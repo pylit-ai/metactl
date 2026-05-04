@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/jsonrpc/validate.request.schema.json",
+  "allOf": [
+    {
+      "$ref": "common_jsonrpc.schema.json#/$defs/request_base"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "metactl.validate"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "subject_ref": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/common.schema.json#/$defs/ref"
+            },
+            "resolve_graph": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/resolve_graph.schema.json"
+            },
+            "compile_manifest": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/compile_manifest.schema.json"
+            },
+            "policy_enforcement_report": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/policy_enforcement_report.schema.json"
+            },
+            "project_root": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/common.schema.json#/$defs/path"
+            }
+          },
+          "required": [
+            "subject_ref"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

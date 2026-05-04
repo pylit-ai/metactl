@@ -1,0 +1,91 @@
+{
+  "jsonrpc": "2.0",
+  "id": "green-compile-1",
+  "result": {
+    "compile_manifest": {
+      "api_version": "metactl/v2alpha1",
+      "target": {
+        "kind": "target",
+        "id": "claude-code",
+        "version": "2026.03.25"
+      },
+      "generated_outputs": [
+        {
+          "id": "claude-md",
+          "path": "fixtures/golden/greenfield-claude-code/generated/CLAUDE.md",
+          "kind": "instruction_file",
+          "digest": "sha256:d298c9782cc3cf0221f6d82ea080f5b68177d9e7d57a696e8dd27480675a9487",
+          "managed": true
+        },
+        {
+          "id": "claude-settings",
+          "path": "fixtures/golden/greenfield-claude-code/generated/.claude/settings.json",
+          "kind": "hook_config",
+          "digest": "sha256:b122297524871a02c6544d0ceff08f1e0be6deea3bab9ed203fa06179a3deddc",
+          "managed": true
+        }
+      ],
+      "apply_modes_supported": [
+        "copy",
+        "symlink",
+        "patch"
+      ],
+      "brownfield_mode": "shadow_compile",
+      "degradations": []
+    },
+    "policy_enforcement_report": {
+      "api_version": "metactl/v2alpha1",
+      "target": {
+        "kind": "target",
+        "id": "claude-code",
+        "version": "2026.03.25"
+      },
+      "rules": [
+        {
+          "rule_id": "deny-external-unreviewed",
+          "requested_enforcement_class": "enforceable_local",
+          "realized_enforcement_class": "enforceable_local",
+          "status": "enforced",
+          "enforcement_surface": ".claude/settings.json permissions + resolver suppression",
+          "rationale": "External unreviewed packs never enter the generated working set.",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "dangerous-network-scraper",
+              "version": "0.1.0"
+            }
+          ]
+        },
+        {
+          "rule_id": "ask-before-network",
+          "requested_enforcement_class": "enforceable_local",
+          "realized_enforcement_class": "enforceable_local",
+          "status": "enforced",
+          "enforcement_surface": ".claude/settings.json ask rules",
+          "rationale": "Network-capable actions are routed through ask-on-use permissions.",
+          "affected_refs": [
+            {
+              "kind": "rule",
+              "id": "ask-before-network"
+            }
+          ]
+        },
+        {
+          "rule_id": "ask-before-write",
+          "requested_enforcement_class": "enforceable_local",
+          "realized_enforcement_class": "enforceable_local",
+          "status": "enforced",
+          "enforcement_surface": "PostToolUse hook + ask rules",
+          "rationale": "Write tools require approval before mutation while in reviewer posture.",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "unit-test-loop",
+              "version": "1.0.0"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

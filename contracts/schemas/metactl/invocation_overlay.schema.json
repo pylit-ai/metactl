@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/invocation_overlay.schema.json",
+  "title": "metactl Invocation Overlay",
+  "description": "Ephemeral context supplied by a shell, client, or automation surface. Does not mutate durable config unless explicitly written back.",
+  "type": "object",
+  "properties": {
+    "entrypoint": { "$ref": "common.schema.json#/$defs/entrypoint" },
+    "task": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "tags": { "$ref": "common.schema.json#/$defs/string_list" }
+      },
+      "required": ["summary"],
+      "additionalProperties": false
+    },
+    "selected_project": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/slug" },
+        "path": { "$ref": "common.schema.json#/$defs/path" }
+      },
+      "required": ["path"],
+      "additionalProperties": false
+    },
+    "attached_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "path": { "$ref": "common.schema.json#/$defs/path" },
+          "kind": { "type": "string", "enum": ["file", "directory", "selection", "url", "clipboard", "capture"] }
+        },
+        "required": ["kind"],
+        "additionalProperties": false
+      }
+    },
+    "privacy_mode": { "type": "string", "enum": ["normal", "restricted", "local_only"] },
+    "cost_budget_usd": { "type": "number", "minimum": 0 },
+    "selected_target_override": { "$ref": "common.schema.json#/$defs/ref" },
+    "temporary_approvals": { "$ref": "common.schema.json#/$defs/string_list" },
+    "candidate_pack_hints": { "$ref": "common.schema.json#/$defs/string_list" }
+  },
+  "required": ["entrypoint"],
+  "additionalProperties": false
+}

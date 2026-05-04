@@ -1,0 +1,20 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "codex-cli",
+  "version": "2026.03.25",
+  "title": "Codex CLI",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": false,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": true,
+    "local_scripts": true,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "compile_targets": []
+}

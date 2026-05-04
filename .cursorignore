@@ -1,0 +1,33 @@
+# Repo-aware Cursor ignore list.
+# Keep canonical agent/config surfaces visible and hide only private,
+# generated, or high-churn paths that add little retrieval value.
+
+.git/
+.env
+.env.*
+*.local.*
+
+.cursor/debug.log
+
+.metactl/private/
+.metactl/profile
+.metactl/sandboxes/
+.metactl/skills/private/
+.metactl/state/
+
+memory/state/
+notepads/
+tmp/
+
+target/
+node_modules/
+build/
+dist/
+coverage/
+
+__pycache__/
+.pytest_cache/
+.venv/
+.uv/
+
+.repomix/

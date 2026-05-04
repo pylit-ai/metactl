@@ -1,0 +1,174 @@
+{
+  "jsonrpc": "2.0",
+  "id": "brown-resolve-1",
+  "method": "metactl.resolve",
+  "params": {
+    "config": {
+      "api_version": "metactl/v2alpha1",
+      "role": {
+        "kind": "role",
+        "id": "builder",
+        "version": "1.0.0"
+      },
+      "packs": [
+        {
+          "kind": "pack",
+          "id": "test-sweeper",
+          "version": "1.1.0"
+        },
+        {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        }
+      ],
+      "policy": {
+        "kind": "policy",
+        "id": "brownfield-safe-builder",
+        "version": "1.0.0"
+      },
+      "targets": [
+        {
+          "kind": "target",
+          "id": "codex-cli",
+          "version": "2026.03.25"
+        }
+      ],
+      "defaults": {
+        "brownfield_mode": "patch_mode",
+        "discovery_mode": "candidate_search"
+      }
+    },
+    "overlay": {
+      "entrypoint": "magicwormhole_drop",
+      "task": {
+        "summary": "Refactor the Python API client, keep changes small, and do not touch migrations without approval.",
+        "tags": [
+          "python",
+          "refactor",
+          "migrations",
+          "tests"
+        ]
+      },
+      "privacy_mode": "normal",
+      "cost_budget_usd": 8,
+      "selected_target_override": {
+        "kind": "target",
+        "id": "codex-cli",
+        "version": "2026.03.25"
+      },
+      "temporary_approvals": [],
+      "candidate_pack_hints": [
+        "python-refactor",
+        "test-sweeper",
+        "migration-guard",
+        "unreviewed-release-bot"
+      ],
+      "selected_project": {
+        "path": "/Users/example/src/acme/monorepo/services/api"
+      }
+    },
+    "available_targets": [
+      {
+        "kind": "target_capability_matrix",
+        "target_id": "codex-cli",
+        "version": "2026.03.25",
+        "title": "Codex CLI",
+        "capabilities": {
+          "layered_instructions": true,
+          "skill_folders": true,
+          "deterministic_hooks": false,
+          "subagents": true,
+          "mcp_servers": true,
+          "tool_allowlists": false,
+          "approval_policies": true,
+          "readonly_hints": false,
+          "local_scripts": true,
+          "scheduled_tasks": false,
+          "ui_surfaces": false
+        },
+        "compile_targets": [
+          {
+            "output_kind": "agents_md",
+            "path_template": "generated/AGENTS.md"
+          },
+          {
+            "output_kind": "codex_skill",
+            "path_template": "generated/skills/{pack_id}/SKILL.md"
+          },
+          {
+            "output_kind": "runtime_json",
+            "path_template": "generated/.codex/config.toml"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      {
+        "api_version": "metactl/v2alpha1",
+        "subject_ref": {
+          "kind": "pack",
+          "id": "python-refactor",
+          "version": "2.0.0"
+        },
+        "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "origin": "vendor/python-refactor",
+        "imported_from_ecosystem": "skill_md",
+        "imported_at": "2026-03-25T20:00:00Z",
+        "review": {
+          "reviewed_by": "python-platform",
+          "reviewed_at": "2026-03-25T20:00:00Z",
+          "promotion_status": "promoted"
+        },
+        "attestation_refs": [
+          "attest/python-refactor.sig"
+        ],
+        "validation_refs": [
+          "validation/python-refactor.json"
+        ]
+      },
+      {
+        "api_version": "metactl/v2alpha1",
+        "subject_ref": {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        },
+        "digest": "sha256:ffffffffffffffffffffffffffffffff",
+        "origin": "packs/migration-guard",
+        "imported_from_ecosystem": "first_party",
+        "imported_at": "2026-03-25T20:00:00Z",
+        "review": {
+          "reviewed_by": "core-team",
+          "reviewed_at": "2026-03-25T20:00:00Z",
+          "promotion_status": "promoted"
+        },
+        "attestation_refs": [
+          "attest/migration-guard.sig"
+        ],
+        "validation_refs": [
+          "validation/migration-guard.json"
+        ]
+      },
+      {
+        "api_version": "metactl/v2alpha1",
+        "subject_ref": {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        },
+        "digest": "sha256:12121212121212121212121212121212",
+        "origin": "https://example.com/unreviewed-release-bot",
+        "imported_from_ecosystem": "custom",
+        "imported_at": "2026-03-25T20:00:00Z",
+        "review": {
+          "reviewed_by": "import-bot",
+          "reviewed_at": "2026-03-25T20:00:00Z",
+          "promotion_status": "candidate"
+        },
+        "attestation_refs": [],
+        "validation_refs": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "claude-code",
+  "version": "2026.03.25",
+  "title": "Claude Code",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": false,
+    "deterministic_hooks": true,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": true,
+    "ui_surfaces": true
+  },
+  "compile_targets": [
+    {
+      "output_kind": "claude_md",
+      "path_template": "generated/CLAUDE.md"
+    },
+    {
+      "output_kind": "hook_config",
+      "path_template": "generated/.claude/settings.json"
+    }
+  ]
+}

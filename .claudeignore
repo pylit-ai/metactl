@@ -1,0 +1,31 @@
+# Repo-aware Claude ignore list.
+# Treat this as context hygiene rather than a hard security boundary.
+
+.git/
+.env
+.env.*
+*.local.*
+
+.metactl/private/
+.metactl/profile
+.metactl/sandboxes/
+.metactl/skills/private/
+.metactl/state/
+
+memory/state/
+notepads/
+tmp/
+
+target/
+node_modules/
+build/
+dist/
+coverage/
+
+__pycache__/
+.pytest_cache/
+.venv/
+.uv/
+
+.repomix/
+

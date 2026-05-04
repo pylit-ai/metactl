@@ -1,0 +1,51 @@
+{
+  "kind": "pack",
+  "id": "release-guard",
+  "version": "1.0.0",
+  "title": "Release Guard",
+  "description": "Checklist and checks for release readiness and packaging.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "release",
+    "verification",
+    "handoff"
+  ],
+  "compatible_roles": [
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/release-guard/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    },
+    {
+      "path": "packs/release-guard/references/checklist.md",
+      "kind": "example",
+      "required": false
+    },
+    {
+      "path": "packs/release-guard/scripts/check.sh",
+      "kind": "script",
+      "required": false
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

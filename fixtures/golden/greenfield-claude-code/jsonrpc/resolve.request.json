@@ -1,0 +1,168 @@
+{
+  "jsonrpc": "2.0",
+  "id": "green-resolve-1",
+  "method": "metactl.resolve",
+  "params": {
+    "config": {
+      "api_version": "metactl/v2alpha1",
+      "role": {
+        "kind": "role",
+        "id": "reviewer",
+        "version": "1.0.0"
+      },
+      "packs": [
+        {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        }
+      ],
+      "policy": {
+        "kind": "policy",
+        "id": "safe-review",
+        "version": "1.0.0"
+      },
+      "targets": [
+        {
+          "kind": "target",
+          "id": "claude-code",
+          "version": "2026.03.25"
+        }
+      ],
+      "defaults": {
+        "brownfield_mode": "shadow_compile",
+        "discovery_mode": "curated_only"
+      },
+      "metadata": {
+        "owner": "magicwormhole-seed"
+      }
+    },
+    "overlay": {
+      "entrypoint": "magicwormhole_hotkey",
+      "task": {
+        "summary": "Review the open PR for flaky tests, style regressions, and risky edits.",
+        "tags": [
+          "review",
+          "tests",
+          "risk"
+        ]
+      },
+      "privacy_mode": "restricted",
+      "cost_budget_usd": 3.5,
+      "selected_target_override": {
+        "kind": "target",
+        "id": "claude-code",
+        "version": "2026.03.25"
+      },
+      "temporary_approvals": [
+        "read_repo_metadata"
+      ],
+      "candidate_pack_hints": [
+        "repo-review-instructions",
+        "unit-test-loop",
+        "dangerous-network-scraper"
+      ],
+      "selected_project": {
+        "path": "/Users/example/src/acme/api"
+      }
+    },
+    "available_targets": [
+      {
+        "kind": "target_capability_matrix",
+        "target_id": "claude-code",
+        "version": "2026.03.25",
+        "title": "Claude Code",
+        "capabilities": {
+          "layered_instructions": true,
+          "skill_folders": false,
+          "deterministic_hooks": true,
+          "subagents": true,
+          "mcp_servers": true,
+          "tool_allowlists": true,
+          "approval_policies": true,
+          "readonly_hints": false,
+          "local_scripts": true,
+          "scheduled_tasks": true,
+          "ui_surfaces": true
+        },
+        "compile_targets": [
+          {
+            "output_kind": "claude_md",
+            "path_template": "generated/CLAUDE.md"
+          },
+          {
+            "output_kind": "hook_config",
+            "path_template": "generated/.claude/settings.json"
+          }
+        ]
+      }
+    ],
+    "provenance": [
+      {
+        "api_version": "metactl/v2alpha1",
+        "subject_ref": {
+          "kind": "pack",
+          "id": "repo-review-instructions",
+          "version": "1.0.0"
+        },
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "origin": "packs/repo-review-instructions",
+        "imported_from_ecosystem": "first_party",
+        "imported_at": "2026-03-25T20:00:00Z",
+        "review": {
+          "reviewed_by": "core-team",
+          "reviewed_at": "2026-03-25T20:00:00Z",
+          "promotion_status": "promoted"
+        },
+        "attestation_refs": [
+          "attest/repo-review-instructions.sig"
+        ],
+        "validation_refs": [
+          "validation/repo-review-instructions.json"
+        ]
+      },
+      {
+        "api_version": "metactl/v2alpha1",
+        "subject_ref": {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        },
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "origin": "packs/unit-test-loop",
+        "imported_from_ecosystem": "custom",
+        "imported_at": "2026-03-25T20:00:00Z",
+        "review": {
+          "reviewed_by": "ops-team",
+          "reviewed_at": "2026-03-25T20:00:00Z",
+          "promotion_status": "promoted"
+        },
+        "attestation_refs": [
+          "attest/unit-test-loop.sig"
+        ],
+        "validation_refs": [
+          "validation/unit-test-loop.json"
+        ]
+      },
+      {
+        "api_version": "metactl/v2alpha1",
+        "subject_ref": {
+          "kind": "pack",
+          "id": "dangerous-network-scraper",
+          "version": "0.1.0"
+        },
+        "digest": "sha256:cccccccccccccccccccccccccccccccc",
+        "origin": "https://example.com/dangerous-network-scraper",
+        "imported_from_ecosystem": "skill_md",
+        "imported_at": "2026-03-25T20:00:00Z",
+        "review": {
+          "reviewed_by": "import-bot",
+          "reviewed_at": "2026-03-25T20:00:00Z",
+          "promotion_status": "candidate"
+        },
+        "attestation_refs": [],
+        "validation_refs": []
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "kind": "policy",
+  "id": "safe-review",
+  "version": "1.0.0",
+  "title": "Safe Review",
+  "description": "Review policy favoring read-only behavior and explicit approvals.",
+  "discovery_mode": "curated_only",
+  "rules": [
+    {
+      "id": "deny-external-unreviewed",
+      "title": "Deny unreviewed external packs",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "pack",
+      "operator": "deny",
+      "selectors": {
+        "trust_tiers": [
+          "external_unreviewed"
+        ]
+      }
+    },
+    {
+      "id": "ask-before-network",
+      "title": "Require approval before network actions",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "network",
+      "operator": "require_approval",
+      "parameters": {
+        "approval_prompt": "Allow network access for this review task?"
+      }
+    },
+    {
+      "id": "ask-before-write",
+      "title": "Require approval before file writes",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "filesystem",
+      "operator": "require_approval",
+      "parameters": {
+        "approval_prompt": "Allow file edits while in reviewer role?"
+      }
+    }
+  ],
+  "metadata": {
+    "starter_status": "stable"
+  }
+}

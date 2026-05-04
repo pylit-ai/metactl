@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/search_eval_artifact.schema.json",
+  "title": "metactl Search Evaluation Artifact",
+  "type": "object",
+  "$defs": {
+    "search_match": {
+      "type": "object",
+      "properties": {
+        "pack_id": { "$ref": "common.schema.json#/$defs/slug" },
+        "score": { "type": "number" }
+      },
+      "required": ["pack_id", "score"],
+      "additionalProperties": false
+    },
+    "retrieval_metrics": {
+      "type": "object",
+      "properties": {
+        "k": { "type": "integer", "minimum": 1 },
+        "hit_at_1": { "type": "boolean" },
+        "recall_at_k": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_found": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/slug" },
+          "uniqueItems": true
+        },
+        "expected_missing": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/slug" },
+          "uniqueItems": true
+        }
+      },
+      "required": ["k", "hit_at_1", "recall_at_k", "expected_found", "expected_missing"],
+      "additionalProperties": false
+    },
+    "summary_metrics": {
+      "type": "object",
+      "properties": {
+        "case_count": { "type": "integer", "minimum": 1 },
+        "k": { "type": "integer", "minimum": 1 },
+        "baseline_hit_at_1": { "type": "number", "minimum": 0, "maximum": 1 },
+        "enhanced_hit_at_1": { "type": "number", "minimum": 0, "maximum": 1 },
+        "baseline_recall_at_k": { "type": "number", "minimum": 0, "maximum": 1 },
+        "enhanced_recall_at_k": { "type": "number", "minimum": 0, "maximum": 1 },
+        "enhanced_underperforms_baseline": { "type": "boolean" }
+      },
+      "required": [
+        "case_count",
+        "k",
+        "baseline_hit_at_1",
+        "enhanced_hit_at_1",
+        "baseline_recall_at_k",
+        "enhanced_recall_at_k",
+        "enhanced_underperforms_baseline"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "generated_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "library_root": { "$ref": "common.schema.json#/$defs/path" },
+    "metric_k": { "type": "integer", "minimum": 1 },
+    "summary": { "$ref": "#/$defs/summary_metrics" },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "minLength": 1 },
+          "role": { "$ref": "common.schema.json#/$defs/slug" },
+          "policy": { "$ref": "common.schema.json#/$defs/slug" },
+          "target": { "$ref": "common.schema.json#/$defs/slug" },
+          "expected_shortlist": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/slug" },
+            "uniqueItems": true
+          },
+          "baseline_matches": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/search_match" }
+          },
+          "baseline_metrics": {
+            "$ref": "#/$defs/retrieval_metrics"
+          },
+          "enhanced_matches": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/search_match" }
+          },
+          "enhanced_metrics": {
+            "$ref": "#/$defs/retrieval_metrics"
+          }
+        },
+        "required": [
+          "query",
+          "role",
+          "policy",
+          "target",
+          "expected_shortlist",
+          "baseline_matches",
+          "baseline_metrics",
+          "enhanced_matches",
+          "enhanced_metrics"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "freshness": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pack_id": { "$ref": "common.schema.json#/$defs/slug" },
+          "lifecycle": { "$ref": "common.schema.json#/$defs/pack_lifecycle" }
+        },
+        "required": ["pack_id", "lifecycle"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "api_version",
+    "generated_at",
+    "library_root",
+    "metric_k",
+    "summary",
+    "cases",
+    "freshness"
+  ],
+  "additionalProperties": false
+}

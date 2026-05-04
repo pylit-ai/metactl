@@ -1,0 +1,29 @@
+{
+  "entrypoint": "magicwormhole_drop",
+  "task": {
+    "summary": "Refactor the Python API client, keep changes small, and do not touch migrations without approval.",
+    "tags": [
+      "python",
+      "refactor",
+      "migrations",
+      "tests"
+    ]
+  },
+  "privacy_mode": "normal",
+  "cost_budget_usd": 8,
+  "selected_target_override": {
+    "kind": "target",
+    "id": "codex-cli",
+    "version": "2026.03.25"
+  },
+  "temporary_approvals": [],
+  "candidate_pack_hints": [
+    "python-refactor",
+    "test-sweeper",
+    "migration-guard",
+    "unreviewed-release-bot"
+  ],
+  "selected_project": {
+    "path": "/Users/example/src/acme/monorepo/services/api"
+  }
+}

@@ -1,0 +1,80 @@
+# Rust
+/target/
+
+# Scratch and local validation environments
+/tmp/
+/.venv/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Future metactl generated artifacts
+/.metactl/cache/
+/.metactl/generated/
+/.metactl/history/
+/.metactl/state/tmp/
+**/.metactl/
+
+# Local assistant/agent outputs
+/.agents/
+/.claude/
+/.codex/
+/.cursor/
+/.gemini/
+/.omc/
+/notepads/
+**/notepads/
+**/scratch/
+/docs/repomix-bundles/
+/.metactl/
+memory/
+**/memory/
+/.opendream/
+
+# Internal planning/spec/library surfaces
+/specs/
+/openspec/
+/skills/
+/docs/adr/
+/docs/spec/
+/docs/agents/
+/docs/governance/
+/docs/evidence/
+/docs/status/
+/docs/superpowers/
+/*-library/
+
+# Repomix CLI local bundle registry (timestamps / last-used metadata)
+/.repomix/
+
+# Ruler optional local agent instruction tooling
+/.ruler/
+/.meta/
+
+# Temporary exclude
+.mcp.json
+opencode.json
+/metactl.local.yaml
+*.zip
+**/*.zip
+
+# Local agent artifacts
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+CLAUDE.local.md
+GEMINI.local.md
+PRD.md
+NORTHSTAR.md
+CONSTITUTION.md
+CURRENT_STATE.md
+APPLY.md
+MIGRATION_GUARDRAILS.md
+metactl.yaml
+metactl.lock.json
+Modelfile.*
+*.code-workspace

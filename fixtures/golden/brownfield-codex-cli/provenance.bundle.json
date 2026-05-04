@@ -1,0 +1,67 @@
+[
+  {
+    "api_version": "metactl/v2alpha1",
+    "subject_ref": {
+      "kind": "pack",
+      "id": "python-refactor",
+      "version": "2.0.0"
+    },
+    "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "origin": "vendor/python-refactor",
+    "imported_from_ecosystem": "skill_md",
+    "imported_at": "2026-03-25T20:00:00Z",
+    "review": {
+      "reviewed_by": "python-platform",
+      "reviewed_at": "2026-03-25T20:00:00Z",
+      "promotion_status": "promoted"
+    },
+    "attestation_refs": [
+      "attest/python-refactor.sig"
+    ],
+    "validation_refs": [
+      "validation/python-refactor.json"
+    ]
+  },
+  {
+    "api_version": "metactl/v2alpha1",
+    "subject_ref": {
+      "kind": "pack",
+      "id": "migration-guard",
+      "version": "1.0.0"
+    },
+    "digest": "sha256:ffffffffffffffffffffffffffffffff",
+    "origin": "packs/migration-guard",
+    "imported_from_ecosystem": "first_party",
+    "imported_at": "2026-03-25T20:00:00Z",
+    "review": {
+      "reviewed_by": "core-team",
+      "reviewed_at": "2026-03-25T20:00:00Z",
+      "promotion_status": "promoted"
+    },
+    "attestation_refs": [
+      "attest/migration-guard.sig"
+    ],
+    "validation_refs": [
+      "validation/migration-guard.json"
+    ]
+  },
+  {
+    "api_version": "metactl/v2alpha1",
+    "subject_ref": {
+      "kind": "pack",
+      "id": "unreviewed-release-bot",
+      "version": "0.2.0"
+    },
+    "digest": "sha256:12121212121212121212121212121212",
+    "origin": "https://example.com/unreviewed-release-bot",
+    "imported_from_ecosystem": "custom",
+    "imported_at": "2026-03-25T20:00:00Z",
+    "review": {
+      "reviewed_by": "import-bot",
+      "reviewed_at": "2026-03-25T20:00:00Z",
+      "promotion_status": "candidate"
+    },
+    "attestation_refs": [],
+    "validation_refs": []
+  }
+]

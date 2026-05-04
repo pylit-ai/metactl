@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/target_capability_matrix.schema.json",
+  "title": "metactl Target Capability Matrix",
+  "type": "object",
+  "properties": {
+    "kind": { "const": "target_capability_matrix" },
+    "target_id": { "$ref": "common.schema.json#/$defs/slug" },
+    "version": { "$ref": "common.schema.json#/$defs/version_string" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "layered_instructions": { "type": "boolean" },
+        "skill_folders": { "type": "boolean" },
+        "deterministic_hooks": { "type": "boolean" },
+        "subagents": { "type": "boolean" },
+        "mcp_servers": { "type": "boolean" },
+        "tool_allowlists": { "type": "boolean" },
+        "approval_policies": { "type": "boolean" },
+        "readonly_hints": { "type": "boolean" },
+        "local_scripts": { "type": "boolean" },
+        "scheduled_tasks": { "type": "boolean" },
+        "ui_surfaces": { "type": "boolean" }
+      },
+      "required": [
+        "layered_instructions",
+        "skill_folders",
+        "deterministic_hooks",
+        "subagents",
+        "mcp_servers",
+        "tool_allowlists",
+        "approval_policies",
+        "readonly_hints",
+        "local_scripts",
+        "scheduled_tasks",
+        "ui_surfaces"
+      ],
+      "additionalProperties": false
+    },
+    "compile_targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "output_kind": {
+            "type": "string",
+            "enum": ["agents_md", "claude_md", "openclaw_md", "codex_skill", "pack_resource", "hook_config", "mcp_config", "runtime_json", "other"]
+          },
+          "path_template": { "$ref": "common.schema.json#/$defs/path" },
+          "resource_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "instruction",
+                "example",
+                "hook",
+                "script",
+                "command",
+                "rule",
+                "plugin",
+                "asset",
+                "schema",
+                "test"
+              ]
+            },
+            "uniqueItems": true
+          },
+          "instruction_mode": {
+            "type": "string",
+            "enum": ["inline", "reference_index"]
+          },
+          "surface_selection_mode": {
+            "type": "string",
+            "enum": ["minimal", "full"]
+          },
+          "supports_multi_surface_pack": { "type": "boolean", "default": false },
+          "supports_surface_assets": { "type": "boolean", "default": false },
+          "supports_surface_scripts": { "type": "boolean", "default": false },
+          "supports_surface_frontmatter": { "type": "boolean", "default": false },
+          "surface_merge_strategy": {
+            "type": "string",
+            "enum": ["none", "optional", "required"]
+          }
+        },
+        "required": ["output_kind", "path_template"],
+        "additionalProperties": false
+      }
+    },
+    "metadata": { "$ref": "common.schema.json#/$defs/string_map" }
+  },
+  "required": ["kind", "target_id", "version", "title", "capabilities"],
+  "additionalProperties": false
+}

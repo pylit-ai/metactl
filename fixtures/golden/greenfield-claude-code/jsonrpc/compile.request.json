@@ -1,0 +1,106 @@
+{
+  "jsonrpc": "2.0",
+  "id": "green-compile-1",
+  "method": "metactl.compile",
+  "params": {
+    "resolve_graph": {
+      "api_version": "metactl/v2alpha1",
+      "source_config_digest": "sha256:11111111111111111111111111111111",
+      "overlay_digest": "sha256:22222222222222222222222222222222",
+      "role": {
+        "kind": "role",
+        "id": "reviewer",
+        "version": "1.0.0"
+      },
+      "selected_target": {
+        "kind": "target",
+        "id": "claude-code",
+        "version": "2026.03.25"
+      },
+      "requested_pack_refs": [
+        {
+          "kind": "pack",
+          "id": "repo-review-instructions",
+          "version": "1.0.0"
+        },
+        {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        },
+        {
+          "kind": "pack",
+          "id": "dangerous-network-scraper",
+          "version": "0.1.0"
+        }
+      ],
+      "activated_pack_refs": [
+        {
+          "kind": "pack",
+          "id": "repo-review-instructions",
+          "version": "1.0.0"
+        },
+        {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        }
+      ],
+      "suppressed_packs": [
+        {
+          "pack_ref": {
+            "kind": "pack",
+            "id": "dangerous-network-scraper",
+            "version": "0.1.0"
+          },
+          "reason_code": "suppressed_by_policy",
+          "detail": "Denied by safe-review policy because trust tier is external_unreviewed."
+        }
+      ],
+      "applied_policies": [
+        {
+          "kind": "policy",
+          "id": "safe-review",
+          "version": "1.0.0"
+        }
+      ],
+      "capability_gaps": [],
+      "provenance_refs": [
+        "artifact:repo-review-instructions-provenance",
+        "artifact:unit-test-loop-provenance"
+      ],
+      "brownfield_mode": "shadow_compile"
+    },
+    "target_capability": {
+      "kind": "target_capability_matrix",
+      "target_id": "claude-code",
+      "version": "2026.03.25",
+      "title": "Claude Code",
+      "capabilities": {
+        "layered_instructions": true,
+        "skill_folders": false,
+        "deterministic_hooks": true,
+        "subagents": true,
+        "mcp_servers": true,
+        "tool_allowlists": true,
+        "approval_policies": true,
+        "readonly_hints": false,
+        "local_scripts": true,
+        "scheduled_tasks": true,
+        "ui_surfaces": true
+      },
+      "compile_targets": [
+        {
+          "output_kind": "claude_md",
+          "path_template": "generated/CLAUDE.md"
+        },
+        {
+          "output_kind": "hook_config",
+          "path_template": "generated/.claude/settings.json"
+        }
+      ]
+    },
+    "apply_mode": "copy",
+    "emit_policy_report": true
+  }
+}

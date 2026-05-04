@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/search_result.schema.json",
+  "title": "metactl Search Result",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "query": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "discovery_mode": { "$ref": "common.schema.json#/$defs/discovery_mode" },
+    "matches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "why": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "trust_tier": { "$ref": "common.schema.json#/$defs/trust_tier" },
+          "requires_confirmation": { "type": "boolean" },
+          "provenance_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "match_evidence": { "$ref": "common.schema.json#/$defs/search_match_evidence" },
+          "lifecycle": { "$ref": "common.schema.json#/$defs/pack_lifecycle" }
+        },
+        "required": ["pack_ref", "score", "why", "trust_tier", "requires_confirmation"],
+        "additionalProperties": false
+      }
+    },
+    "suppressed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "detail": { "type": "string", "maxLength": 2000 }
+        },
+        "required": ["pack_ref", "reason_code"],
+        "additionalProperties": false
+      }
+    },
+    "notes": { "$ref": "common.schema.json#/$defs/string_list" }
+  },
+  "required": ["api_version", "query", "discovery_mode", "matches"],
+  "additionalProperties": false
+}

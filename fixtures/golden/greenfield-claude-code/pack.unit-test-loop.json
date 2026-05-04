@@ -1,0 +1,35 @@
+{
+  "kind": "pack",
+  "id": "unit-test-loop",
+  "version": "1.0.0",
+  "title": "Unit Test Loop",
+  "description": "Procedure for targeted test runs before or after edits.",
+  "activation_class": "script",
+  "side_effect_class": "fs_write",
+  "trust_tier": "org_validated",
+  "requires_confirmation": true,
+  "task_tags": [
+    "tests",
+    "verification"
+  ],
+  "compatible_roles": [
+    "reviewer",
+    "builder"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli"
+  ],
+  "resources": [
+    {
+      "path": "packs/unit-test-loop/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    },
+    {
+      "path": "packs/unit-test-loop/scripts/run-targeted-tests.sh",
+      "kind": "script",
+      "required": true
+    }
+  ]
+}

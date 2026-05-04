@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/jsonrpc/explain.response.schema.json",
+  "allOf": [
+    {
+      "$ref": "common_jsonrpc.schema.json#/$defs/response_base"
+    },
+    {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "result": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/explain_result.schema.json"
+            }
+          },
+          "required": [
+            "result"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "$ref": "common_jsonrpc.schema.json#/$defs/error"
+            }
+          },
+          "required": [
+            "error"
+          ]
+        }
+      ]
+    }
+  ]
+}

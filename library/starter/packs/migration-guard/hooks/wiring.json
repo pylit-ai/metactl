@@ -1,0 +1,6 @@
+{
+  "event": "PostToolUse",
+  "matcher": "Write|Edit|MultiEdit",
+  "command_ref": "packs/migration-guard/hook.sh",
+  "compatible_targets": ["claude-code"]
+}

@@ -1,0 +1,84 @@
+{
+  "kind": "pack",
+  "id": "unit-test-loop",
+  "version": "1.0.0",
+  "title": "Unit Test Loop",
+  "description": "Procedure for targeted test runs before or after edits.",
+  "activation_class": "script",
+  "side_effect_class": "fs_write",
+  "trust_tier": "org_validated",
+  "requires_confirmation": true,
+  "task_tags": [
+    "tests",
+    "verification"
+  ],
+  "compatible_roles": [
+    "reviewer",
+    "builder",
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/unit-test-loop/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/unit-test-loop/SCOPE.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "suppressible"
+    },
+    {
+      "path": "packs/unit-test-loop/scripts/run-targeted-tests.sh",
+      "kind": "script",
+      "required": true
+    },
+    {
+      "path": "packs/unit-test-loop/commands/run-targeted-tests.md",
+      "kind": "command",
+      "required": true
+    },
+    {
+      "path": "packs/unit-test-loop/rules/testing-discipline.md",
+      "kind": "rule",
+      "required": true
+    },
+    {
+      "path": "packs/unit-test-loop/plugins/test-loop.json",
+      "kind": "plugin",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "gemini-cli",
+      "openclaw"
+    ],
+    "last_verified_at": "2026-04-22T12:00:00Z",
+    "evidence_refs": [
+      "evals/search/starter-search-eval.json"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

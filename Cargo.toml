@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/metactl",
+    "crates/metactld",
+]
+default-members = [
+    "crates/metactl",
+    "crates/metactld",
+]
+resolver = "2"

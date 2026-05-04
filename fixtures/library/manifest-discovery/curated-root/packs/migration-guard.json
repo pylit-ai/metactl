@@ -1,0 +1,27 @@
+{
+  "kind": "pack",
+  "id": "migration-guard",
+  "version": "1.0.0",
+  "title": "Migration Guard",
+  "description": "Keep schema migrations safe during repo edits.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": ["migration", "schema", "safety"],
+  "compatible_roles": ["builder"],
+  "compatible_targets": ["codex-cli"],
+  "resources": [
+    {
+      "path": "packs/migration-guard/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "curated-root"
+    }
+  ]
+}

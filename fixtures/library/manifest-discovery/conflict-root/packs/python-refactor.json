@@ -1,0 +1,13 @@
+{
+  "kind": "pack",
+  "id": "python-refactor",
+  "version": "9.9.9",
+  "title": "Conflicting Python Refactor",
+  "description": "Intentional conflict for loader tests.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "org_validated",
+  "requires_confirmation": false,
+  "task_tags": ["python", "refactor"],
+  "resources": []
+}

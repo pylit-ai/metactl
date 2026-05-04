@@ -1,0 +1,72 @@
+{
+  "jsonrpc": "2.0",
+  "id": "green-resolve-1",
+  "result": {
+    "api_version": "metactl/v2alpha1",
+    "source_config_digest": "sha256:11111111111111111111111111111111",
+    "overlay_digest": "sha256:22222222222222222222222222222222",
+    "role": {
+      "kind": "role",
+      "id": "reviewer",
+      "version": "1.0.0"
+    },
+    "selected_target": {
+      "kind": "target",
+      "id": "claude-code",
+      "version": "2026.03.25"
+    },
+    "requested_pack_refs": [
+      {
+        "kind": "pack",
+        "id": "repo-review-instructions",
+        "version": "1.0.0"
+      },
+      {
+        "kind": "pack",
+        "id": "unit-test-loop",
+        "version": "1.0.0"
+      },
+      {
+        "kind": "pack",
+        "id": "dangerous-network-scraper",
+        "version": "0.1.0"
+      }
+    ],
+    "activated_pack_refs": [
+      {
+        "kind": "pack",
+        "id": "repo-review-instructions",
+        "version": "1.0.0"
+      },
+      {
+        "kind": "pack",
+        "id": "unit-test-loop",
+        "version": "1.0.0"
+      }
+    ],
+    "suppressed_packs": [
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "dangerous-network-scraper",
+          "version": "0.1.0"
+        },
+        "reason_code": "suppressed_by_policy",
+        "detail": "Denied by safe-review policy because trust tier is external_unreviewed."
+      }
+    ],
+    "applied_policies": [
+      {
+        "kind": "policy",
+        "id": "safe-review",
+        "version": "1.0.0"
+      }
+    ],
+    "capability_gaps": [],
+    "provenance_refs": [
+      "artifact:repo-review-instructions-provenance",
+      "artifact:unit-test-loop-provenance"
+    ],
+    "brownfield_mode": "shadow_compile"
+  }
+}

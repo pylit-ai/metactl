@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/explain_result.schema.json",
+  "title": "metactl Explain Result",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+    "what_is_active": { "$ref": "common.schema.json#/$defs/string_list" },
+    "why_it_is_active": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "subject_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        },
+        "required": ["subject_ref", "reason"],
+        "additionalProperties": false
+      }
+    },
+    "what_was_suppressed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "subject_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "detail": { "type": "string", "maxLength": 2000 }
+        },
+        "required": ["subject_ref", "reason_code"],
+        "additionalProperties": false
+      }
+    },
+    "unknown_or_unsupported": { "$ref": "common.schema.json#/$defs/string_list" },
+    "resolve_graph": { "$ref": "resolve_graph.schema.json" }
+  },
+  "required": ["api_version", "summary", "resolve_graph"],
+  "additionalProperties": false
+}

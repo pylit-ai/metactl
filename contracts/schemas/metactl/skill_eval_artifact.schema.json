@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/skill_eval_artifact.schema.json",
+  "title": "metactl Skill Evaluation Artifact",
+  "description": "Local paired projection record for skill-surface effectiveness. This is not a live model benchmark.",
+  "type": "object",
+  "$defs": {
+    "pack_list": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/slug" },
+      "uniqueItems": true
+    },
+    "projection_record": {
+      "type": "object",
+      "properties": {
+        "packs": { "$ref": "#/$defs/pack_list" },
+        "generated_output_count": { "type": "integer", "minimum": 0 },
+        "generated_output_paths": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/path" },
+          "uniqueItems": true
+        },
+        "skill_pack_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/slug" },
+          "uniqueItems": true
+        },
+        "contains_expected_skill": { "type": "boolean" }
+      },
+      "required": [
+        "packs",
+        "generated_output_count",
+        "generated_output_paths",
+        "skill_pack_ids",
+        "contains_expected_skill"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "generated_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "library_root": { "$ref": "common.schema.json#/$defs/path" },
+    "evaluation_kind": { "const": "paired_projection_effectiveness" },
+    "benchmark_scope": { "const": "local_deterministic_projection" },
+    "notes": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "case_count": { "type": "integer", "minimum": 1 },
+        "pass_count": { "type": "integer", "minimum": 0 },
+        "failed_case_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/slug" },
+          "uniqueItems": true
+        }
+      },
+      "required": ["case_count", "pass_count", "failed_case_ids"],
+      "additionalProperties": false
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "role": { "$ref": "common.schema.json#/$defs/slug" },
+          "policy": { "$ref": "common.schema.json#/$defs/slug" },
+          "target": { "$ref": "common.schema.json#/$defs/slug" },
+          "expected_skill_pack": { "$ref": "common.schema.json#/$defs/slug" },
+          "expected_output_kind": { "const": "skill_folder" },
+          "baseline": { "$ref": "#/$defs/projection_record" },
+          "skill_enabled": { "$ref": "#/$defs/projection_record" },
+          "delta": {
+            "type": "object",
+            "properties": {
+              "expected_skill_added": { "type": "boolean" },
+              "new_output_paths": {
+                "type": "array",
+                "items": { "$ref": "common.schema.json#/$defs/path" },
+                "uniqueItems": true
+              }
+            },
+            "required": ["expected_skill_added", "new_output_paths"],
+            "additionalProperties": false
+          },
+          "passed": { "type": "boolean" }
+        },
+        "required": [
+          "id",
+          "title",
+          "role",
+          "policy",
+          "target",
+          "expected_skill_pack",
+          "expected_output_kind",
+          "baseline",
+          "skill_enabled",
+          "delta",
+          "passed"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "api_version",
+    "generated_at",
+    "library_root",
+    "evaluation_kind",
+    "benchmark_scope",
+    "notes",
+    "summary",
+    "cases"
+  ],
+  "additionalProperties": false
+}

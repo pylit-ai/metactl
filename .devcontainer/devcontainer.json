@@ -1,0 +1,27 @@
+{
+  "name": "metactl-dev",
+  "dockerComposeFile": [
+    "docker-compose.yml"
+  ],
+  "service": "workspace",
+  "workspaceFolder": "/workspaces/metactl",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb",
+        "serayuzgur.crates",
+        "tamasfe.even-better-toml",
+        "ms-python.python"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy"
+      }
+    }
+  },
+  "postCreateCommand": "mkdir -p tmp && cargo fetch --locked && python3 -m venv tmp/validate-contracts/.venv && tmp/validate-contracts/.venv/bin/python -m pip install -r requirements-dev.txt && cargo --version && rustc --version && python3 --version",
+  "postStartCommand": "mkdir -p tmp",
+  "forwardPorts": []
+}

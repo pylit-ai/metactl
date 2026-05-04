@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/provenance_envelope.schema.json",
+  "title": "metactl Provenance Envelope",
+  "type": "object",
+  "properties": {
+    "api_version": {
+      "const": "metactl/v2alpha1"
+    },
+    "subject_ref": {
+      "$ref": "common.schema.json#/$defs/ref"
+    },
+    "digest": {
+      "$ref": "common.schema.json#/$defs/digest"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/uri"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/path"
+        }
+      ]
+    },
+    "imported_from_ecosystem": {
+      "type": "string",
+      "enum": [
+        "skill_md",
+        "agents_md",
+        "mcp",
+        "custom",
+        "first_party"
+      ]
+    },
+    "imported_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "review": {
+      "type": "object",
+      "properties": {
+        "reviewed_by": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "reviewed_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "promotion_status": {
+          "type": "string",
+          "enum": [
+            "candidate",
+            "promoted",
+            "rejected",
+            "retired"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "attestation_refs": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "validation_refs": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    }
+  },
+  "required": [
+    "api_version",
+    "subject_ref",
+    "digest",
+    "imported_from_ecosystem"
+  ],
+  "additionalProperties": false
+}

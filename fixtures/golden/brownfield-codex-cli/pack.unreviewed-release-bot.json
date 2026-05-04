@@ -1,0 +1,21 @@
+{
+  "kind": "pack",
+  "id": "unreviewed-release-bot",
+  "version": "0.2.0",
+  "title": "Unreviewed Release Bot",
+  "description": "Candidate automation pack from external source.",
+  "activation_class": "service",
+  "side_effect_class": "external_write",
+  "trust_tier": "candidate_quarantined",
+  "requires_confirmation": true,
+  "task_tags": [
+    "release",
+    "publish"
+  ],
+  "compatible_roles": [
+    "builder"
+  ],
+  "compatible_targets": [
+    "codex-cli"
+  ]
+}

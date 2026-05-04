@@ -1,0 +1,70 @@
+{
+  "jsonrpc": "2.0",
+  "id": "brown-search-1",
+  "result": {
+    "api_version": "metactl/v2alpha1",
+    "query": "refactor python API client and keep migrations safe",
+    "discovery_mode": "candidate_search",
+    "matches": [
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "python-refactor",
+          "version": "2.0.0"
+        },
+        "score": 0.96,
+        "why": "Strong match on python refactor intent and imported skill provenance.",
+        "trust_tier": "org_validated",
+        "requires_confirmation": false,
+        "provenance_ref": {
+          "kind": "artifact",
+          "id": "python-refactor-provenance"
+        }
+      },
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "test-sweeper",
+          "version": "1.1.0"
+        },
+        "score": 0.71,
+        "why": "Task implies verification after edits.",
+        "trust_tier": "first_party_validated",
+        "requires_confirmation": true,
+        "provenance_ref": {
+          "kind": "artifact",
+          "id": "test-sweeper-provenance"
+        }
+      },
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        },
+        "score": 0.68,
+        "why": "Task explicitly mentions migrations safety.",
+        "trust_tier": "first_party_validated",
+        "requires_confirmation": false,
+        "provenance_ref": {
+          "kind": "artifact",
+          "id": "migration-guard-provenance"
+        }
+      }
+    ],
+    "suppressed": [
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        },
+        "reason_code": "untrusted_pack",
+        "detail": "Candidate packs remain quarantined and cannot auto-activate."
+      }
+    ],
+    "notes": [
+      "Candidate search surfaced one quarantined pack that remained suppressed."
+    ]
+  }
+}

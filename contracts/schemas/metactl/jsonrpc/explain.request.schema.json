@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/jsonrpc/explain.request.schema.json",
+  "allOf": [
+    {
+      "$ref": "common_jsonrpc.schema.json#/$defs/request_base"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "metactl.explain"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "resolve_graph": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/resolve_graph.schema.json"
+            }
+          },
+          "required": [
+            "resolve_graph"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

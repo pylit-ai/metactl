@@ -1,0 +1,20 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "repo-review-instructions",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:repo-review-instructions",
+  "origin": "library/starter/packs/repo-review-instructions.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-03-26T18:00:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:starter-library",
+    "tests:reviewer-compile"
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "migration-guard",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:migration-guard",
+  "origin": "curated-root/packs/migration-guard.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "promotion_status": "promoted"
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/compile_manifest.schema.json",
+  "title": "metactl Compile Manifest",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "target": { "$ref": "common.schema.json#/$defs/ref" },
+    "generated_outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "path": { "$ref": "common.schema.json#/$defs/path" },
+          "destination_path": { "$ref": "common.schema.json#/$defs/path" },
+          "kind": { "type": "string", "enum": ["instruction_file", "skill_folder", "resource_file", "hook_config", "mcp_config", "runtime_json", "other"] },
+          "digest": { "$ref": "common.schema.json#/$defs/digest" },
+          "instruction_mode": { "type": "string", "enum": ["inline", "reference_index"] },
+          "pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "surface_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "surface_slug": { "$ref": "common.schema.json#/$defs/slug" },
+          "source_resource_paths": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/path" },
+            "uniqueItems": true
+          },
+          "merge_status": { "type": "string", "enum": ["separate", "merged", "suppressed"] },
+          "degradation_codes": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "uniqueItems": true
+          },
+          "ownership_token": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "managed": { "type": "boolean", "default": true }
+        },
+        "required": ["path", "kind"],
+        "additionalProperties": false
+      }
+    },
+    "surface_selection_mode": {
+      "$ref": "common.schema.json#/$defs/surface_selection_mode"
+    },
+    "surface_selection": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "surface_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "surface_slug": { "$ref": "common.schema.json#/$defs/slug" },
+          "relevance_tier": { "$ref": "common.schema.json#/$defs/surface_relevance_tier" },
+          "emitted": { "type": "boolean" },
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "detail": { "type": "string", "maxLength": 2000 },
+          "source_resource_paths": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/path" },
+            "uniqueItems": true
+          }
+        },
+        "required": ["pack_ref", "surface_id", "surface_slug", "relevance_tier", "emitted"],
+        "additionalProperties": false
+      }
+    },
+    "apply_modes_supported": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["symlink", "copy", "patch", "takeover"] },
+      "uniqueItems": true
+    },
+    "brownfield_mode": { "$ref": "common.schema.json#/$defs/brownfield_mode" },
+    "degradations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "feature": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "affected_refs": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/ref" },
+            "uniqueItems": true
+          }
+        },
+        "required": ["feature", "reason_code"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["api_version", "target", "generated_outputs"],
+  "additionalProperties": false
+}

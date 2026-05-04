@@ -1,0 +1,19 @@
+{
+  "kind": "policy",
+  "id": "release-policy",
+  "version": "1.0.0",
+  "title": "Release Policy",
+  "description": "Candidates stay quarantined until manual promotion.",
+  "discovery_mode": "candidate_search",
+  "rules": [
+    {
+      "id": "quarantine-release-candidates",
+      "requested_enforcement_class": "advisory",
+      "subject": "pack",
+      "operator": "quarantine_only",
+      "selectors": {
+        "trust_tiers": ["candidate_quarantined"]
+      }
+    }
+  ]
+}

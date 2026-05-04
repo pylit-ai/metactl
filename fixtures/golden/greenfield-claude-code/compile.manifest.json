@@ -1,0 +1,31 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "target": {
+    "kind": "target",
+    "id": "claude-code",
+    "version": "2026.03.25"
+  },
+  "generated_outputs": [
+    {
+      "id": "claude-md",
+      "path": "fixtures/golden/greenfield-claude-code/generated/CLAUDE.md",
+      "kind": "instruction_file",
+      "digest": "sha256:d298c9782cc3cf0221f6d82ea080f5b68177d9e7d57a696e8dd27480675a9487",
+      "managed": true
+    },
+    {
+      "id": "claude-settings",
+      "path": "fixtures/golden/greenfield-claude-code/generated/.claude/settings.json",
+      "kind": "hook_config",
+      "digest": "sha256:b122297524871a02c6544d0ceff08f1e0be6deea3bab9ed203fa06179a3deddc",
+      "managed": true
+    }
+  ],
+  "apply_modes_supported": [
+    "copy",
+    "symlink",
+    "patch"
+  ],
+  "brownfield_mode": "shadow_compile",
+  "degradations": []
+}

@@ -1,0 +1,166 @@
+{
+  "jsonrpc": "2.0",
+  "id": "green-search-1",
+  "method": "metactl.search",
+  "params": {
+    "query": "review flaky tests and style regressions",
+    "config": {
+      "api_version": "metactl/v2alpha1",
+      "role": {
+        "kind": "role",
+        "id": "reviewer",
+        "version": "1.0.0"
+      },
+      "packs": [
+        {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        }
+      ],
+      "policy": {
+        "kind": "policy",
+        "id": "safe-review",
+        "version": "1.0.0"
+      },
+      "targets": [
+        {
+          "kind": "target",
+          "id": "claude-code",
+          "version": "2026.03.25"
+        }
+      ],
+      "defaults": {
+        "brownfield_mode": "shadow_compile",
+        "discovery_mode": "curated_only"
+      },
+      "metadata": {
+        "owner": "magicwormhole-seed"
+      }
+    },
+    "overlay": {
+      "entrypoint": "magicwormhole_hotkey",
+      "task": {
+        "summary": "Review the open PR for flaky tests, style regressions, and risky edits.",
+        "tags": [
+          "review",
+          "tests",
+          "risk"
+        ]
+      },
+      "privacy_mode": "restricted",
+      "cost_budget_usd": 3.5,
+      "selected_target_override": {
+        "kind": "target",
+        "id": "claude-code",
+        "version": "2026.03.25"
+      },
+      "temporary_approvals": [
+        "read_repo_metadata"
+      ],
+      "candidate_pack_hints": [
+        "repo-review-instructions",
+        "unit-test-loop",
+        "dangerous-network-scraper"
+      ],
+      "selected_project": {
+        "path": "/Users/example/src/acme/api"
+      }
+    },
+    "candidate_packs": [
+      {
+        "kind": "pack",
+        "id": "repo-review-instructions",
+        "version": "1.0.0",
+        "title": "Repo Review Instructions",
+        "description": "Curated review procedure with correctness-first instructions.",
+        "activation_class": "instruction",
+        "side_effect_class": "none",
+        "trust_tier": "first_party_validated",
+        "requires_confirmation": false,
+        "task_tags": [
+          "review",
+          "pr",
+          "correctness"
+        ],
+        "compatible_roles": [
+          "reviewer"
+        ],
+        "compatible_targets": [
+          "claude-code"
+        ],
+        "resources": [
+          {
+            "path": "packs/repo-review-instructions/SKILL.md",
+            "kind": "instruction",
+            "required": true
+          }
+        ]
+      },
+      {
+        "kind": "pack",
+        "id": "unit-test-loop",
+        "version": "1.0.0",
+        "title": "Unit Test Loop",
+        "description": "Procedure for targeted test runs before or after edits.",
+        "activation_class": "script",
+        "side_effect_class": "fs_write",
+        "trust_tier": "org_validated",
+        "requires_confirmation": true,
+        "task_tags": [
+          "tests",
+          "verification"
+        ],
+        "compatible_roles": [
+          "reviewer",
+          "builder"
+        ],
+        "compatible_targets": [
+          "claude-code",
+          "codex-cli"
+        ],
+        "resources": [
+          {
+            "path": "packs/unit-test-loop/SKILL.md",
+            "kind": "instruction",
+            "required": true
+          },
+          {
+            "path": "packs/unit-test-loop/scripts/run-targeted-tests.sh",
+            "kind": "script",
+            "required": true
+          }
+        ]
+      },
+      {
+        "kind": "pack",
+        "id": "dangerous-network-scraper",
+        "version": "0.1.0",
+        "title": "Dangerous Network Scraper",
+        "description": "Unreviewed external pack that fetches arbitrary external content.",
+        "activation_class": "service",
+        "side_effect_class": "network",
+        "trust_tier": "external_unreviewed",
+        "requires_confirmation": true,
+        "task_tags": [
+          "search",
+          "scrape"
+        ],
+        "compatible_roles": [
+          "reviewer"
+        ],
+        "compatible_targets": [
+          "claude-code"
+        ],
+        "imports": [
+          {
+            "ecosystem": "skill_md",
+            "origin": "https://example.com/dangerous-network-scraper",
+            "digest": "sha256:0123456789abcdef0123456789abcdef"
+          }
+        ]
+      }
+    ],
+    "limit": 5
+  }
+}

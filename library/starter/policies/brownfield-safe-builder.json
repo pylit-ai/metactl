@@ -1,0 +1,60 @@
+{
+  "kind": "policy",
+  "id": "brownfield-safe-builder",
+  "version": "1.0.0",
+  "title": "Brownfield Safe Builder",
+  "description": "Builder policy for brownfield repositories with reversible changes and approval gates.",
+  "discovery_mode": "candidate_search",
+  "rules": [
+    {
+      "id": "require-approval-external-write",
+      "title": "External writes require approval",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "artifact",
+      "operator": "require_approval",
+      "parameters": {
+        "approval_prompt": "Allow external release or publish action?"
+      }
+    },
+    {
+      "id": "deny-candidate-packs",
+      "title": "Candidate packs stay quarantined",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "pack",
+      "operator": "quarantine_only",
+      "selectors": {
+        "trust_tiers": [
+          "candidate_quarantined"
+        ]
+      }
+    },
+    {
+      "id": "protect-migrations",
+      "title": "Do not edit migrations without explicit approval",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "filesystem",
+      "operator": "require_approval",
+      "selectors": {
+        "tags": [
+          "migrations"
+        ]
+      },
+      "parameters": {
+        "approval_prompt": "Allow edits under migrations/?"
+      }
+    },
+    {
+      "id": "budget-cap",
+      "title": "Keep tool spend bounded",
+      "requested_enforcement_class": "explain_only_unverifiable",
+      "subject": "budget",
+      "operator": "budget_cap",
+      "parameters": {
+        "max_budget_usd": 10
+      }
+    }
+  ],
+  "metadata": {
+    "starter_status": "stable"
+  }
+}

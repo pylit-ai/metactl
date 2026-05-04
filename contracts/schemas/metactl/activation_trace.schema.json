@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/activation_trace.schema.json",
+  "title": "metactl Activation Trace",
+  "description": "Opt-in trace shape for future pack activation evidence. This schema does not imply automatic collection.",
+  "type": "object",
+  "$defs": {
+    "activation_cause": {
+      "type": "string",
+      "enum": [
+        "direct_user",
+        "model_inferred",
+        "mcp_tool_call",
+        "compile_projection",
+        "manual_eval"
+      ]
+    },
+    "candidate": {
+      "type": "object",
+      "properties": {
+        "pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+        "score": { "type": "number", "minimum": 0 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      },
+      "required": ["pack_ref"],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "trace_id": { "$ref": "common.schema.json#/$defs/slug" },
+    "recorded_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "opt_in": { "const": true },
+    "source": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["manual_eval", "local_cli", "ci", "mcp_client"]
+        },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      },
+      "required": ["kind"],
+      "additionalProperties": false
+    },
+    "activation": {
+      "type": "object",
+      "properties": {
+        "cause": { "$ref": "#/$defs/activation_cause" },
+        "selected_pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+        "selected_surface_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "retrieved_refs": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/ref" },
+          "uniqueItems": true
+        }
+      },
+      "required": ["cause", "selected_pack_ref", "retrieved_refs"],
+      "additionalProperties": false
+    },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "candidate_shortlist": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/candidate" }
+        }
+      },
+      "required": ["candidate_shortlist"],
+      "additionalProperties": false
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["succeeded", "failed", "aborted", "unknown"]
+        },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "token_count": { "type": "integer", "minimum": 0 },
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "human_override": { "type": "boolean" }
+      },
+      "required": ["status"],
+      "additionalProperties": false
+    },
+    "approvals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "detail": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "required": ["reason_code"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "api_version",
+    "trace_id",
+    "recorded_at",
+    "opt_in",
+    "source",
+    "activation",
+    "routing",
+    "execution",
+    "approvals"
+  ],
+  "additionalProperties": false
+}

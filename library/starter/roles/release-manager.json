@@ -1,0 +1,36 @@
+{
+  "kind": "role",
+  "id": "release-manager",
+  "version": "1.0.0",
+  "title": "Release Manager",
+  "description": "Posture for release readiness, packaging, and final verification.",
+  "intent_tags": [
+    "release",
+    "verification",
+    "handoff"
+  ],
+  "default_pack_refs": [
+    {
+      "kind": "pack",
+      "id": "release-guard",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "pack",
+      "id": "unit-test-loop",
+      "version": "1.0.0"
+    }
+  ],
+  "default_policy_ref": {
+    "kind": "policy",
+    "id": "release-policy",
+    "version": "1.0.0"
+  },
+  "compatible_targets": [
+    "codex-cli",
+    "openclaw"
+  ],
+  "metadata": {
+    "starter_status": "stable"
+  }
+}

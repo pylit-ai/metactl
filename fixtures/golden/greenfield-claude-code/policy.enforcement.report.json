@@ -1,0 +1,54 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "target": {
+    "kind": "target",
+    "id": "claude-code",
+    "version": "2026.03.25"
+  },
+  "rules": [
+    {
+      "rule_id": "deny-external-unreviewed",
+      "requested_enforcement_class": "enforceable_local",
+      "realized_enforcement_class": "enforceable_local",
+      "status": "enforced",
+      "enforcement_surface": ".claude/settings.json permissions + resolver suppression",
+      "rationale": "External unreviewed packs never enter the generated working set.",
+      "affected_refs": [
+        {
+          "kind": "pack",
+          "id": "dangerous-network-scraper",
+          "version": "0.1.0"
+        }
+      ]
+    },
+    {
+      "rule_id": "ask-before-network",
+      "requested_enforcement_class": "enforceable_local",
+      "realized_enforcement_class": "enforceable_local",
+      "status": "enforced",
+      "enforcement_surface": ".claude/settings.json ask rules",
+      "rationale": "Network-capable actions are routed through ask-on-use permissions.",
+      "affected_refs": [
+        {
+          "kind": "rule",
+          "id": "ask-before-network"
+        }
+      ]
+    },
+    {
+      "rule_id": "ask-before-write",
+      "requested_enforcement_class": "enforceable_local",
+      "realized_enforcement_class": "enforceable_local",
+      "status": "enforced",
+      "enforcement_surface": "PostToolUse hook + ask rules",
+      "rationale": "Write tools require approval before mutation while in reviewer posture.",
+      "affected_refs": [
+        {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        }
+      ]
+    }
+  ]
+}

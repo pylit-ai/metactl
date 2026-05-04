@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/common.schema.json",
+  "title": "metactl Common Schema",
+  "description": "Shared enums and reusable definitions for metactl v2 kernel schemas.",
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/-]{1,127}$"
+    },
+    "version_string": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._+-]{1,64}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+:[A-Fa-f0-9]{16,}$"
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "uri": {
+      "type": "string",
+      "format": "uri"
+    },
+    "ref": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["role", "pack", "policy", "target", "artifact", "rule", "output", "overlay"]
+        },
+        "id": { "$ref": "#/$defs/slug" },
+        "version": { "$ref": "#/$defs/version_string" }
+      },
+      "required": ["kind", "id"],
+      "additionalProperties": false
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "suppressed_by_policy",
+        "suppressed_by_mode",
+        "unsupported_target",
+        "incompatible_role",
+        "untrusted_pack",
+        "requires_confirmation",
+        "capability_gap",
+        "conflict_detected",
+        "brownfield_collision",
+        "missing_metadata",
+        "validation_failed",
+        "not_found",
+        "zero_match",
+        "degraded_enforcement",
+        "unverifiable"
+      ]
+    },
+    "trust_tier": {
+      "type": "string",
+      "enum": ["first_party_validated", "org_validated", "candidate_quarantined", "external_unreviewed"]
+    },
+    "activation_class": {
+      "type": "string",
+      "enum": ["instruction", "hook", "script", "service"]
+    },
+    "side_effect_class": {
+      "type": "string",
+      "enum": ["none", "fs_write", "network", "external_write", "mixed"]
+    },
+    "visibility_scope": {
+      "type": "string",
+      "enum": ["shared", "private"]
+    },
+    "surface_selection_mode": {
+      "type": "string",
+      "enum": ["minimal", "full"]
+    },
+    "surface_relevance_tier": {
+      "type": "string",
+      "enum": ["always_on", "suppressible"]
+    },
+    "lifecycle_status": {
+      "type": "string",
+      "enum": ["active", "deprecated", "retired"]
+    },
+    "requested_enforcement_class": {
+      "type": "string",
+      "enum": ["advisory", "enforceable_local", "enforceable_remote", "explain_only_unverifiable"]
+    },
+    "realized_enforcement_class": {
+      "type": "string",
+      "enum": ["advisory", "enforceable_local", "enforceable_remote", "explain_only_unverifiable"]
+    },
+    "enforcement_status": {
+      "type": "string",
+      "enum": ["enforced", "degraded", "not_realized"]
+    },
+    "discovery_mode": {
+      "type": "string",
+      "enum": ["none", "curated_only", "candidate_search", "exploratory"]
+    },
+    "brownfield_mode": {
+      "type": "string",
+      "enum": ["shadow_compile", "review_diff", "patch_mode", "takeover_mode", "refuse_due_to_conflict"]
+    },
+    "entrypoint": {
+      "type": "string",
+      "enum": ["cli", "daemon", "magicwormhole_hotkey", "magicwormhole_tray", "magicwormhole_notch", "magicwormhole_drop", "automation", "api"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pack_lifecycle": {
+      "type": "object",
+      "properties": {
+        "status": { "$ref": "#/$defs/lifecycle_status" },
+        "replacement_pack_ref": { "$ref": "#/$defs/ref" },
+        "verified_targets": { "$ref": "#/$defs/string_list" },
+        "last_verified_at": { "$ref": "#/$defs/timestamp" },
+        "evidence_refs": { "$ref": "#/$defs/string_list" }
+      },
+      "required": ["status"],
+      "additionalProperties": false
+    },
+    "search_match_evidence": {
+      "type": "object",
+      "properties": {
+        "matched_fields": { "$ref": "#/$defs/string_list" },
+        "matched_resource_paths": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/path" },
+          "uniqueItems": true
+        },
+        "matched_terms": { "$ref": "#/$defs/string_list" }
+      },
+      "additionalProperties": false
+    },
+    "string_map": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "string_list": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    }
+  }
+}

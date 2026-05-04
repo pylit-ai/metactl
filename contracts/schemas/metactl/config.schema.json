@@ -1,0 +1,118 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/config.schema.json",
+  "title": "metactl Config",
+  "description": "Durable user-authored source configuration. MagicWormhole and other clients may provide transient overlays separately.",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "role": { "$ref": "common.schema.json#/$defs/ref" },
+    "packs": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/ref" },
+      "uniqueItems": true
+    },
+    "policy": { "$ref": "common.schema.json#/$defs/ref" },
+    "targets": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/ref" },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "starter_library": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/source" },
+      "uniqueItems": true
+    },
+    "linked_projects": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/linked_project" },
+      "uniqueItems": true
+    },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "brownfield_mode": { "$ref": "common.schema.json#/$defs/brownfield_mode" },
+        "fleet_sync_adopt": {
+          "enum": ["patch", "refuse"]
+        },
+        "discovery_mode": { "$ref": "common.schema.json#/$defs/discovery_mode" }
+      },
+      "additionalProperties": false
+    },
+    "metadata": { "$ref": "common.schema.json#/$defs/string_map" }
+  },
+  "required": ["api_version", "role", "policy", "targets"],
+  "additionalProperties": false,
+  "$defs": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "type": {
+          "enum": ["local", "git"]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "visibility": {
+          "enum": ["public", "private"]
+        },
+        "lock_publicity": {
+          "enum": ["public", "private"]
+        }
+      },
+      "required": ["id", "type", "visibility", "lock_publicity"],
+      "oneOf": [
+        {
+          "properties": { "type": { "const": "local" } },
+          "required": ["path"]
+        },
+        {
+          "properties": { "type": { "const": "git" } },
+          "required": ["url", "ref"]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "linked_project": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "path"],
+      "additionalProperties": false
+    }
+  }
+}

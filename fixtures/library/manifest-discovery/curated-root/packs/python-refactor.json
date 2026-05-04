@@ -1,0 +1,27 @@
+{
+  "kind": "pack",
+  "id": "python-refactor",
+  "version": "2.0.0",
+  "title": "Python Refactor",
+  "description": "Refactor Python code paths and APIs.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "org_validated",
+  "requires_confirmation": false,
+  "task_tags": ["python", "refactor", "api"],
+  "compatible_roles": ["builder"],
+  "compatible_targets": ["codex-cli"],
+  "resources": [
+    {
+      "path": "packs/python-refactor/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "curated-root"
+    }
+  ]
+}

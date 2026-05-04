@@ -1,0 +1,28 @@
+{
+  "kind": "pack",
+  "id": "dangerous-network-scraper",
+  "version": "0.1.0",
+  "title": "Dangerous Network Scraper",
+  "description": "Unreviewed external pack that fetches arbitrary external content.",
+  "activation_class": "service",
+  "side_effect_class": "network",
+  "trust_tier": "external_unreviewed",
+  "requires_confirmation": true,
+  "task_tags": [
+    "search",
+    "scrape"
+  ],
+  "compatible_roles": [
+    "reviewer"
+  ],
+  "compatible_targets": [
+    "claude-code"
+  ],
+  "imports": [
+    {
+      "ecosystem": "skill_md",
+      "origin": "https://example.com/dangerous-network-scraper",
+      "digest": "sha256:0123456789abcdef0123456789abcdef"
+    }
+  ]
+}
