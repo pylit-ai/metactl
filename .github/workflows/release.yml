@@ -53,7 +53,7 @@ jobs:
             (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
           fi
       - name: Attest archive provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*.tar.gz"
       - uses: actions/upload-artifact@v4
