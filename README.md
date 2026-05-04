@@ -1,46 +1,211 @@
+<div align="center">
+
 # metactl
 
-`metactl` is a local deterministic context control plane for AI coding agents. It keeps agent behavior source-controlled, explainable, portable, and target-native without coupling behavior to one editor or agent runtime.
+**A local, deterministic control plane for AI coding-agent context.**
 
-## At A Glance
+Resolve reusable instruction packs against role, policy, and target constraints; compile target-native agent files; then validate what changed before it reaches a repository.
 
-- **Core model:** `Role`, `Pack`, `Policy`, `Target`
-- **Primary binary:** `metactl`
-- **Local service shim:** `metactld` for stdio JSON-RPC/MCP usage
-- **Public starter library:** `library/starter`
-- **Stable machine-readable contracts:** `contracts/`
-- **Verification fixtures:** `fixtures/`
+[![CI](https://github.com/pylit-ai/metactl/actions/workflows/ci.yml/badge.svg)](https://github.com/pylit-ai/metactl/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Rust](https://img.shields.io/badge/rust-2021-b7410e?logo=rust&logoColor=white)
+![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)
 
-## Quick Start
+</div>
+
+`metactl` turns agent instructions into reviewable build artifacts. It knows about roles, packs, policies, and agent targets, so a team can ship one portable context configuration and materialize the right files for Codex CLI, Claude Code, Cursor, Gemini CLI, or OpenClaw.
+
+No hosted service, browser automation, or API key is required for local search, compile, apply, or validation workflows.
 
 ```bash
-cargo build -p metactl -p metactld
-cargo run -p metactl -- --help
-cargo run -p metactl -- init --target codex-cli
-cargo run -p metactl -- search python --json
+metactl --project /tmp/metactl-demo init -t codex-cli --no-input
+metactl --project /tmp/metactl-demo compile
+metactl --project /tmp/metactl-demo apply --mode copy
+metactl --project /tmp/metactl-demo validate
 ```
 
-Run commands from the repo root when using `cargo run`. Pass `--project <path>` to operate on another repository.
+Expected success signal:
 
-## Repository Map
+```text
+Initialized /tmp/metactl-demo.
 
-| Path | Purpose |
-| --- | --- |
-| `crates/metactl/` | Local CLI and library crate |
-| `crates/metactld/` | Local stdio JSON-RPC/MCP shim |
-| `contracts/` | Public schemas and JSON-RPC method contracts |
-| `fixtures/` | Public verification fixtures |
-| `library/starter/` | Small public example library |
-| `docs/user/` | User-facing CLI docs |
-| `docs/mcp/` | Local MCP setup notes |
-| `docs/architecture.md` | Public architecture overview |
-| `docs/threat-model.md` | Public security model and non-goals |
-| `docs/support-matrix.md` | Adapter support tiers |
-| `docs/conformance.md` | Compatibility badge rules |
-| `docs/comparisons.md` | Positioning against single-agent files and MCP alone |
-| `docs/release-readiness.md` | Latest release gate and dependency scan record |
+Compiled:
+  codex-cli (3 outputs, surface: minimal ...)
 
-## Verification
+Applied:
+  codex-cli (copy, 3 files)
+    AGENTS.md
+    .codex/skills/python-refactor/python-refactor/SKILL.md
+    .codex/skills/migration-guard/migration-guard/SKILL.md
+
+Validation:
+  codex-cli [pass]
+```
+
+## What It Does
+
+- Compiles agent context from explicit `Role`, `Pack`, `Policy`, and `Target` inputs.
+- Generates target-native files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, and agent-specific skill folders.
+- Keeps generated state under `.metactl/` so output can be reviewed before it is applied.
+- Refuses silent takeover of unmanaged brownfield files.
+- Emits stable JSON for automation with `--json`.
+- Exposes the same reference kernel through `metactld` for local stdio JSON-RPC/MCP usage.
+
+## Install From Source
+
+```bash
+git clone https://github.com/pylit-ai/metactl.git
+cd metactl
+cargo install --path crates/metactl --locked
+```
+
+Expected success signal:
+
+```text
+Installed package `metactl v0.1.0 (...)` (executable `metactl`)
+```
+
+For local development without installing:
+
+```bash
+cargo run -p metactl -- --help
+```
+
+Expected success signal:
+
+```text
+Human-first and agent-safe CLI for the metactl kernel
+
+Usage: metactl [OPTIONS] <COMMAND>
+```
+
+## Quickstart
+
+Create a clean demo project and materialize Codex CLI context:
+
+```bash
+mkdir -p /tmp/metactl-demo
+metactl --project /tmp/metactl-demo init -t codex-cli --no-input
+metactl --project /tmp/metactl-demo search "release review"
+metactl --project /tmp/metactl-demo compile
+metactl --project /tmp/metactl-demo apply --mode copy
+metactl --project /tmp/metactl-demo validate
+```
+
+Expected output includes:
+
+```text
+Role:    builder
+Policy:  brownfield-safe-builder
+Targets: codex-cli
+Packs:   python-refactor, migration-guard
+
+Search results for "release review":
+- metactl-project-onboarding ...
+- migration-guard ...
+- python-refactor ...
+
+Validation:
+  codex-cli [pass]
+```
+
+The demo writes `metactl.yaml`, `metactl.lock.json`, `.metactl/` state, `AGENTS.md`, and Codex skill files into `/tmp/metactl-demo`.
+
+## Daily Workflow
+
+```bash
+metactl init -t codex-cli --no-input
+metactl list packs
+metactl use python-refactor
+metactl status
+metactl sync
+metactl validate
+```
+
+Success signal: `status` reports `Execution readiness: ready`, `sync` compiles and applies configured targets, and `validate` reports each target as `[pass]`.
+
+Use `compile` and `apply` separately when you want an explicit review step before files land in the working tree:
+
+```bash
+metactl compile --json
+metactl apply --mode copy
+```
+
+Success signal: `compile --json` returns a compile manifest with `generated_outputs`; `apply` lists every materialized file.
+
+## Supported Targets
+
+| Target | Generated surface | Status |
+| --- | --- | --- |
+| Codex CLI | `AGENTS.md`, `.codex/skills/...` | Tier 1, conformance-covered |
+| Claude Code | `CLAUDE.md`, `.claude/skills/...` | Tier 1, conformance-covered |
+| Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 2, preview |
+| Gemini CLI | `GEMINI.md`, `.gemini/extensions/...` | Tier 2, preview |
+| OpenClaw | `OPENCLAW.md` | Target available; compatibility tier not yet claimed |
+
+See [docs/support-matrix.md](docs/support-matrix.md) and [docs/agent-surfaces.md](docs/agent-surfaces.md) for release-specific target notes.
+
+## Dogfooding
+
+This repository tests `metactl` by using it against temporary projects, compiling real target surfaces, applying them, validating them, and checking public-boundary hygiene.
+
+```bash
+make verify
+```
+
+Expected success signal:
+
+```text
+metactl CLI smoke passed
+```
+
+Focused checks:
+
+```bash
+cargo test -p metactl
+cargo check -p metactl -p metactld
+bash scripts/smoke_cli.sh
+bash scripts/smoke_dogfood.sh
+bash scripts/check_public_boundary.sh
+```
+
+Expected success signal: every command exits `0`; smoke scripts print their pass line; the boundary check reports no generated local roots, machine paths, or private-only artifacts in the public tree.
+
+## Automation And MCP
+
+`metactl` is designed for local, repo-driven automation. Prefer CLI, JSON, JSON-RPC, or MCP integration over browser automation.
+
+```bash
+metactl search "python refactor" --json
+metactl validate --json
+```
+
+Expected success signal: JSON responses include `api_version: "metactl/v2alpha1"` and either `ok: true` or a stable machine-readable error.
+
+`metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP flows. Start with [docs/mcp/servers.md](docs/mcp/servers.md) and the `run-metactld` Make target when integrating an editor or agent runtime.
+
+## Documentation Map
+
+- [docs/user/GETTING_STARTED.md](docs/user/GETTING_STARTED.md) - first project setup and common commands.
+- [docs/user/WORKFLOWS.md](docs/user/WORKFLOWS.md) - preview, brownfield, and local MCP workflows.
+- [docs/user/PACK_VISIBILITY.md](docs/user/PACK_VISIBILITY.md) - shared and local pack visibility rules.
+- [docs/architecture.md](docs/architecture.md) - reference-kernel model and core nouns.
+- [docs/comparisons.md](docs/comparisons.md) - how `metactl` differs from raw agent files, MCP alone, and editor-specific rules.
+- [docs/conformance.md](docs/conformance.md) - compatibility claim rules.
+- [docs/security-checklist.md](docs/security-checklist.md) and [docs/threat-model.md](docs/threat-model.md) - release and security gates.
+- [docs/release-readiness.md](docs/release-readiness.md) - latest local release-readiness record.
+
+## For Coding Agents
+
+Source-of-truth read order:
+
+1. `README.md`
+2. `Cargo.toml` and `crates/*/Cargo.toml`
+3. `docs/user/GETTING_STARTED.md`
+4. `docs/architecture.md`
+5. `docs/security-checklist.md`
+
+Safe verification commands:
 
 ```bash
 cargo fmt --check
@@ -50,16 +215,21 @@ make metactl-validate-contracts
 bash scripts/check_public_boundary.sh
 ```
 
-For the broader local smoke suite:
+Public-boundary rules:
 
-```bash
-make verify
-```
+- Keep machine-specific paths, credentials, local profiles, and private source names out of public docs, fixtures, and package metadata.
+- Do not commit generated local agent roots unless the change intentionally updates public fixtures or starter-library output.
+- Review `.metactl/private/` policy reports locally; do not publish private local state.
+- Run `scripts/check_public_boundary.sh` before release-facing changes.
 
-## Repository Hygiene
+## Project Status
 
-Keep generated local agent config, machine-specific paths, local notes, and environment-specific files out of committed examples and release artifacts.
+Current crate version: `0.1.0`.
+
+Current API version: `metactl/v2alpha1`.
+
+Release-readiness notes are tracked in [docs/release-readiness.md](docs/release-readiness.md). Compatibility statements are release-specific; avoid broad claims such as "certified" unless a release note says so.
 
 ## License
 
-This repository is licensed under Apache-2.0. See `LICENSE`.
+Apache-2.0. See [LICENSE](LICENSE).
