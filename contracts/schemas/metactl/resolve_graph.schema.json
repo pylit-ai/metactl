@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/resolve_graph.schema.json",
+  "title": "metactl Resolve Graph",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "source_config_digest": { "$ref": "common.schema.json#/$defs/digest" },
+    "overlay_digest": { "$ref": "common.schema.json#/$defs/digest" },
+    "role": { "$ref": "common.schema.json#/$defs/ref" },
+    "selected_target": { "$ref": "common.schema.json#/$defs/ref" },
+    "requested_pack_refs": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/ref" },
+      "uniqueItems": true
+    },
+    "activated_pack_refs": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/ref" },
+      "uniqueItems": true
+    },
+    "suppressed_packs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pack_ref": { "$ref": "common.schema.json#/$defs/ref" },
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "detail": { "type": "string", "maxLength": 2000 }
+        },
+        "required": ["pack_ref", "reason_code"],
+        "additionalProperties": false
+      }
+    },
+    "applied_policies": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/ref" },
+      "uniqueItems": true
+    },
+    "capability_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "feature": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "reason_code": { "$ref": "common.schema.json#/$defs/reason_code" },
+          "affected_refs": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/ref" },
+            "uniqueItems": true
+          }
+        },
+        "required": ["feature", "reason_code"],
+        "additionalProperties": false
+      }
+    },
+    "provenance_refs": { "$ref": "common.schema.json#/$defs/string_list" },
+    "brownfield_mode": { "$ref": "common.schema.json#/$defs/brownfield_mode" }
+  },
+  "required": ["api_version", "role", "selected_target", "activated_pack_refs", "applied_policies"],
+  "additionalProperties": false
+}

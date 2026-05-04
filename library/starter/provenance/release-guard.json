@@ -1,0 +1,20 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "release-guard",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:release-guard",
+  "origin": "library/starter/packs/release-guard.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-03-26T18:20:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:starter-library",
+    "tests:release-manager"
+  ]
+}

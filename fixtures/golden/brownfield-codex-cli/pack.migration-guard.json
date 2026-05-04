@@ -1,0 +1,30 @@
+{
+  "kind": "pack",
+  "id": "migration-guard",
+  "version": "1.0.0",
+  "title": "Migration Guard",
+  "description": "Prevent edits to migrations unless explicitly approved.",
+  "activation_class": "hook",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "migrations",
+    "db",
+    "safety"
+  ],
+  "compatible_roles": [
+    "builder"
+  ],
+  "compatible_targets": [
+    "codex-cli",
+    "claude-code"
+  ],
+  "resources": [
+    {
+      "path": "packs/migration-guard/hook.sh",
+      "kind": "hook",
+      "required": true
+    }
+  ]
+}

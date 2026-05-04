@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/validation_report.schema.json",
+  "title": "metactl Validation Report",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "subject_ref": { "$ref": "common.schema.json#/$defs/ref" },
+    "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+          "message": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "artifact_ref": { "$ref": "common.schema.json#/$defs/ref" }
+        },
+        "required": ["id", "status", "message"],
+        "additionalProperties": false
+      }
+    },
+    "generated_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "required": ["api_version", "subject_ref", "status", "checks"],
+  "additionalProperties": false
+}

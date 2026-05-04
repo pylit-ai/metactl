@@ -1,0 +1,33 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "codex-cli",
+  "version": "2026.03.25",
+  "title": "Codex CLI",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": false,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": false,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "compile_targets": [
+    {
+      "output_kind": "agents_md",
+      "path_template": "generated/AGENTS.md"
+    },
+    {
+      "output_kind": "codex_skill",
+      "path_template": "generated/skills/{pack_id}/SKILL.md"
+    },
+    {
+      "output_kind": "runtime_json",
+      "path_template": "generated/.codex/config.toml"
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "kind": "pack",
+  "id": "python-refactor",
+  "version": "2.0.0",
+  "title": "Python Refactor",
+  "description": "Safe Python refactors for service code paths and APIs.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "org_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "python",
+    "refactor",
+    "api"
+  ],
+  "compatible_roles": [
+    "builder"
+  ],
+  "compatible_targets": [
+    "codex-cli",
+    "cursor",
+    "gemini-cli"
+  ],
+  "resources": [
+    {
+      "path": "packs/python-refactor/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/python-refactor/CONTRACTS.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "suppressible"
+    },
+    {
+      "path": "packs/python-refactor/TESTS.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "suppressible"
+    },
+    {
+      "path": "packs/python-refactor/references/testing.md",
+      "kind": "example",
+      "required": false
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "codex-cli",
+      "cursor",
+      "gemini-cli"
+    ],
+    "last_verified_at": "2026-04-22T12:00:00Z",
+    "evidence_refs": [
+      "evals/search/starter-search-eval.json"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

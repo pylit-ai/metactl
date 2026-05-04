@@ -1,0 +1,29 @@
+{
+  "entrypoint": "magicwormhole_hotkey",
+  "task": {
+    "summary": "Review the open PR for flaky tests, style regressions, and risky edits.",
+    "tags": [
+      "review",
+      "tests",
+      "risk"
+    ]
+  },
+  "privacy_mode": "restricted",
+  "cost_budget_usd": 3.5,
+  "selected_target_override": {
+    "kind": "target",
+    "id": "claude-code",
+    "version": "2026.03.25"
+  },
+  "temporary_approvals": [
+    "read_repo_metadata"
+  ],
+  "candidate_pack_hints": [
+    "repo-review-instructions",
+    "unit-test-loop",
+    "dangerous-network-scraper"
+  ],
+  "selected_project": {
+    "path": "/Users/example/src/acme/api"
+  }
+}

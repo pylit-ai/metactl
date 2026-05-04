@@ -1,0 +1,22 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "starter_library",
+  "id": "metactl-first-party-starter",
+  "version": "2026.03.30",
+  "title": "metactl First-Party Starter Library",
+  "owner": "platform",
+  "minimum_roles": 3,
+  "minimum_packs": 8,
+  "supported_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "promotion_requirements": [
+    "provenance",
+    "policy_review",
+    "validation"
+  ]
+}

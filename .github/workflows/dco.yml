@@ -1,0 +1,30 @@
+name: DCO
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  dco:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check Signed-off-by trailers
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          while IFS= read -r commit; do
+            if ! git log -1 --format=%B "$commit" | grep -qi '^Signed-off-by:'; then
+              echo "Missing Signed-off-by trailer: $commit"
+              missing=1
+            fi
+          done < <(git rev-list "${base}..${head}")
+          exit "$missing"

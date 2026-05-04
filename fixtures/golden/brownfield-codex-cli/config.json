@@ -1,0 +1,36 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "role": {
+    "kind": "role",
+    "id": "builder",
+    "version": "1.0.0"
+  },
+  "packs": [
+    {
+      "kind": "pack",
+      "id": "test-sweeper",
+      "version": "1.1.0"
+    },
+    {
+      "kind": "pack",
+      "id": "migration-guard",
+      "version": "1.0.0"
+    }
+  ],
+  "policy": {
+    "kind": "policy",
+    "id": "brownfield-safe-builder",
+    "version": "1.0.0"
+  },
+  "targets": [
+    {
+      "kind": "target",
+      "id": "codex-cli",
+      "version": "2026.03.25"
+    }
+  ],
+  "defaults": {
+    "brownfield_mode": "patch_mode",
+    "discovery_mode": "candidate_search"
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "jsonrpc": "2.0",
+  "id": "brown-compile-1",
+  "result": {
+    "compile_manifest": {
+      "api_version": "metactl/v2alpha1",
+      "target": {
+        "kind": "target",
+        "id": "codex-cli",
+        "version": "2026.03.25"
+      },
+      "generated_outputs": [
+        {
+          "id": "agents-md",
+          "path": "fixtures/golden/brownfield-codex-cli/generated/AGENTS.md",
+          "kind": "instruction_file",
+          "digest": "sha256:60f08b0cb489abb6f2ff58f5ba3166410f2717138e9229d281b3ba91b0adc58e",
+          "managed": true
+        },
+        {
+          "id": "python-refactor-skill",
+          "path": "fixtures/golden/brownfield-codex-cli/generated/skills/python-refactor/SKILL.md",
+          "kind": "skill_folder",
+          "digest": "sha256:e214e9c66049db121a7600faf1af42d6690c48154af2bd36521e55cacbe21411",
+          "managed": true
+        },
+        {
+          "id": "codex-config",
+          "path": "fixtures/golden/brownfield-codex-cli/generated/.codex/config.toml",
+          "kind": "runtime_json",
+          "digest": "sha256:a38331960fe77db60fe4f767aaed808b44d05d8fc741ec0821c7440168645153",
+          "managed": true
+        }
+      ],
+      "apply_modes_supported": [
+        "copy",
+        "patch",
+        "takeover"
+      ],
+      "brownfield_mode": "patch_mode",
+      "degradations": [
+        {
+          "feature": "deterministic_hooks",
+          "reason_code": "unsupported_target",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "migration-guard",
+              "version": "1.0.0"
+            }
+          ]
+        },
+        {
+          "feature": "protect-migrations",
+          "reason_code": "degraded_enforcement",
+          "affected_refs": [
+            {
+              "kind": "rule",
+              "id": "protect-migrations"
+            }
+          ]
+        }
+      ]
+    },
+    "policy_enforcement_report": {
+      "api_version": "metactl/v2alpha1",
+      "target": {
+        "kind": "target",
+        "id": "codex-cli",
+        "version": "2026.03.25"
+      },
+      "rules": [
+        {
+          "rule_id": "require-approval-external-write",
+          "requested_enforcement_class": "enforceable_local",
+          "realized_enforcement_class": "enforceable_local",
+          "status": "enforced",
+          "enforcement_surface": ".codex/config.toml approval policy",
+          "rationale": "External-write capable actions remain on-request under current sandbox and approval policy.",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "unreviewed-release-bot",
+              "version": "0.2.0"
+            }
+          ]
+        },
+        {
+          "rule_id": "deny-candidate-packs",
+          "requested_enforcement_class": "enforceable_local",
+          "realized_enforcement_class": "enforceable_local",
+          "status": "enforced",
+          "enforcement_surface": "resolver suppression",
+          "rationale": "Candidate packs remain suppressed unless explicitly promoted.",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "unreviewed-release-bot",
+              "version": "0.2.0"
+            }
+          ]
+        },
+        {
+          "rule_id": "protect-migrations",
+          "requested_enforcement_class": "enforceable_local",
+          "realized_enforcement_class": "advisory",
+          "status": "degraded",
+          "enforcement_surface": "AGENTS.md advisory instruction",
+          "rationale": "Codex CLI target lacks deterministic hook surface for path-specific hard blocks in this adapter version.",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "migration-guard",
+              "version": "1.0.0"
+            }
+          ]
+        },
+        {
+          "rule_id": "budget-cap",
+          "requested_enforcement_class": "explain_only_unverifiable",
+          "realized_enforcement_class": "explain_only_unverifiable",
+          "status": "enforced",
+          "enforcement_surface": "explain + client budget UI",
+          "rationale": "Budget caps are surfaced to the shell and explain output but not hard-enforced by this target adapter.",
+          "affected_refs": [
+            {
+              "kind": "rule",
+              "id": "budget-cap"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

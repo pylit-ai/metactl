@@ -1,0 +1,44 @@
+{
+  "jsonrpc": "2.0",
+  "id": "brown-validate-1",
+  "result": {
+    "api_version": "metactl/v2alpha1",
+    "subject_ref": {
+      "kind": "target",
+      "id": "codex-cli",
+      "version": "2026.03.25"
+    },
+    "status": "warn",
+    "checks": [
+      {
+        "id": "schema-compile-manifest",
+        "status": "pass",
+        "message": "Compile manifest validates against schema.",
+        "artifact_ref": {
+          "kind": "output",
+          "id": "agents-md"
+        }
+      },
+      {
+        "id": "policy-degradation-detected",
+        "status": "warn",
+        "message": "Migration protection degraded to advisory because deterministic hooks are unsupported on target codex-cli.",
+        "artifact_ref": {
+          "kind": "rule",
+          "id": "protect-migrations"
+        }
+      },
+      {
+        "id": "quarantine-respected",
+        "status": "pass",
+        "message": "Candidate pack remained suppressed during search and resolve.",
+        "artifact_ref": {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        }
+      }
+    ],
+    "generated_at": "2026-03-25T20:00:00Z"
+  }
+}

@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  package:
+    name: Package ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify
+        run: |
+          cargo fmt --check
+          cargo check -p metactl -p metactld
+          cargo test -p metactl
+          make metactl-validate-contracts
+          bash scripts/check_public_boundary.sh
+      - name: Package crates
+        run: |
+          cargo package -p metactl --locked
+          cargo package -p metactld --locked
+      - name: Build release binaries
+        run: cargo build --release --locked -p metactl -p metactld
+      - name: Assemble archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="metactl-${GITHUB_REF_NAME:-manual}-${RUNNER_OS}-${RUNNER_ARCH}"
+          mkdir -p "dist/$name"
+          cp target/release/metactl "dist/$name/"
+          cp target/release/metactld "dist/$name/"
+          cp README.md LICENSE NOTICE "dist/$name/"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          else
+            (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          fi
+      - name: Attest archive provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+
+  github-release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --draft \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Draft release. Verify checksums and support matrix before publishing."

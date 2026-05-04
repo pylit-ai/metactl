@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format
+        run: cargo fmt --check
+      - name: Check
+        run: cargo check -p metactl -p metactld
+      - name: Test
+        run: cargo test -p metactl
+      - name: Validate contracts
+        run: make metactl-validate-contracts
+      - name: Public boundary
+        run: bash scripts/check_public_boundary.sh

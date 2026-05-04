@@ -1,0 +1,69 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "target": {
+    "kind": "target",
+    "id": "codex-cli",
+    "version": "2026.03.25"
+  },
+  "rules": [
+    {
+      "rule_id": "require-approval-external-write",
+      "requested_enforcement_class": "enforceable_local",
+      "realized_enforcement_class": "enforceable_local",
+      "status": "enforced",
+      "enforcement_surface": ".codex/config.toml approval policy",
+      "rationale": "External-write capable actions remain on-request under current sandbox and approval policy.",
+      "affected_refs": [
+        {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        }
+      ]
+    },
+    {
+      "rule_id": "deny-candidate-packs",
+      "requested_enforcement_class": "enforceable_local",
+      "realized_enforcement_class": "enforceable_local",
+      "status": "enforced",
+      "enforcement_surface": "resolver suppression",
+      "rationale": "Candidate packs remain suppressed unless explicitly promoted.",
+      "affected_refs": [
+        {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        }
+      ]
+    },
+    {
+      "rule_id": "protect-migrations",
+      "requested_enforcement_class": "enforceable_local",
+      "realized_enforcement_class": "advisory",
+      "status": "degraded",
+      "enforcement_surface": "AGENTS.md advisory instruction",
+      "rationale": "Codex CLI target lacks deterministic hook surface for path-specific hard blocks in this adapter version.",
+      "affected_refs": [
+        {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        }
+      ]
+    },
+    {
+      "rule_id": "budget-cap",
+      "requested_enforcement_class": "explain_only_unverifiable",
+      "realized_enforcement_class": "explain_only_unverifiable",
+      "status": "enforced",
+      "enforcement_surface": "explain + client budget UI",
+      "rationale": "Budget caps are surfaced to the shell and explain output but not hard-enforced by this target adapter.",
+      "affected_refs": [
+        {
+          "kind": "rule",
+          "id": "budget-cap"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "kind": "policy",
+  "id": "builder-policy",
+  "version": "1.0.0",
+  "title": "Builder Policy",
+  "description": "Allow curated packs and quarantine imported candidates.",
+  "discovery_mode": "candidate_search",
+  "rules": [
+    {
+      "id": "quarantine-candidates",
+      "title": "Keep quarantined candidates suppressed",
+      "requested_enforcement_class": "advisory",
+      "subject": "pack",
+      "operator": "quarantine_only",
+      "selectors": {
+        "trust_tiers": ["candidate_quarantined"]
+      }
+    }
+  ]
+}

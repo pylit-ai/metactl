@@ -1,0 +1,203 @@
+{
+  "jsonrpc": "2.0",
+  "id": "brown-search-1",
+  "method": "metactl.search",
+  "params": {
+    "query": "refactor python API client and keep migrations safe",
+    "config": {
+      "api_version": "metactl/v2alpha1",
+      "role": {
+        "kind": "role",
+        "id": "builder",
+        "version": "1.0.0"
+      },
+      "packs": [
+        {
+          "kind": "pack",
+          "id": "test-sweeper",
+          "version": "1.1.0"
+        },
+        {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        }
+      ],
+      "policy": {
+        "kind": "policy",
+        "id": "brownfield-safe-builder",
+        "version": "1.0.0"
+      },
+      "targets": [
+        {
+          "kind": "target",
+          "id": "codex-cli",
+          "version": "2026.03.25"
+        }
+      ],
+      "defaults": {
+        "brownfield_mode": "patch_mode",
+        "discovery_mode": "candidate_search"
+      }
+    },
+    "overlay": {
+      "entrypoint": "magicwormhole_drop",
+      "task": {
+        "summary": "Refactor the Python API client, keep changes small, and do not touch migrations without approval.",
+        "tags": [
+          "python",
+          "refactor",
+          "migrations",
+          "tests"
+        ]
+      },
+      "privacy_mode": "normal",
+      "cost_budget_usd": 8,
+      "selected_target_override": {
+        "kind": "target",
+        "id": "codex-cli",
+        "version": "2026.03.25"
+      },
+      "temporary_approvals": [],
+      "candidate_pack_hints": [
+        "python-refactor",
+        "test-sweeper",
+        "migration-guard",
+        "unreviewed-release-bot"
+      ],
+      "selected_project": {
+        "path": "/Users/example/src/acme/monorepo/services/api"
+      }
+    },
+    "candidate_packs": [
+      {
+        "kind": "pack",
+        "id": "python-refactor",
+        "version": "2.0.0",
+        "title": "Python Refactor",
+        "description": "Safe Python refactoring imported from a skill folder.",
+        "activation_class": "instruction",
+        "side_effect_class": "none",
+        "trust_tier": "org_validated",
+        "requires_confirmation": false,
+        "task_tags": [
+          "python",
+          "refactor",
+          "tests"
+        ],
+        "compatible_roles": [
+          "builder"
+        ],
+        "compatible_targets": [
+          "codex-cli"
+        ],
+        "resources": [
+          {
+            "path": "packs/python-refactor/SKILL.md",
+            "kind": "instruction",
+            "required": true
+          },
+          {
+            "path": "packs/python-refactor/references/testing.md",
+            "kind": "example",
+            "required": false
+          }
+        ],
+        "imports": [
+          {
+            "ecosystem": "skill_md",
+            "origin": "vendor/python-refactor",
+            "digest": "sha256:dddddddddddddddddddddddddddddddd"
+          }
+        ]
+      },
+      {
+        "kind": "pack",
+        "id": "test-sweeper",
+        "version": "1.1.0",
+        "title": "Test Sweeper",
+        "description": "Routine for narrow test runs after edits.",
+        "activation_class": "script",
+        "side_effect_class": "fs_write",
+        "trust_tier": "first_party_validated",
+        "requires_confirmation": true,
+        "task_tags": [
+          "tests",
+          "verification"
+        ],
+        "compatible_roles": [
+          "builder",
+          "reviewer"
+        ],
+        "compatible_targets": [
+          "codex-cli",
+          "claude-code"
+        ],
+        "resources": [
+          {
+            "path": "packs/test-sweeper/SKILL.md",
+            "kind": "instruction",
+            "required": true
+          },
+          {
+            "path": "packs/test-sweeper/scripts/run-tests.sh",
+            "kind": "script",
+            "required": true
+          }
+        ]
+      },
+      {
+        "kind": "pack",
+        "id": "migration-guard",
+        "version": "1.0.0",
+        "title": "Migration Guard",
+        "description": "Prevent edits to migrations unless explicitly approved.",
+        "activation_class": "hook",
+        "side_effect_class": "none",
+        "trust_tier": "first_party_validated",
+        "requires_confirmation": false,
+        "task_tags": [
+          "migrations",
+          "db",
+          "safety"
+        ],
+        "compatible_roles": [
+          "builder"
+        ],
+        "compatible_targets": [
+          "codex-cli",
+          "claude-code"
+        ],
+        "resources": [
+          {
+            "path": "packs/migration-guard/hook.sh",
+            "kind": "hook",
+            "required": true
+          }
+        ]
+      },
+      {
+        "kind": "pack",
+        "id": "unreviewed-release-bot",
+        "version": "0.2.0",
+        "title": "Unreviewed Release Bot",
+        "description": "Candidate automation pack from external source.",
+        "activation_class": "service",
+        "side_effect_class": "external_write",
+        "trust_tier": "candidate_quarantined",
+        "requires_confirmation": true,
+        "task_tags": [
+          "release",
+          "publish"
+        ],
+        "compatible_roles": [
+          "builder"
+        ],
+        "compatible_targets": [
+          "codex-cli"
+        ]
+      }
+    ],
+    "limit": 5
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "kind": "role",
+  "id": "release-manager",
+  "version": "1.0.0",
+  "title": "Release Manager",
+  "description": "Prepare releases conservatively.",
+  "intent_tags": ["release", "safety"],
+  "default_pack_refs": [
+    {
+      "kind": "pack",
+      "id": "release-guard",
+      "version": "0.0.0-candidate"
+    }
+  ],
+  "default_policy_ref": {
+    "kind": "policy",
+    "id": "release-policy",
+    "version": "1.0.0"
+  },
+  "compatible_targets": ["codex-cli"]
+}

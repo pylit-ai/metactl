@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/policy_manifest.schema.json",
+  "title": "metactl Policy Manifest",
+  "type": "object",
+  "properties": {
+    "kind": { "const": "policy" },
+    "id": { "$ref": "common.schema.json#/$defs/slug" },
+    "version": { "$ref": "common.schema.json#/$defs/version_string" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "description": { "type": "string", "maxLength": 8000 },
+    "discovery_mode": { "$ref": "common.schema.json#/$defs/discovery_mode" },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/slug" },
+          "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "requested_enforcement_class": { "$ref": "common.schema.json#/$defs/requested_enforcement_class" },
+          "subject": {
+            "type": "string",
+            "enum": ["pack", "tool", "network", "filesystem", "approval", "budget", "runtime", "mcp", "hook", "artifact"]
+          },
+          "operator": {
+            "type": "string",
+            "enum": ["allow", "deny", "require_approval", "prefer", "readonly", "budget_cap", "quarantine_only"]
+          },
+          "selectors": {
+            "type": "object",
+            "properties": {
+              "ids": { "$ref": "common.schema.json#/$defs/string_list" },
+              "tags": { "$ref": "common.schema.json#/$defs/string_list" },
+              "trust_tiers": {
+                "type": "array",
+                "items": { "$ref": "common.schema.json#/$defs/trust_tier" },
+                "uniqueItems": true
+              }
+            },
+            "additionalProperties": false
+          },
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "max_budget_usd": { "type": "number", "minimum": 0 },
+              "approval_prompt": { "type": "string", "maxLength": 1000 },
+              "read_only": { "type": "boolean" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "required": ["id", "requested_enforcement_class", "subject", "operator"],
+        "additionalProperties": false
+      }
+    },
+    "metadata": { "$ref": "common.schema.json#/$defs/string_map" }
+  },
+  "required": ["kind", "id", "version", "title", "rules"],
+  "additionalProperties": false
+}

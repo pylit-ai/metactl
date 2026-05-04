@@ -1,0 +1,41 @@
+{
+  "kind": "pack",
+  "id": "repo-review-instructions",
+  "version": "1.0.0",
+  "title": "Repo Review Instructions",
+  "description": "Curated review procedure with correctness-first instructions.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "review",
+    "pr",
+    "correctness"
+  ],
+  "compatible_roles": [
+    "reviewer"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/repo-review-instructions/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "local-only-example",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:local-only-example",
+  "origin": "library/starter/packs/local-only-example.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "metactl-public-example",
+    "reviewed_at": "2026-05-04T00:00:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:visibility-scope"
+  ]
+}

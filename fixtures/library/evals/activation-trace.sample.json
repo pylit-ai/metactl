@@ -1,0 +1,61 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "trace_id": "trace-sample-python-refactor",
+  "recorded_at": "2026-04-23T12:00:00Z",
+  "opt_in": true,
+  "source": {
+    "kind": "manual_eval",
+    "description": "Committed schema fixture only; metactl does not collect activation traces automatically."
+  },
+  "activation": {
+    "cause": "manual_eval",
+    "selected_pack_ref": {
+      "kind": "pack",
+      "id": "python-refactor",
+      "version": "2.0.0"
+    },
+    "selected_surface_id": "python-refactor",
+    "retrieved_refs": [
+      {
+        "kind": "pack",
+        "id": "python-refactor",
+        "version": "2.0.0"
+      },
+      {
+        "kind": "pack",
+        "id": "migration-guard",
+        "version": "1.0.0"
+      }
+    ]
+  },
+  "routing": {
+    "candidate_shortlist": [
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "python-refactor",
+          "version": "2.0.0"
+        },
+        "score": 1.41,
+        "reason": "Matched query terms in metadata and skill body."
+      },
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        },
+        "score": 0.53,
+        "reason": "Compatible builder role and Codex target."
+      }
+    ]
+  },
+  "execution": {
+    "status": "succeeded",
+    "latency_ms": 842,
+    "token_count": 0,
+    "cost_usd": 0,
+    "human_override": false
+  },
+  "approvals": []
+}

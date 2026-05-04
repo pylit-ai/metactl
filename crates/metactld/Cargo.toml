@@ -1,0 +1,17 @@
+[package]
+name = "metactld"
+version = "0.1.0"
+edition = "2021"
+authors = ["metactl contributors"]
+description = "metactl v2 local reference-kernel JSON-RPC/MCP shim"
+license = "Apache-2.0"
+repository = "https://github.com/pylit-ai/metactl"
+readme = "../../README.md"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+metactl = { version = "0.1.0", path = "../metactl" }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }

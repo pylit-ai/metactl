@@ -1,0 +1,60 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "cursor",
+  "version": "2026.03.26",
+  "title": "Cursor",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": false,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": false,
+    "ui_surfaces": true
+  },
+  "compile_targets": [
+    {
+      "output_kind": "agents_md",
+      "path_template": "AGENTS.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "agents_md",
+      "path_template": ".cursor/rules/metactl-pack-index.mdc",
+      "instruction_mode": "reference_index",
+      "instruction_frontmatter": {
+        "description": "metactl pack index — always-applied routing doc",
+        "alwaysApply": "true"
+      }
+    },
+    {
+      "output_kind": "codex_skill",
+      "path_template": ".cursor/skills/{pack_id}/{surface_slug}/SKILL.md",
+      "surface_selection_mode": "minimal",
+      "supports_multi_surface_pack": true,
+      "supports_surface_assets": true,
+      "supports_surface_scripts": true,
+      "supports_surface_frontmatter": true,
+      "surface_merge_strategy": "optional"
+    }
+  ],
+  "local_projection": {
+    "support": "exact",
+    "local_surface": ".cursor/rules/metactl-pack-index.local.mdc",
+    "notes": "Cursor supports local rule files that are gitignored."
+  },
+  "metadata": {
+    "starter_status": "stable",
+    "docs": "https://cursor.com/docs (project rules + native skills + AGENTS.md)",
+    "shared_root_document_owner": "codex-cli",
+    "shared_root_document_path": "AGENTS.md",
+    "shared_agents_md": "Root AGENTS.md is owned by the codex-cli target when both are enabled; Cursor reads it from the repo.",
+    "approval_surface": ".cursor/rules and editor approval flows",
+    "filesystem_surface": ".cursor/skills and .cursor/rules outputs",
+    "advisory_surface": ".cursor/rules/metactl-pack-index.mdc + skills; root AGENTS.md from codex-cli when enabled"
+  }
+}

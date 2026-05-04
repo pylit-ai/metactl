@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/pack_manifest.schema.json",
+  "title": "metactl Pack Manifest",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "pack"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version_string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 8000
+    },
+    "activation_class": {
+      "$ref": "common.schema.json#/$defs/activation_class"
+    },
+    "side_effect_class": {
+      "$ref": "common.schema.json#/$defs/side_effect_class"
+    },
+    "trust_tier": {
+      "$ref": "common.schema.json#/$defs/trust_tier"
+    },
+    "requires_confirmation": {
+      "type": "boolean",
+      "default": false
+    },
+    "task_tags": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "compatible_roles": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "compatible_targets": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "instruction",
+              "example",
+              "hook",
+              "hook_wiring",
+              "script",
+              "command",
+              "rule",
+              "plugin",
+              "asset",
+              "schema",
+              "test",
+              "subagent"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "default": true
+          },
+          "surface_relevance": {
+            "$ref": "common.schema.json#/$defs/surface_relevance_tier"
+          }
+        },
+        "required": [
+          "path",
+          "kind"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "imports": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "enum": [
+              "skill_md",
+              "agents_md",
+              "mcp",
+              "custom",
+              "first_party",
+              "third_party"
+            ]
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "common.schema.json#/$defs/uri"
+              },
+              {
+                "$ref": "common.schema.json#/$defs/path"
+              }
+            ]
+          },
+          "digest": {
+            "$ref": "common.schema.json#/$defs/digest"
+          }
+        },
+        "required": [
+          "ecosystem",
+          "origin"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "visibility_scope": {
+      "$ref": "common.schema.json#/$defs/visibility_scope"
+    },
+    "lifecycle": {
+      "$ref": "common.schema.json#/$defs/pack_lifecycle"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
+  },
+  "required": [
+    "kind",
+    "id",
+    "version",
+    "title",
+    "activation_class",
+    "side_effect_class",
+    "trust_tier"
+  ],
+  "additionalProperties": false
+}

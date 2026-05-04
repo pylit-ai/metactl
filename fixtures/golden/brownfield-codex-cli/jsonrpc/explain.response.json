@@ -1,0 +1,149 @@
+{
+  "jsonrpc": "2.0",
+  "id": "brown-explain-1",
+  "result": {
+    "api_version": "metactl/v2alpha1",
+    "summary": "Builder role resolved to Codex CLI with three active packs. Migration protection degraded because Codex CLI lacks deterministic hooks, so the policy is preserved in generated instructions and approval settings instead of a hard hook.",
+    "what_is_active": [
+      "role:builder",
+      "pack:python-refactor@2.0.0",
+      "pack:test-sweeper@1.1.0",
+      "pack:migration-guard@1.0.0",
+      "policy:brownfield-safe-builder@1.0.0",
+      "target:codex-cli@2026.03.25"
+    ],
+    "why_it_is_active": [
+      {
+        "subject_ref": {
+          "kind": "pack",
+          "id": "python-refactor",
+          "version": "2.0.0"
+        },
+        "reason": "Role builder defaults plus task tags strongly matched the imported skill."
+      },
+      {
+        "subject_ref": {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        },
+        "reason": "Task explicitly called for migrations safety in a brownfield repository."
+      }
+    ],
+    "what_was_suppressed": [
+      {
+        "subject_ref": {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        },
+        "reason_code": "untrusted_pack",
+        "detail": "Quarantined candidate pack was discovered but not activated."
+      }
+    ],
+    "unknown_or_unsupported": [
+      "deterministic_hooks not supported on target codex-cli"
+    ],
+    "resolve_graph": {
+      "api_version": "metactl/v2alpha1",
+      "source_config_digest": "sha256:33333333333333333333333333333333",
+      "overlay_digest": "sha256:44444444444444444444444444444444",
+      "role": {
+        "kind": "role",
+        "id": "builder",
+        "version": "1.0.0"
+      },
+      "selected_target": {
+        "kind": "target",
+        "id": "codex-cli",
+        "version": "2026.03.25"
+      },
+      "requested_pack_refs": [
+        {
+          "kind": "pack",
+          "id": "python-refactor",
+          "version": "2.0.0"
+        },
+        {
+          "kind": "pack",
+          "id": "test-sweeper",
+          "version": "1.1.0"
+        },
+        {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        },
+        {
+          "kind": "pack",
+          "id": "unreviewed-release-bot",
+          "version": "0.2.0"
+        }
+      ],
+      "activated_pack_refs": [
+        {
+          "kind": "pack",
+          "id": "python-refactor",
+          "version": "2.0.0"
+        },
+        {
+          "kind": "pack",
+          "id": "test-sweeper",
+          "version": "1.1.0"
+        },
+        {
+          "kind": "pack",
+          "id": "migration-guard",
+          "version": "1.0.0"
+        }
+      ],
+      "suppressed_packs": [
+        {
+          "pack_ref": {
+            "kind": "pack",
+            "id": "unreviewed-release-bot",
+            "version": "0.2.0"
+          },
+          "reason_code": "untrusted_pack",
+          "detail": "Candidate pack remained quarantined under policy."
+        }
+      ],
+      "applied_policies": [
+        {
+          "kind": "policy",
+          "id": "brownfield-safe-builder",
+          "version": "1.0.0"
+        }
+      ],
+      "capability_gaps": [
+        {
+          "feature": "deterministic_hooks",
+          "reason_code": "unsupported_target",
+          "affected_refs": [
+            {
+              "kind": "pack",
+              "id": "migration-guard",
+              "version": "1.0.0"
+            }
+          ]
+        },
+        {
+          "feature": "scheduled_tasks",
+          "reason_code": "unsupported_target",
+          "affected_refs": [
+            {
+              "kind": "target",
+              "id": "codex-cli",
+              "version": "2026.03.25"
+            }
+          ]
+        }
+      ],
+      "provenance_refs": [
+        "artifact:python-refactor-provenance",
+        "artifact:migration-guard-provenance"
+      ],
+      "brownfield_mode": "patch_mode"
+    }
+  }
+}

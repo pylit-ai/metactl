@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/policy_enforcement_report.schema.json",
+  "title": "metactl Policy Enforcement Report",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "target": { "$ref": "common.schema.json#/$defs/ref" },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "rule_id": { "$ref": "common.schema.json#/$defs/slug" },
+          "requested_enforcement_class": { "$ref": "common.schema.json#/$defs/requested_enforcement_class" },
+          "realized_enforcement_class": { "$ref": "common.schema.json#/$defs/realized_enforcement_class" },
+          "status": { "$ref": "common.schema.json#/$defs/enforcement_status" },
+          "enforcement_surface": { "type": "string", "maxLength": 256 },
+          "rationale": { "type": "string", "maxLength": 2000 },
+          "affected_refs": {
+            "type": "array",
+            "items": { "$ref": "common.schema.json#/$defs/ref" },
+            "uniqueItems": true
+          }
+        },
+        "required": ["rule_id", "requested_enforcement_class", "realized_enforcement_class", "status"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["api_version", "target", "rules"],
+  "additionalProperties": false
+}

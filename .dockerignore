@@ -1,0 +1,66 @@
+# Git and local editor state
+.git
+.gitignore
+.DS_Store
+.agents
+.cursor
+.claude
+.codex
+.gemini
+.omc
+.opendream
+.ruler
+.meta
+.mcp.json
+opencode.json
+.idea
+.vscode
+
+# Local env and generated local artifacts
+.env
+.env.*
+*.local.*
+.metactl
+memory/state
+notepads
+**/notepads
+**/scratch
+tmp
+**/tmp
+specs
+openspec
+skills
+.agents
+docs/adr
+docs/spec
+docs/agents
+docs/governance
+docs/evidence
+docs/status
+docs/superpowers
+*-library
+*.zip
+**/*.zip
+
+# Python caches
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/.uv
+**/*.pyc
+
+# Build artifacts and dependency trees
+target
+**/target
+node_modules
+**/node_modules
+build
+**/build
+dist
+**/dist
+coverage
+**/coverage
+
+# Local tooling caches and exports
+.repomix
+repomix-output.xmlmain.xml

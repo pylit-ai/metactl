@@ -1,0 +1,35 @@
+{
+  "kind": "pack",
+  "id": "test-sweeper",
+  "version": "1.1.0",
+  "title": "Test Sweeper",
+  "description": "Routine for narrow test runs after edits.",
+  "activation_class": "script",
+  "side_effect_class": "fs_write",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": true,
+  "task_tags": [
+    "tests",
+    "verification"
+  ],
+  "compatible_roles": [
+    "builder",
+    "reviewer"
+  ],
+  "compatible_targets": [
+    "codex-cli",
+    "claude-code"
+  ],
+  "resources": [
+    {
+      "path": "packs/test-sweeper/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    },
+    {
+      "path": "packs/test-sweeper/scripts/run-tests.sh",
+      "kind": "script",
+      "required": true
+    }
+  ]
+}

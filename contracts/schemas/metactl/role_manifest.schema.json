@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/role_manifest.schema.json",
+  "title": "metactl Role Manifest",
+  "type": "object",
+  "properties": {
+    "kind": { "const": "role" },
+    "id": { "$ref": "common.schema.json#/$defs/slug" },
+    "version": { "$ref": "common.schema.json#/$defs/version_string" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "description": { "type": "string", "maxLength": 4000 },
+    "intent_tags": { "$ref": "common.schema.json#/$defs/string_list" },
+    "default_pack_refs": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/ref" },
+      "uniqueItems": true
+    },
+    "default_policy_ref": { "$ref": "common.schema.json#/$defs/ref" },
+    "compatible_targets": { "$ref": "common.schema.json#/$defs/string_list" },
+    "metadata": { "$ref": "common.schema.json#/$defs/string_map" }
+  },
+  "required": ["kind", "id", "version", "title"],
+  "additionalProperties": false
+}

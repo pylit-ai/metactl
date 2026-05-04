@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/jsonrpc/resolve.request.schema.json",
+  "allOf": [
+    {
+      "$ref": "common_jsonrpc.schema.json#/$defs/request_base"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "method": {
+          "const": "metactl.resolve"
+        },
+        "params": {
+          "type": "object",
+          "properties": {
+            "config": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/config.schema.json"
+            },
+            "overlay": {
+              "$ref": "https://dropzone/contracts/schemas/metactl/invocation_overlay.schema.json"
+            },
+            "available_targets": {
+              "type": "array",
+              "items": {
+                "$ref": "https://dropzone/contracts/schemas/metactl/target_capability_matrix.schema.json"
+              },
+              "minItems": 1
+            },
+            "provenance": {
+              "type": "array",
+              "items": {
+                "$ref": "https://dropzone/contracts/schemas/metactl/provenance_envelope.schema.json"
+              },
+              "uniqueItems": false
+            }
+          },
+          "required": [
+            "config",
+            "available_targets"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ]
+}

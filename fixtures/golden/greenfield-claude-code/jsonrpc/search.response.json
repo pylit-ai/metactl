@@ -1,0 +1,55 @@
+{
+  "jsonrpc": "2.0",
+  "id": "green-search-1",
+  "result": {
+    "api_version": "metactl/v2alpha1",
+    "query": "review flaky tests and style regressions",
+    "discovery_mode": "curated_only",
+    "matches": [
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "repo-review-instructions",
+          "version": "1.0.0"
+        },
+        "score": 0.93,
+        "why": "Direct match on review and risk tags.",
+        "trust_tier": "first_party_validated",
+        "requires_confirmation": false,
+        "provenance_ref": {
+          "kind": "artifact",
+          "id": "repo-review-instructions-provenance"
+        }
+      },
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "unit-test-loop",
+          "version": "1.0.0"
+        },
+        "score": 0.74,
+        "why": "Task mentions flaky tests and verification.",
+        "trust_tier": "org_validated",
+        "requires_confirmation": true,
+        "provenance_ref": {
+          "kind": "artifact",
+          "id": "unit-test-loop-provenance"
+        }
+      }
+    ],
+    "suppressed": [
+      {
+        "pack_ref": {
+          "kind": "pack",
+          "id": "dangerous-network-scraper",
+          "version": "0.1.0"
+        },
+        "reason_code": "suppressed_by_policy",
+        "detail": "Policy denies external_unreviewed packs in curated_only mode."
+      }
+    ],
+    "notes": [
+      "No candidate packs were auto-activated."
+    ]
+  }
+}
