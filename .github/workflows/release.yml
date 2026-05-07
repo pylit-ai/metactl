@@ -34,7 +34,10 @@ jobs:
       - name: Package crates
         run: |
           cargo package -p metactl --locked
-          cargo package -p metactld --locked
+          # metactld depends on the published metactl crate version, so it
+          # cannot be packaged against crates.io until metactl reaches the index.
+          # The binary still builds below; crate publish verification is
+          # dependency-ordered in docs/release-readiness.md.
       - name: Build release binaries
         run: cargo build --release --locked -p metactl -p metactld
       - name: Assemble archive

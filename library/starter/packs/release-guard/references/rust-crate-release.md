@@ -63,6 +63,7 @@ cargo publish --dry-run --workspace --locked
 ```
 
 If a workspace member cannot dry-run because an unpublished sibling crate is not in the registry yet, dry-run and publish in dependency order instead of weakening the gate.
+For binary archive workflows, it is acceptable to skip packaging a dependent crate until its sibling dependency exists in the registry, but still build and smoke-test the dependent binary.
 
 ## Commit, Push, Release
 

@@ -41,6 +41,7 @@ cargo package -p metactld --allow-dirty --list
 ```
 
 Release artifacts should be created through `.github/workflows/release.yml`, which produces SHA-256 checksums and GitHub provenance attestations.
+Until `metactl` is present in the crates.io index, the release workflow packages only the `metactl` crate archive; `metactld` is still built into the binary archive, and its crate publish verification runs after `metactl` reaches the index.
 
 Publish order for crates.io:
 
