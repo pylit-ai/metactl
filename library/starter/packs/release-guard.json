@@ -1,9 +1,9 @@
 {
   "kind": "pack",
   "id": "release-guard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "Release Guard",
-  "description": "Checklist and checks for release readiness and packaging.",
+  "description": "Reusable release readiness protocol for package, tag, CI, and publish handoffs.",
   "activation_class": "instruction",
   "side_effect_class": "none",
   "trust_tier": "first_party_validated",
@@ -30,6 +30,11 @@
     },
     {
       "path": "packs/release-guard/references/checklist.md",
+      "kind": "example",
+      "required": false
+    },
+    {
+      "path": "packs/release-guard/references/rust-crate-release.md",
       "kind": "example",
       "required": false
     },

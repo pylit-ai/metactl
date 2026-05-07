@@ -21,6 +21,8 @@ Use this skill when you need an agent-facing interface for maintaining metactl l
    For every pack or profile, state what belongs in the default set, what stays opt-in, and why.
 6. Emit concrete drafts and commands.
    Produce pack manifest drafts, profile YAML drafts, and exact metactl commands to apply the chosen layout.
+7. Place Fleet controllers separately from packs.
+   If the work spans multiple linked local projects, put the Fleet controller in `/path/to/metactl-library/fleet/<name>`, `~/.config/metactl/fleet/<name>`, or a dedicated private repo. Create it with `metactl fleet controller init <name>` or `metactl fleet controller init <name> --path /path/to/controller`. Do not put controller registries under `packs/`.
 
 ## Output Format
 
@@ -29,6 +31,7 @@ Use this skill when you need an agent-facing interface for maintaining metactl l
 - Pack proposals with: `pack id`, `purpose`, `included artifacts`, `excluded artifacts`, `rationale`
 - Profile matrix with: `profile`, `default packs`, `storage layer`, `why this stays small`
 - Exact metactl command sequence when the user asks to apply the recommendation
+- Fleet controller recommendation when the user is coordinating multiple repos
 - Risks or ambiguities that still need a human decision
 - Exact manifest or YAML drafts when the user asks for them
 
@@ -40,4 +43,6 @@ Use this skill when you need an agent-facing interface for maintaining metactl l
 - Prefer a few small defaults plus explicit specialist profiles over one giant default profile.
 - If two artifacts always move together at runtime, keep them together. If users often want one without the other, split them.
 - Explain where information lives: global library, shared project config, and local overrides are separate decisions.
+- Explain where Fleet information lives: `linked_projects` belongs in the controller project's `metactl.yaml`; the user-global config stores only the selected controller pointer.
 - Prefer explicit metactl operations and file locations over vague advice. If suggesting a binding or override, name the file that changes.
+- Do not use user-specific private paths in reusable docs or starter packs. Use placeholders such as `/path/to/metactl-library/fleet/<name>`.

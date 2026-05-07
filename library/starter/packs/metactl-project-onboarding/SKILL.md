@@ -34,6 +34,19 @@ Use this skill as the primary greenfield or brownfield entrypoint for installing
 12. Verify and report.
    Run `metactl doctor`, `metactl --json status`, and `metactl explain --json`. If MCP was installed, run the MCP smoke check from `docs/mcp/servers.md` or the client's MCP list command. Report the active profile, packs, targets, changed files, MCP config path, and exact commands used.
 
+## Fleet Sync
+
+Use Fleet Sync only when the user wants one controller to preview or apply metactl output across multiple linked local projects.
+
+- Reference `docs/user/FLEET_SYNC.md` when available.
+- Treat the Fleet controller as a normal metactl project whose `metactl.yaml` owns `linked_projects`.
+- Create a new controller with `metactl fleet controller init <name>` or `metactl fleet controller init <name> --path /path/to/controller`.
+- Store only a pointer in machine-local user settings; `init` and `set` both select the controller.
+- Prefer `/path/to/metactl-library/fleet/<name>` when a private metactl library already exists. Use `~/.config/metactl/fleet/<name>` for single-machine private state. Use a dedicated private repo for team-shared registries.
+- Do not assume a user's private library path. Ask or inspect configured profiles/library roots before proposing an exact location.
+- Do not put Fleet controllers under `packs/`; controllers are registries, not packs.
+- Always run `metactl fleet sync --preview` before any apply. Apply requires `metactl --yes --no-input fleet sync --apply`.
+
 ## Command Patterns
 
 - List profiles: `metactl profile list`
@@ -45,6 +58,11 @@ Use this skill as the primary greenfield or brownfield entrypoint for installing
 - Personal pack addition: `metactl use --local <pack>`
 - Brownfield preview: `metactl sync --adopt preview`
 - Brownfield patch apply: `metactl sync --adopt patch --yes`
+- Fleet controller init: `metactl fleet controller init <name>`
+- Fleet controller init at explicit path: `metactl fleet controller init <name> --path /path/to/controller`
+- Existing Fleet controller selection: `metactl fleet controller set <name> /path/to/controller`
+- Fleet preview: `metactl fleet sync --preview`
+- Fleet apply: `metactl --yes --no-input fleet sync --apply`
 - Refresh hooks: `metactl hook install`
 - MCP install reference: `docs/mcp/servers.md`
 - Claude Code MCP install: `make metactl-mcp-install MCP_CLIENT=claude-code`
@@ -62,6 +80,7 @@ Use this skill as the primary greenfield or brownfield entrypoint for installing
 - Prefer patch or preview for brownfield repos. Reserve takeover for explicit destructive approval.
 - Do not add every available pack to a default profile. Keep default context small and put specialized packs in specialist profiles or local overrides.
 - Do not copy private user-library artifacts into public starter packs.
+- Do not hardcode machine-specific paths such as a user's home directory, username, or private org checkout in public docs or generated examples. Use `/path/to/...` placeholders unless the user explicitly asks for a local setup command.
 - If profile roots do not include roles, policies, or targets, add the starter library root to the profile or project config before syncing.
 - Do not configure MCP until `metactld` is installed on `PATH` or the install command has a reviewed absolute `--metactld-bin` path.
 - Do not overwrite unmanaged MCP server entries. Use `--force` only after reviewing the existing `metactl` entry with the user.

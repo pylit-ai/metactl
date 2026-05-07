@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-blocked_paths='^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|CLAUDE\.local\.md|GEMINI\.local\.md|PRD\.md|NORTHSTAR\.md|CONSTITUTION\.md|CURRENT_STATE\.md|APPLY\.md|MIGRATION_GUARDRAILS\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.claude/|\.cursor/|\.gemini/|\.omc/|\.opendream/|\.ruler/|\.meta/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|specs/|openspec/|skills/|docs/adr/|docs/spec/|docs/agents/|docs/governance/|docs/evidence/|docs/status/|docs/superpowers/|docs/repomix-bundles/|docs/user/FLEET_SYNC\.md|[^/]+-library/|.*\.code-workspace$|.*\.zip$)'
+blocked_paths='^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|CLAUDE\.local\.md|GEMINI\.local\.md|PRD\.md|NORTHSTAR\.md|CONSTITUTION\.md|CURRENT_STATE\.md|APPLY\.md|MIGRATION_GUARDRAILS\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.claude/|\.cursor/|\.gemini/|\.omc/|\.opendream/|\.ruler/|\.meta/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|specs/|openspec/|skills/|docs/adr/|docs/spec/|docs/agents/|docs/governance/|docs/evidence/|docs/status/|docs/superpowers/|docs/repomix-bundles/|[^/]+-library/|.*\.code-workspace$|.*\.zip$)'
 
 tracked_or_new="$(mktemp)"
 content_hits="$(mktemp)"

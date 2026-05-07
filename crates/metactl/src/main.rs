@@ -13,15 +13,16 @@ use metactl::project::{
     current_overlay_digest, default_project_config, detect_brownfield_repo, digest_path,
     ensure_gitignore_entries, ensure_project_layout, is_candidate_pack, list_user_profiles,
     load_compile_manifest, load_partial_project_config, load_policy_report, load_profile_partial,
-    load_project_context, load_user_settings, policy_report_path, preferred_apply_mode_for_target,
-    private_source_lock_path, profile_path, profiles_directory, project_config_path,
-    project_lock_path, resolve_profile_name_for_init, save_user_settings, strip_ansi_codes,
-    target_supports_takeover, update_managed_files_index, user_settings_path, write_lock,
-    write_partial_project_config, write_policy_report, write_private_source_lock, ConfigOverrides,
-    FleetSyncAdoptMode, HistoryEntry, LinkedProject, LinkedProjectStatus, LockedSource,
-    LockedTarget, OperationLock, PrivateSourceLock, ProfileActivationSource, ProjectConfigDefaults,
-    ProjectConfigFile, ProjectLock, SourceLockPublicity, SourceRecord, SourceType,
-    SourceVisibility,
+    load_project_context, load_user_settings, metactl_user_config_dir, policy_report_path,
+    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
+    project_config_path, project_lock_path, resolve_profile_name_for_init, save_user_settings,
+    strip_ansi_codes, target_supports_takeover, update_managed_files_index, user_settings_path,
+    write_lock, write_partial_project_config, write_policy_report, write_private_source_lock,
+    write_project_config, ConfigOverrides, FleetSyncAdoptMode, HistoryEntry, LinkedProject,
+    LinkedProjectStatus, LockedSource, LockedTarget, OperationLock, PrivateSourceLock,
+    ProfileActivationSource, ProjectConfigDefaults, ProjectConfigFile, ProjectLock,
+    SourceLockPublicity, SourceRecord, SourceType, SourceVisibility, UserFleetController,
+    UserFleetSettings,
 };
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
@@ -260,6 +261,42 @@ enum FleetCommand {
     Status(FleetStatusArgs),
     /// Preview by default or explicitly apply sync across linked projects
     Sync(FleetSyncArgs),
+    /// Manage the machine-local default Fleet controller pointer
+    Controller(FleetControllerArgs),
+}
+
+#[derive(Debug, Args)]
+struct FleetControllerArgs {
+    #[command(subcommand)]
+    command: FleetControllerCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum FleetControllerCommand {
+    /// Create and select a Fleet controller project
+    Init {
+        /// Controller id stored in user settings
+        name: String,
+        /// Path to create; defaults to ~/.config/metactl/fleet/<name>
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Replace an existing controller metactl.yaml and README.md
+        #[arg(long)]
+        force: bool,
+    },
+    /// Show the resolved Fleet controller
+    Show,
+    /// List configured Fleet controllers
+    List,
+    /// Set and select a machine-local Fleet controller pointer
+    Set {
+        /// Controller id stored in user settings
+        name: String,
+        /// Path to the controller project containing linked_projects
+        path: PathBuf,
+    },
+    /// Clear the selected machine-local default Fleet controller
+    ClearDefault,
 }
 
 #[derive(Debug, Args)]
@@ -796,7 +833,7 @@ fn main() -> ExitCode {
 
 fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
     let _operation_lock = if let Some(command) = mutating_operation_label(cli) {
-        let project_root = project_root(cli).map_err(internal_error)?;
+        let project_root = operation_lock_project_root(cli)?;
         let lock = OperationLock::acquire(&project_root, command).map_err(operation_lock_error)?;
         if let Ok(ms) = std::env::var("METACTL_TEST_HOLD_OPERATION_LOCK_MS") {
             if let Ok(ms) = ms.parse::<u64>() {
@@ -854,7 +891,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             TargetCommand::Remove(_) => Some("target remove"),
         },
         Commands::Fleet(args) => match &args.command {
-            FleetCommand::List | FleetCommand::Status(_) => None,
+            FleetCommand::List | FleetCommand::Status(_) | FleetCommand::Controller(_) => None,
             FleetCommand::Sync(args) => args.apply.then_some("fleet sync"),
         },
         Commands::Sync(_) => Some("sync"),
@@ -897,6 +934,18 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         | Commands::Profile(_)
         | Commands::Version => None,
     }
+}
+
+fn operation_lock_project_root(cli: &Cli) -> std::result::Result<PathBuf, CliError> {
+    if let Commands::Fleet(FleetArgs {
+        command: FleetCommand::Sync(args),
+    }) = &cli.command
+    {
+        if args.apply {
+            return resolve_fleet_controller(cli).map(|controller| controller.project_root);
+        }
+    }
+    project_root(cli).map_err(internal_error)
 }
 
 fn project_root(cli: &Cli) -> Result<PathBuf> {
@@ -2274,18 +2323,296 @@ fn cmd_fleet(cli: &Cli, args: &FleetArgs) -> std::result::Result<CommandOutput, 
         FleetCommand::List => cmd_fleet_list(cli),
         FleetCommand::Status(args) => cmd_fleet_status(cli, args),
         FleetCommand::Sync(args) => cmd_fleet_sync(cli, args),
+        FleetCommand::Controller(args) => cmd_fleet_controller(cli, args),
     }
 }
 
+fn cmd_fleet_controller(
+    cli: &Cli,
+    args: &FleetControllerArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        FleetControllerCommand::Init { name, path, force } => {
+            validate_fleet_controller_name(name)?;
+            let controller_path = resolve_fleet_controller_init_path(cli, name, path.as_deref())?;
+            fs::create_dir_all(&controller_path).map_err(|err| {
+                internal_error(anyhow!(
+                    "create Fleet controller {}: {}",
+                    controller_path.display(),
+                    err
+                ))
+            })?;
+            ensure_project_layout(&controller_path).map_err(internal_error)?;
+
+            let config_path = project_config_path(&controller_path, cli.config.as_deref());
+            if config_path.exists() && !force {
+                return Err(CliError::new(
+                    EXIT_STATE,
+                    format!(
+                        "Fleet controller config already exists: {}.\nHint: rerun with --force to replace it, or use `metactl fleet controller set {name} {}`.",
+                        config_path.display(),
+                        controller_path.display()
+                    ),
+                ));
+            }
+            let mut config = default_project_config();
+            config.linked_projects = Vec::new();
+            config
+                .metadata
+                .insert("fleet_controller".to_string(), "true".to_string());
+            write_project_config(&config_path, &config).map_err(internal_error)?;
+
+            let readme_path = controller_path.join("README.md");
+            if !readme_path.exists() || *force {
+                atomic_write(
+                    &readme_path,
+                    fleet_controller_readme(name, &controller_path).as_bytes(),
+                )
+                .map_err(internal_error)?;
+            }
+
+            let context = load_required_context_for_path(cli, &controller_path)?;
+            save_fleet_controller_pointer(name, &controller_path)?;
+            Ok(CommandOutput {
+                human: format!(
+                    "Fleet controller `{name}` initialized at {}.\nNext: edit {} and add linked_projects, then run `metactl fleet sync --preview`.\n",
+                    controller_path.display(),
+                    config_path.display()
+                ),
+                json: success_json(
+                    "fleet",
+                    cli.project.as_deref(),
+                    json!({
+                        "action": "controller-init",
+                        "controller": {
+                            "id": name,
+                            "path": controller_path.to_string_lossy(),
+                            "source": "user_default",
+                            "config_path": config_path.to_string_lossy(),
+                            "registry_digest": current_config_digest(&context).ok(),
+                        },
+                        "created_files": [
+                            config_path.to_string_lossy(),
+                            readme_path.to_string_lossy(),
+                        ],
+                    }),
+                ),
+            })
+        }
+        FleetControllerCommand::Show => {
+            let settings = load_user_settings();
+            let path = user_settings_path();
+            let controller = resolve_fleet_controller(cli).ok();
+            let human = if let Some(controller) = controller.as_ref() {
+                fleet_controller_human_header(controller).join("\n")
+            } else {
+                format!(
+                    "Fleet controller: (none)\nUser settings file: {}",
+                    path.as_ref()
+                        .map(|item| item.display().to_string())
+                        .unwrap_or_else(
+                            || "(unavailable — set HOME or XDG_CONFIG_HOME)".to_string()
+                        )
+                )
+            };
+            Ok(CommandOutput {
+                human: format!("{human}\n"),
+                json: success_json(
+                    "fleet",
+                    cli.project.as_deref(),
+                    json!({
+                        "action": "controller-show",
+                        "settings_path": path,
+                        "default_controller": settings.fleet.as_ref().and_then(|fleet| fleet.default_controller.as_deref()),
+                        "controller": controller.as_ref().map(fleet_controller_json),
+                    }),
+                ),
+            })
+        }
+        FleetControllerCommand::List => {
+            let settings = load_user_settings();
+            let path = user_settings_path();
+            let fleet = settings.fleet.unwrap_or_default();
+            let controllers = fleet
+                .controllers
+                .iter()
+                .map(|(name, controller)| {
+                    let resolved = resolve_user_path(&controller.path);
+                    json!({
+                        "name": name,
+                        "path": controller.path,
+                        "resolved_path": resolved.to_string_lossy(),
+                        "default": fleet.default_controller.as_deref() == Some(name.as_str()),
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut lines = vec!["Fleet controllers:".to_string()];
+            if controllers.is_empty() {
+                lines.push("  (none)".to_string());
+            }
+            for item in &controllers {
+                let marker = if item["default"].as_bool().unwrap_or(false) {
+                    " *"
+                } else {
+                    ""
+                };
+                lines.push(format!(
+                    "  {}{} — {}",
+                    item["name"].as_str().unwrap_or("?"),
+                    marker,
+                    item["resolved_path"].as_str().unwrap_or("?")
+                ));
+            }
+            Ok(CommandOutput {
+                human: format!("{}\n", lines.join("\n")),
+                json: success_json(
+                    "fleet",
+                    cli.project.as_deref(),
+                    json!({
+                        "action": "controller-list",
+                        "settings_path": path,
+                        "default_controller": fleet.default_controller,
+                        "controllers": controllers,
+                    }),
+                ),
+            })
+        }
+        FleetControllerCommand::Set { name, path } => {
+            validate_fleet_controller_name(name)?;
+            let mut resolved = resolve_user_path(&path.to_string_lossy());
+            if !resolved.is_absolute() {
+                let cwd = project_root(cli).map_err(internal_error)?;
+                resolved = cwd.join(resolved);
+            }
+            let context = load_required_context_for_path(cli, &resolved)?;
+            save_fleet_controller_pointer(name, &resolved)?;
+            Ok(CommandOutput {
+                human: format!("Fleet controller `{name}` set to {}.\n", resolved.display()),
+                json: success_json(
+                    "fleet",
+                    cli.project.as_deref(),
+                    json!({
+                        "action": "controller-set",
+                        "controller": {
+                            "id": name,
+                            "path": resolved.to_string_lossy(),
+                            "source": "user_default",
+                            "config_path": project_config_path(&resolved, cli.config.as_deref()).to_string_lossy(),
+                            "registry_digest": current_config_digest(&context).ok(),
+                        },
+                    }),
+                ),
+            })
+        }
+        FleetControllerCommand::ClearDefault => {
+            let mut settings = load_user_settings();
+            if let Some(fleet) = settings.fleet.as_mut() {
+                fleet.default_controller = None;
+            }
+            save_user_settings(&settings).map_err(internal_error)?;
+            Ok(CommandOutput {
+                human: "Cleared default Fleet controller.\n".to_string(),
+                json: success_json(
+                    "fleet",
+                    cli.project.as_deref(),
+                    json!({
+                        "action": "controller-clear-default",
+                        "default_controller": Value::Null,
+                    }),
+                ),
+            })
+        }
+    }
+}
+
+fn validate_fleet_controller_name(name: &str) -> std::result::Result<(), CliError> {
+    if !name.is_empty()
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Ok(());
+    }
+    Err(CliError::new(
+        EXIT_STATE,
+        format!(
+            "Invalid Fleet controller name `{name}`.\nHint: use only ASCII letters, numbers, '.', '_', and '-'."
+        ),
+    ))
+}
+
+fn resolve_fleet_controller_init_path(
+    cli: &Cli,
+    name: &str,
+    path: Option<&Path>,
+) -> std::result::Result<PathBuf, CliError> {
+    if let Some(path) = path {
+        let mut resolved = resolve_user_path(&path.to_string_lossy());
+        if !resolved.is_absolute() {
+            let cwd = project_root(cli).map_err(internal_error)?;
+            resolved = cwd.join(resolved);
+        }
+        return Ok(resolved);
+    }
+    let Some(config_dir) = metactl_user_config_dir() else {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "HOME (or XDG_CONFIG_HOME) is not set; cannot create a default Fleet controller path.",
+        ));
+    };
+    Ok(config_dir.join("fleet").join(name))
+}
+
+fn save_fleet_controller_pointer(name: &str, path: &Path) -> std::result::Result<(), CliError> {
+    let mut settings = load_user_settings();
+    let fleet = settings
+        .fleet
+        .get_or_insert_with(UserFleetSettings::default);
+    fleet.controllers.insert(
+        name.to_string(),
+        UserFleetController {
+            path: path.to_string_lossy().to_string(),
+        },
+    );
+    fleet.default_controller = Some(name.to_string());
+    save_user_settings(&settings).map_err(internal_error)
+}
+
+fn fleet_controller_readme(name: &str, path: &Path) -> String {
+    format!(
+        r#"# metactl Fleet Controller: {name}
+
+This directory is an explicit local Fleet controller.
+
+- `metactl.yaml` owns the `linked_projects` registry.
+- User-global config stores only a pointer to this directory.
+- `metactl fleet sync --preview` is the default safe review command.
+- `metactl --yes --no-input fleet sync --apply` applies across selected projects.
+
+Add projects manually:
+
+```yaml
+linked_projects:
+  - id: example
+    path: /path/to/repo
+```
+
+Controller path: {path}
+"#,
+        path = path.display()
+    )
+}
+
 fn cmd_fleet_list(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
-    let project_root = project_root(cli).map_err(internal_error)?;
-    let context = load_required_context(cli, &project_root)?;
-    let projects = fleet_projects_for_output(&project_root, &context.config_file);
+    let controller = resolve_fleet_controller(cli)?;
+    let projects =
+        fleet_projects_for_output(&controller.project_root, &controller.context.config_file);
     let project_json = projects
         .iter()
         .map(fleet_project_list_json)
         .collect::<Vec<_>>();
-    let mut lines = vec!["Fleet projects:".to_string()];
+    let mut lines = fleet_controller_human_header(&controller);
+    lines.push("Fleet projects:".to_string());
     if project_json.is_empty() {
         lines.push("  (none configured)".to_string());
     }
@@ -2298,12 +2625,13 @@ fn cmd_fleet_list(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         ));
     }
     Ok(CommandOutput {
-        human: project_human_output(&project_root, lines.join("\n")),
+        human: project_human_output(&controller.project_root, lines.join("\n")),
         json: success_json(
             "fleet",
-            Some(&project_root),
+            Some(&controller.project_root),
             json!({
                 "action": "list",
+                "controller": fleet_controller_json(&controller),
                 "projects": project_json,
             }),
         ),
@@ -2314,11 +2642,10 @@ fn cmd_fleet_status(
     cli: &Cli,
     args: &FleetStatusArgs,
 ) -> std::result::Result<CommandOutput, CliError> {
-    let project_root = project_root(cli).map_err(internal_error)?;
-    let context = load_required_context(cli, &project_root)?;
+    let controller = resolve_fleet_controller(cli)?;
     let projects = select_fleet_projects(
-        &project_root,
-        &context.config_file,
+        &controller.project_root,
+        &controller.context.config_file,
         &args.ids,
         args.include_disabled,
     )?;
@@ -2326,7 +2653,8 @@ fn cmd_fleet_status(
         .iter()
         .map(|project| fleet_project_status_json(project))
         .collect::<Vec<_>>();
-    let mut lines = vec!["Fleet status:".to_string()];
+    let mut lines = fleet_controller_human_header(&controller);
+    lines.push("Fleet status:".to_string());
     for status in &statuses {
         lines.push(format!(
             "  {:<18} {:<14} {}",
@@ -2336,12 +2664,13 @@ fn cmd_fleet_status(
         ));
     }
     Ok(CommandOutput {
-        human: project_human_output(&project_root, lines.join("\n")),
+        human: project_human_output(&controller.project_root, lines.join("\n")),
         json: success_json(
             "fleet",
-            Some(&project_root),
+            Some(&controller.project_root),
             json!({
                 "action": "status",
+                "controller": fleet_controller_json(&controller),
                 "projects": statuses,
             }),
         ),
@@ -2349,8 +2678,7 @@ fn cmd_fleet_status(
 }
 
 fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<CommandOutput, CliError> {
-    let project_root = project_root(cli).map_err(internal_error)?;
-    let context = load_required_context(cli, &project_root)?;
+    let controller = resolve_fleet_controller(cli)?;
     let apply = args.apply;
     if apply && !(cli.yes && cli.no_input) {
         return Err(CliError::new(
@@ -2359,8 +2687,8 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
         ));
     }
     let projects = select_fleet_projects(
-        &project_root,
-        &context.config_file,
+        &controller.project_root,
+        &controller.context.config_file,
         &args.ids,
         args.include_disabled,
     )?;
@@ -2414,14 +2742,15 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
         results.push(result);
     }
     if apply {
-        write_fleet_sync_log(&project_root, &results).map_err(internal_error)?;
+        write_fleet_sync_log(&controller.project_root, &results).map_err(internal_error)?;
     }
     let failed = results.iter().any(|item| item["status"] == "failed");
-    let mut lines = vec![if apply {
+    let mut lines = fleet_controller_human_header(&controller);
+    lines.push(if apply {
         "Fleet sync applied:".to_string()
     } else {
         "Fleet sync preview:".to_string()
-    }];
+    });
     for item in &results {
         lines.push(format!(
             "  {:<18} {:<14} {}",
@@ -2432,9 +2761,10 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
     }
     let mut json_payload = success_json(
         "fleet",
-        Some(&project_root),
+        Some(&controller.project_root),
         json!({
             "action": "sync",
+            "controller": fleet_controller_json(&controller),
             "preview": !apply,
             "projects": results,
         }),
@@ -2448,9 +2778,152 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
         return Err(err);
     }
     Ok(CommandOutput {
-        human: project_human_output(&project_root, lines.join("\n")),
+        human: project_human_output(&controller.project_root, lines.join("\n")),
         json: json_payload,
     })
+}
+
+#[derive(Debug)]
+struct FleetControllerContext {
+    id: Option<String>,
+    source: FleetControllerSource,
+    project_root: PathBuf,
+    context: metactl::project::ProjectContext,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum FleetControllerSource {
+    CommandLine,
+    Environment,
+    CurrentProject,
+    UserDefault,
+}
+
+fn resolve_fleet_controller(cli: &Cli) -> std::result::Result<FleetControllerContext, CliError> {
+    if cli.project.is_some() || cli.config.is_some() {
+        let project_root = project_root(cli).map_err(internal_error)?;
+        let context = load_required_context(cli, &project_root)?;
+        return Ok(FleetControllerContext {
+            id: None,
+            source: FleetControllerSource::CommandLine,
+            project_root,
+            context,
+        });
+    }
+
+    if let Ok(raw_path) = std::env::var("METACTL_FLEET_CONTROLLER") {
+        if !raw_path.trim().is_empty() {
+            let project_root = resolve_user_path(raw_path.trim());
+            let context = load_required_context_for_path(cli, &project_root)?;
+            return Ok(FleetControllerContext {
+                id: None,
+                source: FleetControllerSource::Environment,
+                project_root,
+                context,
+            });
+        }
+    }
+
+    let cwd = project_root(cli).map_err(internal_error)?;
+    let cwd_config = project_config_path(&cwd, cli.config.as_deref());
+    if cwd_config.exists() {
+        let context = load_required_context(cli, &cwd)?;
+        if !context.config_file.linked_projects.is_empty() {
+            return Ok(FleetControllerContext {
+                id: None,
+                source: FleetControllerSource::CurrentProject,
+                project_root: cwd,
+                context,
+            });
+        }
+    }
+
+    let settings = load_user_settings();
+    if let Some(fleet) = settings.fleet {
+        if let Some(default_controller) = fleet.default_controller {
+            if let Some(controller) = fleet.controllers.get(&default_controller) {
+                let project_root = resolve_user_path(&controller.path);
+                let context = load_required_context_for_path(cli, &project_root)?;
+                return Ok(FleetControllerContext {
+                    id: Some(default_controller),
+                    source: FleetControllerSource::UserDefault,
+                    project_root,
+                    context,
+                });
+            }
+            return Err(CliError::new(
+                EXIT_STATE,
+                format!(
+                    "Fleet default controller `{default_controller}` is not configured.\nHint: run `metactl fleet controller set {default_controller} /path/to/controller`."
+                ),
+            ));
+        }
+    }
+
+    Err(CliError::new(
+        EXIT_STATE,
+        "Fleet controller not found.\nHint: run from a project with linked_projects, pass `--project /path/to/controller`, set METACTL_FLEET_CONTROLLER, or run `metactl fleet controller set personal /path/to/controller`.",
+    ))
+}
+
+fn load_required_context_for_path(
+    cli: &Cli,
+    project_root: &Path,
+) -> std::result::Result<metactl::project::ProjectContext, CliError> {
+    load_project_context(
+        project_root,
+        cli.config.as_deref(),
+        cli.profile.as_deref(),
+        cli.overlay.as_deref(),
+    )
+    .map_err(state_error)
+}
+
+fn resolve_user_path(raw_path: &str) -> PathBuf {
+    if raw_path == "~" {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(raw_path))
+    } else if let Some(rest) = raw_path.strip_prefix("~/") {
+        std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join(rest))
+            .unwrap_or_else(|| PathBuf::from(raw_path))
+    } else {
+        PathBuf::from(raw_path)
+    }
+}
+
+fn fleet_controller_human_header(controller: &FleetControllerContext) -> Vec<String> {
+    vec![
+        format!(
+            "Fleet controller: {}",
+            controller.id.as_deref().unwrap_or("(explicit)")
+        ),
+        format!(
+            "Controller source: {}",
+            fleet_controller_source_label(controller.source)
+        ),
+        format!("Controller path: {}", controller.project_root.display()),
+    ]
+}
+
+fn fleet_controller_json(controller: &FleetControllerContext) -> Value {
+    json!({
+        "id": controller.id.as_deref(),
+        "source": fleet_controller_source_label(controller.source),
+        "path": controller.project_root.to_string_lossy(),
+        "config_path": project_config_path(&controller.project_root, None).to_string_lossy(),
+        "registry_digest": current_config_digest(&controller.context).ok(),
+    })
+}
+
+fn fleet_controller_source_label(source: FleetControllerSource) -> &'static str {
+    match source {
+        FleetControllerSource::CommandLine => "command_line",
+        FleetControllerSource::Environment => "environment",
+        FleetControllerSource::CurrentProject => "current_project",
+        FleetControllerSource::UserDefault => "user_default",
+    }
 }
 
 fn fleet_projects_for_output(

@@ -48,6 +48,7 @@ Validation:
 - Generates target-native files such as `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, and agent-specific skill folders.
 - Keeps generated state under `.metactl/` so output can be reviewed before it is applied.
 - Refuses silent takeover of unmanaged brownfield files.
+- Previews or applies explicit Fleet Sync across linked local projects from a reviewable controller repo.
 - Emits stable JSON for automation with `--json`.
 - Exposes the same reference kernel through `metactld` for local stdio JSON-RPC/MCP usage.
 
@@ -133,6 +134,18 @@ metactl apply --mode copy
 
 Success signal: `compile --json` returns a compile manifest with `generated_outputs`; `apply` lists every materialized file.
 
+## Fleet Sync
+
+Fleet Sync runs across a controller project that defines `linked_projects`. You can pass the controller explicitly, run from that controller, or store a machine-local pointer:
+
+```bash
+metactl fleet controller init personal --path /path/to/metactl-library/fleet/personal
+metactl fleet sync --preview
+metactl --yes --no-input fleet sync --apply
+```
+
+The global pointer is convenience only. The controller repo remains the canonical, reviewable registry. A private metactl library can hold the controller under `fleet/<name>/`; avoid putting it under `packs/`. See [Fleet Sync](docs/user/FLEET_SYNC.md).
+
 ## Supported Targets
 
 | Target | Generated surface | Status |
@@ -188,6 +201,7 @@ Expected success signal: JSON responses include `api_version: "metactl/v2alpha1"
 
 - [docs/user/GETTING_STARTED.md](docs/user/GETTING_STARTED.md) - first project setup and common commands.
 - [docs/user/WORKFLOWS.md](docs/user/WORKFLOWS.md) - preview, brownfield, and local MCP workflows.
+- [docs/user/FLEET_SYNC.md](docs/user/FLEET_SYNC.md) - local Fleet controller setup and sync behavior.
 - [docs/user/PACK_VISIBILITY.md](docs/user/PACK_VISIBILITY.md) - shared and local pack visibility rules.
 - [docs/architecture.md](docs/architecture.md) - reference-kernel model and core nouns.
 - [docs/comparisons.md](docs/comparisons.md) - how `metactl` differs from raw agent files, MCP alone, and editor-specific rules.

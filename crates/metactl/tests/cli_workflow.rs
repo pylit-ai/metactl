@@ -40,6 +40,18 @@ fn run_cli_env(project: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
     command.output().expect("run metactl with env")
 }
 
+fn run_cli_cwd(cwd: &Path, home: &Path, args: &[&str]) -> Output {
+    fs::create_dir_all(home).expect("create test home");
+    Command::new(cli_bin())
+        .env_remove("METACTL_PROFILE")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", home)
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .expect("run metactl in cwd")
+}
+
 fn stdout(output: &Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("utf8 stdout")
 }
@@ -1149,6 +1161,264 @@ fn fleet_sync_preview_does_not_mutate_linked_project() {
         .path()
         .join(".metactl/generated/codex-cli/AGENTS.md")
         .exists());
+}
+
+#[test]
+fn fleet_controller_default_allows_preview_outside_controller_project() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+    let controller = TempDir::new().expect("controller");
+    let ready = TempDir::new().expect("ready");
+    init_project(ready.path());
+    fs::write(
+        controller.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\nlinked_projects:\n- id: ready\n  path: {}\n",
+            ready.path().display()
+        ),
+    )
+    .expect("write controller config");
+
+    let set = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &[
+            "--json",
+            "fleet",
+            "controller",
+            "set",
+            "personal",
+            controller.path().to_str().expect("controller path"),
+        ],
+    );
+    assert!(set.status.success(), "{}", stderr(&set));
+    let set_json = json_output(&set);
+    assert_eq!(set_json["action"], "controller-set");
+
+    let preview = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "fleet", "sync", "--preview"],
+    );
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let json = json_output(&preview);
+    assert_json_contract(&json, "fleet", Some(controller.path()));
+    assert_eq!(json["controller"]["id"], "personal");
+    assert_eq!(json["controller"]["source"], "user_default");
+    assert_eq!(json["projects"][0]["id"], "ready");
+    assert_eq!(json["projects"][0]["status"], "planned");
+    assert!(!ready.path().join("AGENTS.md").exists());
+}
+
+#[test]
+fn fleet_controller_init_creates_default_xdg_controller_and_selects_it() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+
+    let init = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "fleet", "controller", "init", "personal"],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+    let json = json_output(&init);
+    let controller = home.path().join(".config/metactl/fleet/personal");
+    assert_eq!(json["action"], "controller-init");
+    assert_eq!(
+        json["controller"]["path"],
+        controller.to_string_lossy().to_string()
+    );
+    assert!(controller.join("metactl.yaml").exists());
+    assert!(controller.join("README.md").exists());
+
+    let list = run_cli_cwd(cwd.path(), home.path(), &["--json", "fleet", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let list_json = json_output(&list);
+    assert_json_contract(&list_json, "fleet", Some(&controller));
+    assert_eq!(list_json["controller"]["id"], "personal");
+    assert_eq!(list_json["controller"]["source"], "user_default");
+    assert!(list_json["projects"]
+        .as_array()
+        .expect("projects")
+        .is_empty());
+}
+
+#[test]
+fn fleet_controller_init_refuses_to_replace_existing_config_without_force() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+    let first = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "fleet", "controller", "init", "personal"],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+
+    let second = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "fleet", "controller", "init", "personal"],
+    );
+    assert_eq!(second.status.code(), Some(10), "{}", stdout(&second));
+    let json = json_output(&second);
+    assert_eq!(json["ok"], false);
+    assert!(json["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("already exists"));
+}
+
+#[test]
+fn fleet_controller_init_rejects_path_like_names() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+
+    let output = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "fleet", "controller", "init", "../escape"],
+    );
+    assert_eq!(output.status.code(), Some(10), "{}", stdout(&output));
+    let json = json_output(&output);
+    assert_eq!(json["ok"], false);
+    assert!(json["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Invalid Fleet controller name"));
+    assert!(!home
+        .path()
+        .join(".config/metactl/escape/metactl.yaml")
+        .exists());
+}
+
+#[test]
+fn fleet_controller_set_accepts_empty_initialized_controller() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+    let controller = TempDir::new().expect("controller");
+    init_project(controller.path());
+
+    let set = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &[
+            "--json",
+            "fleet",
+            "controller",
+            "set",
+            "personal",
+            controller.path().to_str().expect("controller path"),
+        ],
+    );
+    assert!(set.status.success(), "{}", stderr(&set));
+
+    let list = run_cli_cwd(cwd.path(), home.path(), &["--json", "fleet", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let json = json_output(&list);
+    assert_json_contract(&json, "fleet", Some(controller.path()));
+    assert!(json["projects"].as_array().expect("projects").is_empty());
+}
+
+#[test]
+fn fleet_current_project_without_linked_projects_falls_back_to_default_controller() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+    let controller = TempDir::new().expect("controller");
+    let ready = TempDir::new().expect("ready");
+    init_project(cwd.path());
+    init_project(ready.path());
+    fs::write(
+        controller.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\nlinked_projects:\n- id: ready\n  path: {}\n",
+            ready.path().display()
+        ),
+    )
+    .expect("write controller config");
+    let set = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &[
+            "--json",
+            "fleet",
+            "controller",
+            "set",
+            "personal",
+            controller.path().to_str().expect("controller path"),
+        ],
+    );
+    assert!(set.status.success(), "{}", stderr(&set));
+
+    let list = run_cli_cwd(cwd.path(), home.path(), &["--json", "fleet", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let json = json_output(&list);
+    assert_json_contract(&json, "fleet", Some(controller.path()));
+    assert_eq!(json["controller"]["source"], "user_default");
+    assert_eq!(json["projects"][0]["id"], "ready");
+}
+
+#[test]
+fn fleet_explicit_project_overrides_default_controller() {
+    let home = TempDir::new().expect("home");
+    let cwd = TempDir::new().expect("cwd");
+    let default_controller = TempDir::new().expect("default-controller");
+    let explicit_controller = TempDir::new().expect("explicit-controller");
+    let default_ready = TempDir::new().expect("default-ready");
+    let explicit_ready = TempDir::new().expect("explicit-ready");
+    init_project(default_ready.path());
+    init_project(explicit_ready.path());
+    fs::write(
+        default_controller.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\nlinked_projects:\n- id: default-ready\n  path: {}\n",
+            default_ready.path().display()
+        ),
+    )
+    .expect("write default controller config");
+    fs::write(
+        explicit_controller.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\nlinked_projects:\n- id: explicit-ready\n  path: {}\n",
+            explicit_ready.path().display()
+        ),
+    )
+    .expect("write explicit controller config");
+    let set = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &[
+            "--json",
+            "fleet",
+            "controller",
+            "set",
+            "personal",
+            default_controller
+                .path()
+                .to_str()
+                .expect("default controller path"),
+        ],
+    );
+    assert!(set.status.success(), "{}", stderr(&set));
+
+    let list = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &[
+            "--json",
+            "--project",
+            explicit_controller
+                .path()
+                .to_str()
+                .expect("explicit controller path"),
+            "fleet",
+            "list",
+        ],
+    );
+    assert!(list.status.success(), "{}", stderr(&list));
+    let json = json_output(&list);
+    assert_json_contract(&json, "fleet", Some(explicit_controller.path()));
+    assert_eq!(json["controller"]["source"], "command_line");
+    assert_eq!(json["projects"][0]["id"], "explicit-ready");
 }
 
 #[test]
