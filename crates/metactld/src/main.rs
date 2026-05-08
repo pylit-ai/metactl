@@ -8,6 +8,7 @@ use metactl::{JsonRpcService, McpService, ReferenceKernel};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
+#[command(author, version, about = "Local metactl JSON-RPC/MCP daemon")]
 struct Args {
     #[arg(long)]
     fixtures_dir: Option<PathBuf>,

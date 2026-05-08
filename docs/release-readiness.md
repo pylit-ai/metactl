@@ -41,6 +41,7 @@ make verify
 make verify-v1-release-gate
 cargo package -p metactl --allow-dirty --list
 cargo package -p metactld --allow-dirty --list
+cargo run -p metactld -- --version
 ```
 
 Release artifacts should be created through `.github/workflows/release.yml`, which produces SHA-256 checksums and GitHub provenance attestations.

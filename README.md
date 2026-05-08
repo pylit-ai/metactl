@@ -90,10 +90,8 @@ Check installed versions:
 
 ```bash
 metactl --version
-metactld --help
+metactld --version
 ```
-
-`metactld` currently exposes `--help`, not `--version`.
 
 For source builds:
 
