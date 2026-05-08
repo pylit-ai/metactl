@@ -14,7 +14,7 @@ cd -
 "$METACTL" demo destroy --yes
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Demo sandbox ready: /tmp/.../metactl-demo
@@ -37,7 +37,7 @@ target/debug/metactl --project "$PROJECT" init -t codex-cli --no-input
 target/debug/metactl --project "$PROJECT" compile --json
 ```
 
-The output is similar to the following:
+**Expected JSON shape:**
 
 ```json
 {
@@ -59,7 +59,7 @@ Review generated output paths before applying changes into a real repository.
 
 If a destination file already exists and is not managed by metactl, apply refuses silent takeover. Use preview output to decide whether to copy, patch, symlink, or skip.
 
-The refusal output is similar to the following:
+**Expected refusal output:**
 
 ```text
 Error: Apply refused for target codex-cli.
@@ -75,7 +75,7 @@ Error: Apply refused for target codex-cli.
 make metactl-mcp-smoke
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 ok negotiated protocol: 2025-06-18

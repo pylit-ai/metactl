@@ -34,6 +34,7 @@ COMMANDS = [
     [sys.executable, "scripts/verify_public_boundary.py"],
     [sys.executable, "scripts/verify_docs_links.py"],
     [sys.executable, "scripts/verify_docs_commands.py"],
+    [sys.executable, "scripts/verify_version_consistency.py"],
     [sys.executable, "scripts/verify_mcp_adversarial.py"],
     [
         sys.executable,

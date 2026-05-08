@@ -20,7 +20,7 @@ metactl validate
 metactl demo destroy --yes
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Demo sandbox ready: /tmp/.../metactl-demo
@@ -56,7 +56,7 @@ cargo install metactl --version 0.1.4 --locked
 metactl version
 ```
 
-The output is the following:
+**Expected output:**
 
 ```text
 metactl 0.1.4 (metactl/v2alpha1)
@@ -72,7 +72,7 @@ metactl validate
 metactl demo destroy --yes
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Demo sandbox ready: /tmp/.../metactl-demo
@@ -99,7 +99,7 @@ cargo install --path crates/metactl --locked
 metactl version
 ```
 
-The output is the following:
+**Expected output:**
 
 ```text
 metactl 0.1.4 (metactl/v2alpha1)
@@ -117,7 +117,7 @@ cargo install metactld --version 0.1.4 --locked
 metactld --version
 ```
 
-The output is the following:
+**Expected output:**
 
 ```text
 metactld 0.1.4
@@ -142,7 +142,7 @@ metactl validate
 
 Success signal: `status` reports `Execution readiness: ready`, `sync` compiles and applies configured targets, and `validate` reports each target as `[pass]`.
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Initialized /path/to/project.
@@ -164,7 +164,7 @@ metactl apply --mode copy
 metactl validate
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Project: /path/to/project
@@ -205,7 +205,7 @@ metactl compile
 metactl validate
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Initialized /path/to/project.
@@ -224,7 +224,7 @@ metactl apply --mode copy
 metactl validate
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Applied:
@@ -249,7 +249,7 @@ metactl demo reset --yes
 metactl demo destroy --yes
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Demo sandbox ready: /tmp/.../metactl-demo
@@ -302,7 +302,7 @@ scripts/check_public_boundary.sh
 
 Expected result: dogfood and contract checks pass, and the public boundary scanner reports no private-source leaks.
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 metactl dogfood smoke passed
@@ -334,7 +334,7 @@ metactl fleet sync --preview
 
 Expected result: `status` reports linked project readiness, and `sync --preview` shows planned project updates without applying them.
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet controller: team-agents
@@ -356,7 +356,7 @@ metactl project link /path/to/project
 metactl fleet status
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet controller `team-agents` initialized at /path/to/team-agents.
@@ -382,7 +382,7 @@ metactl --project "$PROJECT" status --json
 metactl --project "$PROJECT" validate --json
 ```
 
-The JSON response shape is similar to the following:
+**Expected JSON shape:**
 
 ```json
 {
@@ -458,7 +458,7 @@ make metactl-validate-contracts
 scripts/check_public_boundary.sh
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 test result: ok. ...
@@ -486,7 +486,7 @@ make smoke-stdio
 make verify
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 verify-docs-links: OK

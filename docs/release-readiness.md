@@ -37,6 +37,7 @@ bash scripts/check_public_boundary.sh
 cargo fmt --check
 cargo check -p metactl -p metactld
 cargo test -p metactl
+python3 scripts/verify_version_consistency.py
 make verify
 make verify-v1-release-gate
 cargo package -p metactl --allow-dirty --list

@@ -31,7 +31,7 @@ metactl fleet controller init personal --path /path/to/metactl-library/fleet/per
 metactl fleet controller show
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet controller `personal` initialized at /path/to/metactl-library/fleet/personal.
@@ -48,7 +48,7 @@ For a new single-machine setup, omit `--path` and metactl creates `~/.config/met
 metactl fleet controller init personal
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet controller `personal` initialized at ~/.config/metactl/fleet/personal.
@@ -61,7 +61,7 @@ Use `set` only when the controller project already exists:
 metactl fleet controller set personal /path/to/controller
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet controller `personal` set to /path/to/controller.
@@ -111,7 +111,7 @@ Preview is the default and does not write linked project files:
 metactl fleet sync --preview
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Project: /path/to/controller
@@ -129,7 +129,7 @@ Apply requires explicit automation gates:
 metactl --yes --no-input fleet sync --apply
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet sync apply:

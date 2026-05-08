@@ -22,7 +22,7 @@ Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 cargo install metactld --version 0.1.4 --locked
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Installed package `metactld v0.1.4` (executable `metactld`)
@@ -42,7 +42,7 @@ cargo install metactl --locked --force
 cargo install metactld --locked --force
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Installed package `metactl v0.1.4` (executable `metactl`)
@@ -56,7 +56,7 @@ metactl --version
 metactld --version
 ```
 
-The output is the following:
+**Expected output:**
 
 ```text
 metactl 0.1.4 (metactl/v2alpha1)
@@ -71,7 +71,7 @@ cd metactl
 cargo build -p metactl -p metactld
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
    Compiling metactl v0.1.4 (...)
@@ -91,7 +91,7 @@ metactl sync --adopt patch
 metactl validate
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Demo sandbox ready: /tmp/.../metactl-demo
@@ -111,7 +111,7 @@ When done, remove the sandbox and its generated files:
 metactl demo destroy --yes
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Removed demo sandbox: /tmp/.../metactl-demo
@@ -124,7 +124,7 @@ sentinel created by metactl.
 metactl --project /path/to/project init --target codex-cli
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Initialized /path/to/project.
@@ -156,7 +156,7 @@ metactl --project /path/to/project add python-refactor
 metactl --project /path/to/project sync
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Matches:
@@ -176,7 +176,7 @@ metactl --project /path/to/project doctor
 metactl --project /path/to/project validate
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Execution readiness: ready
@@ -202,7 +202,7 @@ metactl fleet controller init personal --path /path/to/metactl-library/fleet/per
 metactl fleet sync --preview
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Fleet controller `personal` initialized at /path/to/metactl-library/fleet/personal.

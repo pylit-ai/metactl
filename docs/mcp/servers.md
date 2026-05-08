@@ -35,7 +35,7 @@ Example from a repository being onboarded, using a separate metactl checkout:
 make -C /path/to/metactl metactl-mcp-install MCP_CLIENT=cursor MCP_PROJECT_ROOT="$PWD"
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Installed metactl MCP server for cursor.
@@ -49,7 +49,7 @@ The helper is idempotent for entries it owns. It refuses to overwrite an existin
 python3 scripts/install_metactl_mcp.py cursor --force
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Updated .cursor/mcp.json
@@ -83,7 +83,7 @@ Prefer the installer above for consistency. These native commands are useful whe
 claude mcp add --transport stdio --scope project metactl -- "$(command -v metactld)" --mcp --stdio --library-root "$PWD/library/starter"
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Added project-scoped MCP server `metactl`.
@@ -93,7 +93,7 @@ Added project-scoped MCP server `metactl`.
 gemini mcp add -s project metactl "$(command -v metactld)" -- --mcp --stdio --library-root "$PWD/library/starter"
 ```
 
-The output is similar to the following:
+**Expected output:**
 
 ```text
 Added MCP server `metactl`.
@@ -113,7 +113,7 @@ From another repository, run it through the metactl checkout:
 make -C /path/to/metactl metactl-mcp-smoke
 ```
 
-Expected output:
+**Expected output:**
 
 ```text
 ok negotiated protocol: 2025-06-18
@@ -127,7 +127,7 @@ If you run the server by hand, use an absolute library root:
 metactld --mcp --once <(printf '%s\n' '{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{}}') --library-root "/path/to/metactl/library/starter"
 ```
 
-The output is similar to the following:
+**Expected JSON shape:**
 
 ```json
 {
