@@ -31,16 +31,16 @@ metactl fleet controller init personal --path /path/to/metactl-library/fleet/per
 metactl fleet controller show
 ```
 
-**Expected output:**
-
-```text
-Fleet controller `personal` initialized at /path/to/metactl-library/fleet/personal.
-Next: edit /path/to/metactl-library/fleet/personal/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
-
-Fleet controller: personal
-Controller source: user_default
-Controller path: /path/to/metactl-library/fleet/personal
-```
+> **Expected output**
+>
+> ```text
+> Fleet controller `personal` initialized at /path/to/metactl-library/fleet/personal.
+> Next: edit /path/to/metactl-library/fleet/personal/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
+>
+> Fleet controller: personal
+> Controller source: user_default
+> Controller path: /path/to/metactl-library/fleet/personal
+> ```
 
 For a new single-machine setup, omit `--path` and metactl creates `~/.config/metactl/fleet/<name>`:
 
@@ -101,17 +101,17 @@ Preview is the default and does not write linked project files:
 metactl fleet sync --preview
 ```
 
-**Expected output:**
-
-```text
-Project: /path/to/controller
-Fleet controller: personal
-Controller source: user_default
-Controller path: /path/to/controller
-Fleet sync preview:
-  metactl  /path/to/repos/metactl  ready
-  app      /path/to/repos/app      ready
-```
+> **Expected output**
+>
+> ```text
+> Project: /path/to/controller
+> Fleet controller: personal
+> Controller source: user_default
+> Controller path: /path/to/controller
+> Fleet sync preview:
+>   metactl  /path/to/repos/metactl  ready
+>   app      /path/to/repos/app      ready
+> ```
 
 Apply requires explicit automation gates:
 

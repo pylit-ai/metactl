@@ -20,19 +20,19 @@ metactl validate
 metactl demo destroy --yes
 ```
 
-**Expected output:**
-
-```text
-Demo sandbox ready: /tmp/.../metactl-demo
-Seed: small brownfield Python repo with an existing AGENTS.md
-Preview sync completed; runtime files were not applied.
-Sync complete.
-  codex-cli [degraded] (patch, surface: full, 72 files)
-...
-Validation:
-  codex-cli [pass]
-Removed demo sandbox: /tmp/.../metactl-demo
-```
+> **Expected output**
+>
+> ```text
+> Demo sandbox ready: /tmp/.../metactl-demo
+> Seed: small brownfield Python repo with an existing AGENTS.md
+> Preview sync completed; runtime files were not applied.
+> Sync complete.
+>   codex-cli [degraded] (patch, surface: full, 72 files)
+> ...
+> Validation:
+>   codex-cli [pass]
+> Removed demo sandbox: /tmp/.../metactl-demo
+> ```
 
 ## Why It Exists
 
@@ -67,20 +67,20 @@ metactl validate
 metactl demo destroy --yes
 ```
 
-**Expected output:**
-
-```text
-Demo sandbox ready: /tmp/.../metactl-demo
-Seed: small brownfield Python repo with an existing AGENTS.md
-Preview sync completed; runtime files were not applied.
-Role:    builder
-Policy:  brownfield-safe-builder
-Targets: codex-cli
-
-Validation:
-  codex-cli [pass]
-Removed demo sandbox: /tmp/.../metactl-demo
-```
+> **Expected output**
+>
+> ```text
+> Demo sandbox ready: /tmp/.../metactl-demo
+> Seed: small brownfield Python repo with an existing AGENTS.md
+> Preview sync completed; runtime files were not applied.
+> Role:    builder
+> Policy:  brownfield-safe-builder
+> Targets: codex-cli
+>
+> Validation:
+>   codex-cli [pass]
+> Removed demo sandbox: /tmp/.../metactl-demo
+> ```
 
 No API keys or model-provider credentials are required for this path.
 
@@ -127,19 +127,19 @@ metactl validate
 
 Success signal: `status` reports `Execution readiness: ready`, `sync` compiles and applies configured targets, and `validate` reports each target as `[pass]`.
 
-**Expected output:**
-
-```text
-Initialized /path/to/project.
-...
-Resolved "python-refactor" -> pack python-refactor
-Sync complete.
-  codex-cli [ready] (symlink, surface: full, 4 files)
-...
-Execution readiness: ready
-Validation:
-  codex-cli [pass]
-```
+> **Expected output**
+>
+> ```text
+> Initialized /path/to/project.
+> ...
+> Resolved "python-refactor" -> pack python-refactor
+> Sync complete.
+>   codex-cli [ready] (symlink, surface: full, 4 files)
+> ...
+> Execution readiness: ready
+> Validation:
+>   codex-cli [pass]
+> ```
 
 Use a two-step review flow when you want to inspect generated files before they land in the working tree:
 
@@ -149,17 +149,17 @@ metactl apply --mode copy
 metactl validate
 ```
 
-**Expected output:**
-
-```text
-Project: /path/to/project
-Compiled:
-  codex-cli (4 outputs, surface: full)
-Applied:
-  codex-cli [ready]
-Validation:
-  codex-cli [pass]
-```
+> **Expected output**
+>
+> ```text
+> Project: /path/to/project
+> Compiled:
+>   codex-cli (4 outputs, surface: full)
+> Applied:
+>   codex-cli [ready]
+> Validation:
+>   codex-cli [pass]
+> ```
 
 <details>
 <summary>Common commands</summary>
@@ -190,17 +190,17 @@ metactl compile
 metactl validate
 ```
 
-**Expected output:**
-
-```text
-Initialized /path/to/project.
-Detected targets: codex-cli
-Compiled:
-  codex-cli (...)
-Validation:
-  codex-cli [warn]
-    warn No managed state found for target codex-cli.
-```
+> **Expected output**
+>
+> ```text
+> Initialized /path/to/project.
+> Detected targets: codex-cli
+> Compiled:
+>   codex-cli (...)
+> Validation:
+>   codex-cli [warn]
+>     warn No managed state found for target codex-cli.
+> ```
 
 Then apply only after reviewing `.metactl/generated/`:
 
@@ -209,14 +209,14 @@ metactl apply --mode copy
 metactl validate
 ```
 
-**Expected output:**
-
-```text
-Applied:
-  codex-cli [ready]
-Validation:
-  codex-cli [pass]
-```
+> **Expected output**
+>
+> ```text
+> Applied:
+>   codex-cli [ready]
+> Validation:
+>   codex-cli [pass]
+> ```
 
 `metactl` is intentionally conservative around unmanaged files. If a target file already exists and is not tracked by metactl, expect a reviewable conflict rather than silent overwrite.
 
@@ -234,16 +234,16 @@ metactl demo reset --yes
 metactl demo destroy --yes
 ```
 
-**Expected output:**
-
-```text
-Demo sandbox ready: /tmp/.../metactl-demo
-Seed: small brownfield Python repo with an existing AGENTS.md
-Target: codex-cli
-Preview sync completed; runtime files were not applied.
-Demo sandboxes under ...
-Removed demo sandbox: /tmp/.../metactl-demo
-```
+> **Expected output**
+>
+> ```text
+> Demo sandbox ready: /tmp/.../metactl-demo
+> Seed: small brownfield Python repo with an existing AGENTS.md
+> Target: codex-cli
+> Preview sync completed; runtime files were not applied.
+> Demo sandboxes under ...
+> Removed demo sandbox: /tmp/.../metactl-demo
+> ```
 
 `demo destroy` and `demo reset` verify a `.metactl-demo/manifest.json` sentinel before removing files.
 
@@ -287,15 +287,15 @@ scripts/check_public_boundary.sh
 
 Expected result: dogfood and contract checks pass, and the public boundary scanner reports no private-source leaks.
 
-**Expected output:**
-
-```text
-metactl dogfood smoke passed
-validated: fixtures/library/evals/activation-trace.sample.json
-...
-contracts: OK
-Public boundary OK
-```
+> **Expected output**
+>
+> ```text
+> metactl dogfood smoke passed
+> validated: fixtures/library/evals/activation-trace.sample.json
+> ...
+> contracts: OK
+> Public boundary OK
+> ```
 
 <details>
 <summary>What dogfooding covers</summary>
@@ -319,15 +319,15 @@ metactl fleet sync --preview
 
 Expected result: `status` reports linked project readiness, and `sync --preview` shows planned project updates without applying them.
 
-**Expected output:**
-
-```text
-Fleet controller: team-agents
-Controller source: user_default
-Controller path: /path/to/team-agents
-Fleet sync preview:
-  /path/to/project [ready]
-```
+> **Expected output**
+>
+> ```text
+> Fleet controller: team-agents
+> Controller source: user_default
+> Controller path: /path/to/team-agents
+> Fleet sync preview:
+>   /path/to/project [ready]
+> ```
 
 <details>
 <summary>Controller setup</summary>
@@ -341,15 +341,15 @@ metactl project link /path/to/project
 metactl fleet status
 ```
 
-**Expected output:**
-
-```text
-Fleet controller `team-agents` initialized at /path/to/team-agents.
-Next: edit /path/to/team-agents/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
-Fleet controller: team-agents
-Controller source: user_default
-Controller path: /path/to/team-agents
-```
+> **Expected output**
+>
+> ```text
+> Fleet controller `team-agents` initialized at /path/to/team-agents.
+> Next: edit /path/to/team-agents/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
+> Fleet controller: team-agents
+> Controller source: user_default
+> Controller path: /path/to/team-agents
+> ```
 
 See [docs/user/FLEET_SYNC.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/FLEET_SYNC.md) for controller layout, sync behavior, preview/apply semantics, and failure modes.
 
@@ -367,14 +367,14 @@ metactl --project "$PROJECT" status --json
 metactl --project "$PROJECT" validate --json
 ```
 
-**Expected JSON shape:**
-
-```json
-{
-  "api_version": "metactl/v2alpha1",
-  "ok": true
-}
-```
+> **Expected JSON shape**
+>
+> ```json
+> {
+>   "api_version": "metactl/v2alpha1",
+>   "ok": true
+> }
+> ```
 
 <details>
 <summary>Local MCP and JSON-RPC entrypoints</summary>
@@ -443,15 +443,15 @@ make metactl-validate-contracts
 scripts/check_public_boundary.sh
 ```
 
-**Expected output:**
-
-```text
-test result: ok. ...
-    Finished `dev` profile ...
-validated: fixtures/library/evals/activation-trace.sample.json
-...
-Public boundary OK
-```
+> **Expected output**
+>
+> ```text
+> test result: ok. ...
+>     Finished `dev` profile ...
+> validated: fixtures/library/evals/activation-trace.sample.json
+> ...
+> Public boundary OK
+> ```
 
 Boundary rules:
 
@@ -471,15 +471,15 @@ make smoke-stdio
 make verify
 ```
 
-**Expected output:**
-
-```text
-verify-docs-links: OK
-verify-docs-commands: OK
-metactl CLI smoke passed
-metactl stdio smoke passed
-metactl dogfood smoke passed
-```
+> **Expected output**
+>
+> ```text
+> verify-docs-links: OK
+> verify-docs-commands: OK
+> metactl CLI smoke passed
+> metactl stdio smoke passed
+> metactl dogfood smoke passed
+> ```
 
 Use the smallest focused gate for a local edit, then broaden to `make verify` before release-sensitive changes.
 

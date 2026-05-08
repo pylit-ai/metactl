@@ -102,17 +102,17 @@ If you run the server by hand, use an absolute library root:
 metactld --mcp --once <(printf '%s\n' '{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{}}') --library-root "/path/to/metactl/library/starter"
 ```
 
-**Expected JSON shape:**
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": "tools",
-  "result": {
-    "tools": [ ... ]
-  }
-}
-```
+> **Expected JSON shape**
+>
+> ```json
+> {
+>   "jsonrpc": "2.0",
+>   "id": "tools",
+>   "result": {
+>     "tools": [ ... ]
+>   }
+> }
+> ```
 
 Client-specific checks:
 
