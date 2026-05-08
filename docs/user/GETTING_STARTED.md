@@ -2,16 +2,44 @@
 
 This guide covers the public local `metactl` CLI.
 
-## Build
+## Install
+
+Install the CLI from crates.io:
 
 ```bash
+cargo install metactl --version 0.1.1 --locked
+```
+
+Expected success signal:
+
+```text
+Installed package `metactl v0.1.1` (executable `metactl`)
+```
+
+Install `metactld` only if you need the local JSON-RPC/MCP daemon:
+
+```bash
+cargo install metactld --version 0.1.1 --locked
+```
+
+Expected success signal:
+
+```text
+Installed package `metactld v0.1.1` (executable `metactld`)
+```
+
+For source development:
+
+```bash
+git clone https://github.com/pylit-ai/metactl.git
+cd metactl
 cargo build -p metactl -p metactld
 ```
 
 ## Initialize A Project
 
 ```bash
-cargo run -p metactl -- --project /path/to/project init --target codex-cli
+metactl --project /path/to/project init --target codex-cli
 ```
 
 Common target aliases:
@@ -27,9 +55,9 @@ Common target aliases:
 ## Find And Add Packs
 
 ```bash
-cargo run -p metactl -- --project /path/to/project search python
-cargo run -p metactl -- --project /path/to/project add python-refactor
-cargo run -p metactl -- --project /path/to/project sync
+metactl --project /path/to/project search python
+metactl --project /path/to/project add python-refactor
+metactl --project /path/to/project sync
 ```
 
 Use `--json` for automation. Treat JSON output as forward-compatible: rely on documented top-level fields and ignore unknown additions.
@@ -37,9 +65,9 @@ Use `--json` for automation. Treat JSON output as forward-compatible: rely on do
 ## Validate
 
 ```bash
-cargo run -p metactl -- --project /path/to/project status
-cargo run -p metactl -- --project /path/to/project doctor
-cargo run -p metactl -- --project /path/to/project validate
+metactl --project /path/to/project status
+metactl --project /path/to/project doctor
+metactl --project /path/to/project validate
 ```
 
 ## Local-Only Packs
@@ -53,8 +81,8 @@ See `PACK_VISIBILITY.md` for how public and local-only surfaces are separated.
 Use Fleet Sync when one controller repo should preview or apply metactl output across several linked local projects:
 
 ```bash
-cargo run -p metactl -- fleet controller init personal --path /path/to/metactl-library/fleet/personal
-cargo run -p metactl -- fleet sync --preview
+metactl fleet controller init personal --path /path/to/metactl-library/fleet/personal
+metactl fleet sync --preview
 ```
 
 The controller project owns `linked_projects`; the global setting only remembers which controller to use by default. For single-machine setup, omit `--path` and metactl creates `~/.config/metactl/fleet/<name>`. For private metactl libraries, `fleet/<name>/metactl.yaml` is a better home than a loose project under a source checkout parent. See `FLEET_SYNC.md`.

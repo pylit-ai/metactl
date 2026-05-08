@@ -54,7 +54,31 @@ Validation:
 - Emits stable JSON for automation with `--json`.
 - Exposes the same reference kernel through `metactld` for local stdio JSON-RPC/MCP usage.
 
-## Install From Source
+## Install
+
+```bash
+cargo install metactl --version 0.1.1 --locked
+```
+
+Expected success signal:
+
+```text
+Installed package `metactl v0.1.1` (executable `metactl`)
+```
+
+For local MCP or JSON-RPC integration, install the daemon too:
+
+```bash
+cargo install metactld --version 0.1.1 --locked
+```
+
+Expected success signal:
+
+```text
+Installed package `metactld v0.1.1` (executable `metactld`)
+```
+
+For source builds:
 
 ```bash
 git clone https://github.com/pylit-ai/metactl.git
@@ -65,7 +89,7 @@ cargo install --path crates/metactl --locked
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.0 (...)` (executable `metactl`)
+Installed package `metactl v0.1.1 (...)` (executable `metactl`)
 ```
 
 For local development without installing:
