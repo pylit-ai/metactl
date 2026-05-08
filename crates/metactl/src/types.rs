@@ -15,6 +15,7 @@ pub enum RefKind {
     Rule,
     Output,
     Overlay,
+    KnowledgeSource,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -165,6 +166,7 @@ pub enum ResourceKind {
     Schema,
     Test,
     Subagent,
+    KnowledgeSource,
 }
 
 impl ResourceKind {
@@ -185,6 +187,7 @@ impl ResourceKind {
             ResourceKind::Schema => "schemas",
             ResourceKind::Test => "tests",
             ResourceKind::Subagent => "subagents",
+            ResourceKind::KnowledgeSource => "knowledge_sources",
         }
     }
 }
@@ -407,6 +410,160 @@ pub struct PackImport {
     pub digest: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeSourceKind {
+    FilesystemMarkdown,
+    LlmsTxtIndex,
+    McpResource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeFreshnessPolicy {
+    Ignore,
+    Warn,
+    Fail,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum KnowledgeReviewStatus {
+    Draft,
+    Active,
+    Stale,
+    Superseded,
+    Retired,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeByteBudget {
+    pub max_search_bytes: u64,
+    pub max_read_bytes: u64,
+    pub max_search_results: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeFreshness {
+    pub owner: String,
+    pub last_verified: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_after_days: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_digests: Vec<String>,
+    pub freshness_policy: KnowledgeFreshnessPolicy,
+    pub review_status: KnowledgeReviewStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supersedes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub superseded_by: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BoundedKnowledgeOperation {
+    pub enabled: bool,
+    pub max_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_results: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposeUpdateMode {
+    Disabled,
+    DraftOnly,
+    PullRequestOnly,
+    RequestOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProposeUpdateOperation {
+    pub enabled: bool,
+    pub mode: ProposeUpdateMode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeSourceOperations {
+    pub search: BoundedKnowledgeOperation,
+    pub read: BoundedKnowledgeOperation,
+    pub freshness: BoundedKnowledgeOperation,
+    pub propose_update: ProposeUpdateOperation,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct KnowledgeSourceAdapter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include_globs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_uri: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_index_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_uri_prefixes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub static_fallback_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeSourceManifest {
+    pub kind: String,
+    pub id: String,
+    pub version: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub source_kind: KnowledgeSourceKind,
+    pub uri_scheme: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_targets: Vec<String>,
+    pub byte_budget: KnowledgeByteBudget,
+    pub trust_tier: TrustTier,
+    pub freshness: KnowledgeFreshness,
+    pub operations: KnowledgeSourceOperations,
+    pub adapter: KnowledgeSourceAdapter,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl KnowledgeSourceManifest {
+    pub fn knowledge_source_ref(&self) -> Ref {
+        Ref {
+            kind: RefKind::KnowledgeSource,
+            id: self.id.clone(),
+            version: Some(self.version.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeRef {
+    pub source_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uris: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_targets: Vec<String>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_budget: Option<KnowledgeRefByteBudget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct KnowledgeRefByteBudget {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_read_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_search_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PackManifest {
     pub kind: String,
@@ -426,6 +583,8 @@ pub struct PackManifest {
     pub compatible_roles: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compatible_targets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub knowledge_refs: Vec<KnowledgeRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resources: Vec<PackResource>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -593,6 +752,8 @@ pub struct TargetCapabilityMatrix {
     pub runtime_template: Option<RuntimeTemplateRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_projection: Option<TargetLocalProjection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apply_modes: Vec<ApplyMode>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
 }

@@ -1,0 +1,65 @@
+{
+  "kind": "knowledge_source",
+  "id": "release-readiness-docs",
+  "version": "1.0.0",
+  "title": "Release Readiness Docs",
+  "description": "Bounded local Markdown references used by the release-guard starter pack.",
+  "source_kind": "filesystem_markdown",
+  "uri_scheme": "file",
+  "allowed_targets": [
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "byte_budget": {
+    "max_search_bytes": 32768,
+    "max_read_bytes": 32768,
+    "max_search_results": 20
+  },
+  "trust_tier": "first_party_validated",
+  "freshness": {
+    "owner": "metactl maintainers",
+    "last_verified": "2026-05-07T00:00:00Z",
+    "expires_after_days": 180,
+    "source_digests": [
+      "sha256:fcd44cb3af21a82a27df00a6677a259e099b39b66d4705b214dcf1f8e6659db9",
+      "sha256:1bf0b6280fe0d9b29365baf33a55e1e089a6deb6f0cc689416b0e2b751218ba5"
+    ],
+    "freshness_policy": "warn",
+    "review_status": "active"
+  },
+  "operations": {
+    "search": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 20
+    },
+    "read": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 1
+    },
+    "freshness": {
+      "enabled": true,
+      "max_bytes": 4096,
+      "max_results": 1
+    },
+    "propose_update": {
+      "enabled": false,
+      "mode": "request_only"
+    }
+  },
+  "adapter": {
+    "base_path": "packs/release-guard/references",
+    "include_globs": [
+      "*.md"
+    ],
+    "allowed_uri_prefixes": [
+      "file:packs/release-guard/references/"
+    ]
+  },
+  "metadata": {
+    "pack_id": "release-guard"
+  }
+}

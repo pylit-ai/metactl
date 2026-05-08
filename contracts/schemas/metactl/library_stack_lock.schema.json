@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/library_stack_lock.schema.json",
+  "title": "metactl Library Stack Lock",
+  "type": "object",
+  "properties": {
+    "api_version": {
+      "const": "metactl/v2alpha1"
+    },
+    "kind": {
+      "const": "library_stack_lock"
+    },
+    "stack_ref": {
+      "$ref": "common.schema.json#/$defs/ref"
+    },
+    "profile_ref": {
+      "$ref": "common.schema.json#/$defs/ref"
+    },
+    "resolved_artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact_ref": {
+            "$ref": "common.schema.json#/$defs/ref"
+          },
+          "source_id": {
+            "$ref": "common.schema.json#/$defs/slug"
+          },
+          "source_role": {
+            "type": "string",
+            "enum": [
+              "baseline",
+              "overlay"
+            ]
+          },
+          "source_digest": {
+            "$ref": "common.schema.json#/$defs/digest"
+          },
+          "artifact_digest": {
+            "$ref": "common.schema.json#/$defs/digest"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "override_status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "overrode_baseline",
+              "baseline_precedence"
+            ]
+          },
+          "generated_paths": {
+            "type": "array",
+            "items": {
+              "$ref": "common.schema.json#/$defs/path"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "artifact_ref",
+          "source_id",
+          "source_role",
+          "source_digest",
+          "artifact_digest",
+          "locked",
+          "override_status"
+        ],
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    }
+  },
+  "required": [
+    "api_version",
+    "kind",
+    "stack_ref",
+    "profile_ref",
+    "resolved_artifacts"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/hook_wiring.schema.json",
+  "title": "metactl Hook Wiring",
+  "type": "object",
+  "properties": {
+    "event": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "matcher": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "command_ref": { "$ref": "common.schema.json#/$defs/path" },
+    "compatible_targets": { "$ref": "common.schema.json#/$defs/string_list" }
+  },
+  "required": ["event", "matcher", "command_ref", "compatible_targets"],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

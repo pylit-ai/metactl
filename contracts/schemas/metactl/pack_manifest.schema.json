@@ -44,6 +44,61 @@
     "compatible_targets": {
       "$ref": "common.schema.json#/$defs/string_list"
     },
+    "knowledge_refs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source_id": {
+            "$ref": "common.schema.json#/$defs/slug"
+          },
+          "uris": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "allowed_targets": {
+            "$ref": "common.schema.json#/$defs/string_list"
+          },
+          "required": {
+            "type": "boolean",
+            "default": false
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "byte_budget": {
+            "type": "object",
+            "properties": {
+              "max_read_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1048576
+              },
+              "max_search_bytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1048576
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "source_id",
+          "uris"
+        ],
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      }
+    },
     "resources": {
       "type": "array",
       "items": {
@@ -66,7 +121,8 @@
               "asset",
               "schema",
               "test",
-              "subagent"
+              "subagent",
+              "knowledge_source"
             ]
           },
           "required": {

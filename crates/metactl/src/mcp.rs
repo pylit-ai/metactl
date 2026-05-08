@@ -7,6 +7,8 @@ use crate::types::{CompileParams, ExplainParams, SearchParams, ValidateParams};
 
 const LATEST_MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 const SUPPORTED_MCP_PROTOCOL_VERSIONS: &[&str] = &[LATEST_MCP_PROTOCOL_VERSION, "2025-06-18"];
+const MAX_REQUEST_BYTES: usize = 64 * 1024;
+const MAX_TOOL_TEXT_BYTES: usize = 32 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct McpRequestEnvelope {
@@ -41,6 +43,14 @@ impl<K: MetactlKernel> McpService<K> {
     }
 
     pub fn dispatch_bytes(&self, raw: &[u8]) -> Result<Option<Vec<u8>>> {
+        if raw.len() > MAX_REQUEST_BYTES {
+            return Ok(Some(serde_json::to_vec(&error_response(
+                Value::Null,
+                -32600,
+                "invalid request",
+                Some(json!("request too large")),
+            ))?));
+        }
         let request = match serde_json::from_slice::<McpRequestEnvelope>(raw) {
             Ok(request) => request,
             Err(err) => {
@@ -86,8 +96,11 @@ impl<K: MetactlKernel> McpService<K> {
         Ok(Some(match handled {
             Ok(result) => success_response(id, result),
             Err(err) => {
-                let detail = err.to_string();
-                if detail.contains("decode") {
+                let detail = redact_secrets(&err.to_string());
+                if detail.contains("decode")
+                    || detail.contains("path traversal")
+                    || detail.contains("invalid URI")
+                {
                     error_response(id, -32602, "invalid params", Some(Value::String(detail)))
                 } else {
                     error_response(id, -32601, "method not found", Some(Value::String(detail)))
@@ -98,6 +111,7 @@ impl<K: MetactlKernel> McpService<K> {
 
     fn call_tool(&self, params: Value) -> Result<Value> {
         let params: CallToolParams = serde_json::from_value(params).context("decode tool call")?;
+        reject_unsafe_argument_strings(&params.arguments)?;
         match params.name.as_str() {
             "metactl_search_packs" => {
                 let args: SearchParams =
@@ -133,6 +147,49 @@ impl<K: MetactlKernel> McpService<K> {
             other => Err(anyhow!("unknown tool {other}")),
         }
     }
+}
+
+fn reject_unsafe_argument_strings(value: &Value) -> Result<()> {
+    match value {
+        Value::String(text) => {
+            let normalized = text.replace('\\', "/");
+            if normalized.contains("../") || normalized.starts_with("../") {
+                return Err(anyhow!("path traversal is not allowed in MCP arguments"));
+            }
+            if normalized.starts_with("file:") {
+                return Err(anyhow!("invalid URI is not allowed in MCP arguments"));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                reject_unsafe_argument_strings(item)?;
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values() {
+                reject_unsafe_argument_strings(item)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn redact_secrets(input: &str) -> String {
+    let mut output = input.to_string();
+    for prefix in ["sk_", "ghp_", "pat_", "xoxb-"] {
+        while let Some(start) = output.find(prefix) {
+            let end = output[start..]
+                .char_indices()
+                .find_map(|(idx, ch)| {
+                    (!matches!(ch, 'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '-' | '='))
+                        .then_some(start + idx)
+                })
+                .unwrap_or(output.len());
+            output.replace_range(start..end, "[REDACTED]");
+        }
+    }
+    output
 }
 
 fn response_or_none(id: Option<Value>, mut response: Value) -> Option<Value> {
@@ -255,7 +312,11 @@ fn search_input_schema() -> Value {
 }
 
 fn tool_success(value: Value) -> Value {
-    let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+    let mut text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+    if text.len() > MAX_TOOL_TEXT_BYTES {
+        text.truncate(MAX_TOOL_TEXT_BYTES);
+        text.push_str("\n[truncated]");
+    }
     json!({
         "content": [
             {

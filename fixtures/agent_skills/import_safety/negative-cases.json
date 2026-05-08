@@ -1,0 +1,29 @@
+{
+  "kind": "agent_skill_import_safety_fixture_set",
+  "cases": [
+    {
+      "id": "hidden-secret",
+      "rejects": "hidden secret file markers such as .env.secret or token material"
+    },
+    {
+      "id": "symlink-escape",
+      "rejects": "symlink escape and path traversal outside the skill folder"
+    },
+    {
+      "id": "path-traversal",
+      "rejects": "path traversal attempts in bundled resource paths"
+    },
+    {
+      "id": "oversized-bundle",
+      "rejects": "oversized Agent Skill bundled files above the import budget"
+    },
+    {
+      "id": "malformed-frontmatter",
+      "rejects": "malformed frontmatter missing name or description"
+    },
+    {
+      "id": "executable-script",
+      "rejects": "executable script without explicit allow policy"
+    }
+  ]
+}

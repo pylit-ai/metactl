@@ -1,0 +1,43 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "filesystem-agent",
+  "version": "2026.05.07",
+  "title": "Generic Filesystem Agent",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": false,
+    "deterministic_hooks": false,
+    "subagents": false,
+    "mcp_servers": false,
+    "tool_allowlists": false,
+    "approval_policies": false,
+    "readonly_hints": true,
+    "local_scripts": false,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "compile_targets": [
+    {
+      "output_kind": "agents_md",
+      "path_template": "AGENTS.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".metactl/filesystem-agent/{pack_id}/{resource_name}",
+      "resource_kinds": ["instruction", "example", "rule"]
+    }
+  ],
+  "local_projection": {
+    "support": "degraded",
+    "local_surface": ".metactl/filesystem-agent.local.md",
+    "notes": "Generic filesystem agents read projected files directly; local overlay behavior is tool-specific."
+  },
+  "metadata": {
+    "starter_status": "preview",
+    "standards_ref": "docs/agent-surfaces.md#filesystem-agent",
+    "approval_surface": "none declared by the generic filesystem-agent target",
+    "filesystem_surface": "AGENTS.md plus .metactl/filesystem-agent resources",
+    "advisory_surface": "AGENTS.md advisory guidance"
+  }
+}

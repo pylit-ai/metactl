@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/sanitized_export.schema.json",
+  "title": "metactl Sanitized Export Record",
+  "type": "object",
+  "properties": {
+    "api_version": {
+      "const": "metactl/v2alpha1"
+    },
+    "kind": {
+      "const": "sanitized_export"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "source_artifact": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sanitizer_transform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dropped_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "reviewer_diff_path": {
+      "$ref": "common.schema.json#/$defs/path"
+    },
+    "original_digest": {
+      "$ref": "common.schema.json#/$defs/digest"
+    },
+    "sanitized_digest": {
+      "$ref": "common.schema.json#/$defs/digest"
+    },
+    "exported_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "applied_sanitizers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "public_boundary_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail"
+      ]
+    },
+    "review_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "reviewed",
+        "rejected"
+      ]
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
+  },
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "source_artifact",
+    "sanitizer_transform",
+    "dropped_fields",
+    "reviewer_diff_path",
+    "original_digest",
+    "sanitized_digest",
+    "exported_at",
+    "applied_sanitizers",
+    "public_boundary_status",
+    "review_status"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

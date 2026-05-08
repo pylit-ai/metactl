@@ -34,7 +34,7 @@ CASES = [
         "role": "release-manager",
         "policy": "release-policy",
         "target": "codex-cli",
-        "expected_shortlist": ["unit-test-loop", "release-guard"],
+        "expected_shortlist": ["unit-test-loop", "release-guard", "release-manager"],
     },
 ]
 

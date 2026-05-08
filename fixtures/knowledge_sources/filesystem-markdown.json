@@ -1,0 +1,57 @@
+{
+  "kind": "knowledge_source",
+  "id": "fixture-filesystem-markdown",
+  "version": "1.0.0",
+  "title": "Fixture Filesystem Markdown",
+  "source_kind": "filesystem_markdown",
+  "uri_scheme": "file",
+  "allowed_targets": [
+    "filesystem-agent"
+  ],
+  "byte_budget": {
+    "max_search_bytes": 32768,
+    "max_read_bytes": 32768,
+    "max_search_results": 20
+  },
+  "trust_tier": "first_party_validated",
+  "freshness": {
+    "owner": "fixtures",
+    "last_verified": "2026-05-07T00:00:00Z",
+    "expires_after_days": 30,
+    "source_digests": [
+      "sha256:2ccc95b153c7d75db44e03f493d3fc8d7f8a0c00fbd3bc3cfb52a0287449936b"
+    ],
+    "freshness_policy": "fail",
+    "review_status": "active"
+  },
+  "operations": {
+    "search": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 20
+    },
+    "read": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 1
+    },
+    "freshness": {
+      "enabled": true,
+      "max_bytes": 4096,
+      "max_results": 1
+    },
+    "propose_update": {
+      "enabled": false,
+      "mode": "request_only"
+    }
+  },
+  "adapter": {
+    "base_path": "content/filesystem",
+    "include_globs": [
+      "*.md"
+    ],
+    "allowed_uri_prefixes": [
+      "file:content/filesystem/"
+    ]
+  }
+}

@@ -52,5 +52,26 @@
   ],
   "metadata": {
     "pack_status": "starter-promoted"
-  }
+  },
+  "knowledge_refs": [
+    {
+      "source_id": "release-readiness-docs",
+      "uris": [
+        "file:packs/release-guard/references/checklist.md",
+        "file:packs/release-guard/references/rust-crate-release.md"
+      ],
+      "allowed_targets": [
+        "codex-cli",
+        "cursor",
+        "gemini-cli",
+        "openclaw"
+      ],
+      "required": false,
+      "purpose": "Bounded release checklist and Rust crate release reference material.",
+      "byte_budget": {
+        "max_read_bytes": 32768,
+        "max_search_bytes": 32768
+      }
+    }
+  ]
 }

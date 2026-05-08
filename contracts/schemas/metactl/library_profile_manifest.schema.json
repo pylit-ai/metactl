@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/library_profile_manifest.schema.json",
+  "title": "metactl Library Profile Manifest",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "library_profile"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version_string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "baseline_refs": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/slug"
+      },
+      "uniqueItems": true
+    },
+    "overlay_ref": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "baseline_precedence": {
+      "type": "string",
+      "enum": [
+        "explicit",
+        "fail_on_conflict"
+      ]
+    },
+    "default_targets": {
+      "$ref": "common.schema.json#/$defs/string_list"
+    },
+    "committed_projection": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "tracked_paths": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
+  },
+  "required": [
+    "kind",
+    "id",
+    "version",
+    "title",
+    "baseline_refs",
+    "overlay_ref",
+    "baseline_precedence"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

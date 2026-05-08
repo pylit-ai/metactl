@@ -1,0 +1,32 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack_lock",
+  "stack_ref": {
+    "kind": "artifact",
+    "id": "fixture-allowed-override",
+    "version": "1.0.0"
+  },
+  "profile_ref": {
+    "kind": "artifact",
+    "id": "default",
+    "version": "1.0.0"
+  },
+  "resolved_artifacts": [
+    {
+      "artifact_ref": {
+        "kind": "pack",
+        "id": "python-refactor",
+        "version": "1.0.1"
+      },
+      "source_id": "user-overlay",
+      "source_role": "overlay",
+      "source_digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d",
+      "artifact_digest": "sha256:a60528bd35f8e330f1ce40190c02fa7c0f74457eef754594f4c5b51ba00faf4a",
+      "locked": false,
+      "override_status": "overrode_baseline",
+      "generated_paths": []
+    }
+  ],
+  "conflicts": [],
+  "warnings": []
+}

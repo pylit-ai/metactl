@@ -1,0 +1,3 @@
+# llms.txt fixture
+
+- https://example.invalid/docs

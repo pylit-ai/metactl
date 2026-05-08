@@ -1,0 +1,32 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack_lock",
+  "stack_ref": {
+    "kind": "artifact",
+    "id": "fixture-user-only",
+    "version": "1.0.0"
+  },
+  "profile_ref": {
+    "kind": "artifact",
+    "id": "default",
+    "version": "1.0.0"
+  },
+  "resolved_artifacts": [
+    {
+      "artifact_ref": {
+        "kind": "pack",
+        "id": "user-pack",
+        "version": "1.0.0"
+      },
+      "source_id": "user-overlay",
+      "source_role": "overlay",
+      "source_digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d",
+      "artifact_digest": "sha256:c1001d372471d3640982ea8ca930a9aa24c4299c3e9107ea49b3ddf4ef7ce432",
+      "locked": false,
+      "override_status": "none",
+      "generated_paths": []
+    }
+  ],
+  "conflicts": [],
+  "warnings": []
+}

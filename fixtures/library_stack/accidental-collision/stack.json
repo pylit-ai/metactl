@@ -1,0 +1,82 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack",
+  "id": "fixture-accidental-collision",
+  "version": "1.0.0",
+  "title": "Fixture accidental-collision",
+  "active_profile_ref": "default",
+  "sources": [
+    {
+      "kind": "library_source",
+      "id": "org-baseline",
+      "version": "1.0.0",
+      "title": "org-baseline",
+      "source_role": "baseline",
+      "read_only": true,
+      "writable": false,
+      "pinned": true,
+      "visibility_scope": "shared",
+      "trust_tier": "org_validated",
+      "source": {
+        "type": "local_path",
+        "path": "sources/org-baseline",
+        "digest": "sha256:62665ee14ebd6a54da51753cb025303f15b85ad7094a1bd4e9d980d2e0dc25fe"
+      },
+      "artifacts": [
+        {
+          "artifact_ref": {
+            "kind": "pack",
+            "id": "shared-pack",
+            "version": "1.0.0"
+          },
+          "digest": "sha256:8c789e98ead6ae42972310c08f04fce4e77038854be3d36152b75fa6f5a8fee5",
+          "source_path": "packs/shared-pack.json"
+        }
+      ]
+    },
+    {
+      "kind": "library_source",
+      "id": "user-overlay",
+      "version": "1.0.0",
+      "title": "user-overlay",
+      "source_role": "overlay",
+      "read_only": false,
+      "writable": true,
+      "pinned": true,
+      "visibility_scope": "private",
+      "trust_tier": "first_party_validated",
+      "source": {
+        "type": "local_path",
+        "path": "sources/user-overlay",
+        "digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d"
+      },
+      "artifacts": [
+        {
+          "artifact_ref": {
+            "kind": "pack",
+            "id": "shared-pack",
+            "version": "1.0.1"
+          },
+          "digest": "sha256:e4e8cedadab805d046a2c773c33e630398263069bf3a7a7806a90f00afbff6d0",
+          "source_path": "packs/shared-pack.json"
+        }
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "kind": "library_profile",
+      "id": "default",
+      "version": "1.0.0",
+      "title": "default",
+      "baseline_refs": [
+        "org-baseline"
+      ],
+      "overlay_ref": "user-overlay",
+      "baseline_precedence": "fail_on_conflict",
+      "default_targets": [
+        "codex-cli"
+      ]
+    }
+  ]
+}

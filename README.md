@@ -17,6 +17,8 @@ Resolve reusable instruction packs against role, policy, and target constraints;
 
 No hosted service, browser automation, or API key is required for local search, compile, apply, or validation workflows.
 
+The v1 product boundary is fixed by [docs/v1/charter.md](docs/v1/charter.md): a private-by-default deterministic resolver/compiler/validator with 0..N pinned read-only baseline libraries selected by active project/profile, exactly one writable overlay per active profile, and generated project projections.
+
 ```bash
 metactl --project /tmp/metactl-demo init -t codex-cli --no-input
 metactl --project /tmp/metactl-demo compile
@@ -153,6 +155,7 @@ The global pointer is convenience only. The controller repo remains the canonica
 | Codex CLI | `AGENTS.md`, `.codex/skills/...` | Tier 1, conformance-covered |
 | Claude Code | `CLAUDE.md`, `.claude/skills/...` | Tier 1, conformance-covered |
 | Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 2, preview |
+| Filesystem Agent | `AGENTS.md`, `.metactl/filesystem-agent/...` | Generic compatibility fixture |
 | Gemini CLI | `GEMINI.md`, `.gemini/extensions/...` | Tier 2, preview |
 | OpenClaw | `OPENCLAW.md` | Target available; compatibility tier not yet claimed |
 
@@ -199,6 +202,14 @@ Expected success signal: JSON responses include `api_version: "metactl/v2alpha1"
 
 ## Documentation Map
 
+- [docs/v1/charter.md](docs/v1/charter.md) - canonical v1 scope, vocabulary, and anti-bloat boundary.
+- [docs/v1/decisions/private-by-default-sanitized-export.md](docs/v1/decisions/private-by-default-sanitized-export.md) - public decision record for private-by-default sources and explicit sanitized exports.
+- [docs/v1/onboarding.md](docs/v1/onboarding.md) - v1 onboarding path for local profile setup, projection preview, and verification.
+- [docs/v1/knowledge-sources.md](docs/v1/knowledge-sources.md) - bounded read-only knowledge source manifests and adapter rules.
+- [docs/v1/library-stack.md](docs/v1/library-stack.md) - 0..N baseline plus one overlay stack contracts and conflict rules.
+- [docs/v1/migration.md](docs/v1/migration.md) - migration path from existing projects and metactlv0-era assumptions.
+- [docs/v1/sanitized-export.md](docs/v1/sanitized-export.md) - explicit public export record requirements for private source material.
+- [docs/v1/conformance.md](docs/v1/conformance.md) - v1 target conformance matrix and release claim rules.
 - [docs/user/GETTING_STARTED.md](docs/user/GETTING_STARTED.md) - first project setup and common commands.
 - [docs/user/WORKFLOWS.md](docs/user/WORKFLOWS.md) - preview, brownfield, and local MCP workflows.
 - [docs/user/FLEET_SYNC.md](docs/user/FLEET_SYNC.md) - local Fleet controller setup and sync behavior.

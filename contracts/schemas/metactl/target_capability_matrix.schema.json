@@ -4,24 +4,56 @@
   "title": "metactl Target Capability Matrix",
   "type": "object",
   "properties": {
-    "kind": { "const": "target_capability_matrix" },
-    "target_id": { "$ref": "common.schema.json#/$defs/slug" },
-    "version": { "$ref": "common.schema.json#/$defs/version_string" },
-    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "kind": {
+      "const": "target_capability_matrix"
+    },
+    "target_id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version_string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
     "capabilities": {
       "type": "object",
       "properties": {
-        "layered_instructions": { "type": "boolean" },
-        "skill_folders": { "type": "boolean" },
-        "deterministic_hooks": { "type": "boolean" },
-        "subagents": { "type": "boolean" },
-        "mcp_servers": { "type": "boolean" },
-        "tool_allowlists": { "type": "boolean" },
-        "approval_policies": { "type": "boolean" },
-        "readonly_hints": { "type": "boolean" },
-        "local_scripts": { "type": "boolean" },
-        "scheduled_tasks": { "type": "boolean" },
-        "ui_surfaces": { "type": "boolean" }
+        "layered_instructions": {
+          "type": "boolean"
+        },
+        "skill_folders": {
+          "type": "boolean"
+        },
+        "deterministic_hooks": {
+          "type": "boolean"
+        },
+        "subagents": {
+          "type": "boolean"
+        },
+        "mcp_servers": {
+          "type": "boolean"
+        },
+        "tool_allowlists": {
+          "type": "boolean"
+        },
+        "approval_policies": {
+          "type": "boolean"
+        },
+        "readonly_hints": {
+          "type": "boolean"
+        },
+        "local_scripts": {
+          "type": "boolean"
+        },
+        "scheduled_tasks": {
+          "type": "boolean"
+        },
+        "ui_surfaces": {
+          "type": "boolean"
+        }
       },
       "required": [
         "layered_instructions",
@@ -45,9 +77,22 @@
         "properties": {
           "output_kind": {
             "type": "string",
-            "enum": ["agents_md", "claude_md", "openclaw_md", "codex_skill", "pack_resource", "hook_config", "mcp_config", "runtime_json", "other"]
+            "enum": [
+              "agents_md",
+              "claude_md",
+              "openclaw_md",
+              "codex_skill",
+              "pack_extension_manifest",
+              "pack_resource",
+              "hook_config",
+              "mcp_config",
+              "runtime_json",
+              "other"
+            ]
           },
-          "path_template": { "$ref": "common.schema.json#/$defs/path" },
+          "path_template": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
           "resource_kinds": {
             "type": "array",
             "items": {
@@ -62,34 +107,191 @@
                 "plugin",
                 "asset",
                 "schema",
-                "test"
+                "test",
+                "subagent"
               ]
             },
             "uniqueItems": true
           },
           "instruction_mode": {
             "type": "string",
-            "enum": ["inline", "reference_index"]
+            "enum": [
+              "inline",
+              "reference_index"
+            ]
           },
           "surface_selection_mode": {
             "type": "string",
-            "enum": ["minimal", "full"]
+            "enum": [
+              "minimal",
+              "full"
+            ]
           },
-          "supports_multi_surface_pack": { "type": "boolean", "default": false },
-          "supports_surface_assets": { "type": "boolean", "default": false },
-          "supports_surface_scripts": { "type": "boolean", "default": false },
-          "supports_surface_frontmatter": { "type": "boolean", "default": false },
+          "supports_multi_surface_pack": {
+            "type": "boolean",
+            "default": false
+          },
+          "supports_surface_assets": {
+            "type": "boolean",
+            "default": false
+          },
+          "supports_surface_scripts": {
+            "type": "boolean",
+            "default": false
+          },
+          "supports_surface_frontmatter": {
+            "type": "boolean",
+            "default": false
+          },
           "surface_merge_strategy": {
             "type": "string",
-            "enum": ["none", "optional", "required"]
+            "enum": [
+              "none",
+              "optional",
+              "required"
+            ]
+          },
+          "instruction_frontmatter": {
+            "$ref": "common.schema.json#/$defs/string_map"
+          },
+          "primary_instruction_only": {
+            "type": "boolean",
+            "default": false
+          },
+          "command_adapter": {
+            "type": "object",
+            "properties": {
+              "format": {
+                "type": "string",
+                "enum": [
+                  "markdown",
+                  "toml"
+                ]
+              },
+              "inject_description": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "required": [
+              "format"
+            ],
+            "patternProperties": {
+              "^x-": {}
+            },
+            "additionalProperties": false
           }
         },
-        "required": ["output_kind", "path_template"],
+        "required": [
+          "output_kind",
+          "path_template"
+        ],
+        "patternProperties": {
+          "^x-": {}
+        },
         "additionalProperties": false
       }
     },
-    "metadata": { "$ref": "common.schema.json#/$defs/string_map" }
+    "runtime_template": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "common.schema.json#/$defs/path"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "json",
+            "toml",
+            "yaml",
+            "markdown",
+            "text"
+          ]
+        },
+        "destination_path": {
+          "$ref": "common.schema.json#/$defs/path"
+        },
+        "output_kind": {
+          "type": "string",
+          "enum": [
+            "agents_md",
+            "claude_md",
+            "openclaw_md",
+            "codex_skill",
+            "pack_extension_manifest",
+            "pack_resource",
+            "hook_config",
+            "mcp_config",
+            "runtime_json",
+            "other"
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "format",
+        "destination_path",
+        "output_kind"
+      ],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "local_projection": {
+      "type": "object",
+      "properties": {
+        "support": {
+          "type": "string",
+          "enum": [
+            "exact",
+            "degraded",
+            "unavailable"
+          ]
+        },
+        "local_surface": {
+          "$ref": "common.schema.json#/$defs/path"
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "support"
+      ],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "apply_modes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "copy",
+          "patch",
+          "symlink",
+          "takeover"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
   },
-  "required": ["kind", "target_id", "version", "title", "capabilities"],
+  "required": [
+    "kind",
+    "target_id",
+    "version",
+    "title",
+    "capabilities"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
   "additionalProperties": false
 }

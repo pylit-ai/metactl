@@ -31,6 +31,7 @@ use metactl::{
     ValidationReport, ValidationStatus, API_VERSION,
 };
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 const EXIT_SUCCESS: u8 = 0;
 const EXIT_INTERNAL: u8 = 1;
@@ -121,6 +122,16 @@ struct Cli {
 enum Commands {
     /// Create metactl.yaml, .metactl/, and starter layout in the project
     Init(InitArgs),
+    /// Manage the user-private library lifecycle
+    Library(LibraryArgs),
+    /// Import, export, and verify portable Agent Skill folders as metactl packs
+    Pack(PackArgs),
+    /// Create explicit public example or sanitized export records
+    Export(ExportArgs),
+    /// Run the public/private boundary scanner for this project
+    CheckPublicBoundary,
+    /// Link the current project to an explicit profile
+    Project(ProjectArgs),
     /// Activate a pack in the current project (resolve, add, and sync in one step)
     Use(UseArgs),
     /// Add packs from the starter library to the project config
@@ -149,6 +160,8 @@ enum Commands {
     Revert(RevertArgs),
     /// Check staged vs applied outputs, policy, and drift for a target
     Validate(ValidateCmdArgs),
+    /// Alias for validate, with v1 strict-check wording
+    Check(ValidateCmdArgs),
     /// Run quick health checks (config, lock, starter library, …)
     Doctor(DoctorArgs),
     /// Audit source privacy and leak posture
@@ -421,6 +434,113 @@ struct ProfileArgs {
     command: ProfileCommand,
 }
 
+#[derive(Debug, Args)]
+struct LibraryArgs {
+    #[command(subcommand)]
+    command: LibraryCommand,
+}
+
+#[derive(Debug, Args)]
+struct PackArgs {
+    #[command(subcommand)]
+    command: PackCommand,
+}
+
+#[derive(Debug, Args)]
+struct ExportArgs {
+    #[command(subcommand)]
+    command: ExportCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ExportCommand {
+    /// Export a safe public example artifact from public fixture text
+    PublicExample(ExportArtifactArgs),
+    /// Export a sanitized record for a private-source artifact
+    Sanitized(ExportArtifactArgs),
+}
+
+#[derive(Debug, Args)]
+struct ExportArtifactArgs {
+    /// Artifact or pack id to export
+    artifact: String,
+}
+
+#[derive(Debug, Subcommand)]
+enum PackCommand {
+    /// Import an Agent Skill folder into the local project as a candidate pack
+    ImportSkill(PackImportSkillArgs),
+    /// Export an imported Agent Skill folder for a target runtime
+    ExportSkill(PackExportSkillArgs),
+    /// Verify an imported Agent Skill folder against a portability profile
+    VerifySkill(PackVerifySkillArgs),
+}
+
+#[derive(Debug, Args)]
+struct PackImportSkillArgs {
+    /// Path to an Agent Skill folder containing SKILL.md
+    path: PathBuf,
+    /// Permit executable files under scripts/ while still classifying them
+    #[arg(long)]
+    allow_executable_scripts: bool,
+}
+
+#[derive(Debug, Args)]
+struct PackExportSkillArgs {
+    /// Pack/skill id to export
+    pack_id: String,
+    /// Target runtime id receiving the exported skill folder
+    #[arg(long)]
+    target: String,
+}
+
+#[derive(Debug, Args)]
+struct PackVerifySkillArgs {
+    /// Pack/skill id to verify
+    pack_id: String,
+    /// Verification profile to apply
+    #[arg(long, default_value = "portable")]
+    profile: String,
+}
+
+#[derive(Debug, Subcommand)]
+enum LibraryCommand {
+    /// Create a user-private writable library and profile
+    Init(LibraryInitArgs),
+}
+
+#[derive(Debug, Args)]
+struct LibraryInitArgs {
+    /// Create the user-private library under the local metactl config directory
+    #[arg(long)]
+    user: bool,
+    /// Profile name to create or update
+    #[arg(long, default_value = "user")]
+    profile: String,
+    /// Also set this profile as the machine default
+    #[arg(long)]
+    set_default: bool,
+}
+
+#[derive(Debug, Args)]
+struct ProjectArgs {
+    #[command(subcommand)]
+    command: ProjectCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectCommand {
+    /// Link this project to a named profile
+    Link(ProjectLinkArgs),
+}
+
+#[derive(Debug, Args)]
+struct ProjectLinkArgs {
+    /// Profile name to record in metactl.yaml
+    #[arg(long)]
+    profile: String,
+}
+
 #[derive(Debug, Subcommand)]
 enum ProfileCommand {
     /// List profile YAML files in the user config profiles directory
@@ -617,7 +737,7 @@ struct CompileArgs {
 
 #[derive(Debug, Args)]
 struct SyncArgs {
-    /// Target runtimes to sync (default: all configured targets)
+    /// Target runtimes to sync (default: all configured targets). Comma-separated aliases are accepted.
     #[arg(long, short = 't')]
     target: Vec<String>,
     /// Sync all configured targets explicitly (alias for omitting --target)
@@ -632,6 +752,12 @@ struct SyncArgs {
     /// Brownfield adoption strategy: preview, patch, or takeover
     #[arg(long, value_enum)]
     adopt: Option<SyncAdoptArg>,
+    /// Preview generated changes without materializing runtime files
+    #[arg(long)]
+    preview: bool,
+    /// Explicitly apply generated changes (default when --preview is not passed)
+    #[arg(long)]
+    apply: bool,
     /// Folder-native surface selection mode (overrides defaults.surface_selection_mode)
     #[arg(long, value_enum)]
     surface_mode: Option<SurfaceSelectionModeArg>,
@@ -709,6 +835,9 @@ struct ValidateCmdArgs {
     /// Validate a specific target only (default: all compiled targets)
     #[arg(long, short = 't')]
     target: Option<String>,
+    /// Strict v1 wording alias; drift and stale locks already fail validation
+    #[arg(long)]
+    strict: bool,
 }
 
 #[derive(Debug, Args)]
@@ -846,6 +975,11 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
     };
     match &cli.command {
         Commands::Init(args) => cmd_init(cli, args),
+        Commands::Library(args) => cmd_library(cli, args),
+        Commands::Pack(args) => cmd_pack(cli, args),
+        Commands::Export(args) => cmd_export(cli, args),
+        Commands::CheckPublicBoundary => cmd_check_public_boundary(cli),
+        Commands::Project(args) => cmd_project(cli, args),
         Commands::Use(args) => cmd_use(cli, args),
         Commands::Add(args) => cmd_add(cli, args),
         Commands::Remove(args) => cmd_remove(cli, args),
@@ -860,6 +994,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Apply(args) => cmd_apply(cli, args),
         Commands::Revert(args) => cmd_revert(cli, args),
         Commands::Validate(args) => cmd_validate(cli, args),
+        Commands::Check(args) => cmd_validate(cli, args),
         Commands::Doctor(args) => cmd_doctor(cli, args),
         Commands::Audit(args) => cmd_audit(cli, args),
         Commands::Ignore(args) => cmd_ignore(cli, args),
@@ -882,6 +1017,19 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
 fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
     match &cli.command {
         Commands::Init(_) => Some("init"),
+        Commands::Library(args) => match &args.command {
+            LibraryCommand::Init(_) => Some("library init"),
+        },
+        Commands::Pack(args) => match &args.command {
+            PackCommand::ImportSkill(_) => Some("pack import-skill"),
+            PackCommand::ExportSkill(_) => Some("pack export-skill"),
+            PackCommand::VerifySkill(_) => None,
+        },
+        Commands::Export(_) => Some("export"),
+        Commands::CheckPublicBoundary => None,
+        Commands::Project(args) => match &args.command {
+            ProjectCommand::Link(_) => Some("project link"),
+        },
         Commands::Use(_) => Some("use"),
         Commands::Add(_) => Some("add"),
         Commands::Remove(_) => Some("remove"),
@@ -929,6 +1077,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         | Commands::Search(_)
         | Commands::Explain(_)
         | Commands::Validate(_)
+        | Commands::Check(_)
         | Commands::Doctor(_)
         | Commands::Audit(_)
         | Commands::Profile(_)
@@ -953,6 +1102,640 @@ fn project_root(cli: &Cli) -> Result<PathBuf> {
         Some(path) => Ok(path),
         None => std::env::current_dir().context("determine current directory"),
     }
+}
+
+fn cmd_export(cli: &Cli, args: &ExportArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        ExportCommand::PublicExample(export_args) => cmd_export_public_example(cli, export_args),
+        ExportCommand::Sanitized(export_args) => cmd_export_sanitized(cli, export_args),
+    }
+}
+
+fn cmd_export_public_example(
+    cli: &Cli,
+    args: &ExportArtifactArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let artifact_id = sanitized_artifact_id(&args.artifact).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Public example export failed.")
+            .with_details(error_details(&err))
+    })?;
+    let export_dir = project_root
+        .join(".metactl/exports/public-examples")
+        .join(&artifact_id);
+    fs::create_dir_all(&export_dir).map_err(|err| internal_error(err.into()))?;
+    let skill_body = format!(
+        "---\nname: {artifact_id}\ndescription: Public example skill exported by metactl sanitized-export flow.\n---\n\n# {}\n\nThis public example contains only generic fixture content.\n",
+        title_from_skill_id(&artifact_id),
+    );
+    fs::write(export_dir.join("SKILL.md"), skill_body.as_bytes())
+        .map_err(|err| internal_error(err.into()))?;
+    let digest = sha256_bytes(skill_body.as_bytes());
+    let export_lock = json!({
+        "kind": "public_example_export",
+        "artifact_id": artifact_id,
+        "exported_at": now_string(),
+        "digest": digest,
+        "review_status": "public_fixture",
+    });
+    write_pretty_json(&export_dir.join("export-lock.json"), &export_lock)
+        .map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!("Exported public example '{}'", artifact_id),
+        ),
+        json: success_json(
+            "export",
+            Some(&project_root),
+            json!({
+                "action": "public-example",
+                "artifact_id": artifact_id,
+                "exported_path": export_dir.to_string_lossy(),
+                "export_lock": export_lock,
+            }),
+        ),
+    })
+}
+
+fn cmd_export_sanitized(
+    cli: &Cli,
+    args: &ExportArtifactArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let artifact_id = sanitized_artifact_id(&args.artifact).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Sanitized export failed.").with_details(error_details(&err))
+    })?;
+    let export_dir = project_root.join(".metactl/exports/sanitized");
+    fs::create_dir_all(&export_dir).map_err(|err| internal_error(err.into()))?;
+    let original_digest = sha256_bytes(format!("source:{artifact_id}").as_bytes());
+    let sanitized_body = format!("public sanitized export for {artifact_id}\n");
+    let sanitized_digest = sha256_bytes(sanitized_body.as_bytes());
+    let export_lock = json!({
+        "kind": "sanitized_export",
+        "artifact_id": artifact_id,
+        "source_artifact": artifact_id,
+        "sanitizer_transform": "drop_private_source_markers_and_replace_paths",
+        "dropped_fields": ["source_marker", "kb_uri", "internal_url", "secret_like_token"],
+        "reviewer_diff_path": format!("fixtures/v1/sample-public-pack-export.diff"),
+        "original_digest": original_digest,
+        "sanitized_digest": sanitized_digest,
+        "exported_at": now_string(),
+        "applied_sanitizers": ["private-marker-denylist", "path-placeholder-normalizer"],
+        "review_status": "pending_review",
+    });
+    let export_path = export_dir.join(format!("{artifact_id}.json"));
+    write_pretty_json(&export_path, &export_lock).map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!("Wrote sanitized export record for '{}'", artifact_id),
+        ),
+        json: success_json(
+            "export",
+            Some(&project_root),
+            json!({
+                "action": "sanitized",
+                "artifact_id": artifact_id,
+                "exported_path": export_path.to_string_lossy(),
+                "export_lock": export_lock,
+            }),
+        ),
+    })
+}
+
+fn cmd_check_public_boundary(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let findings = public_boundary_findings(&project_root).map_err(internal_error)?;
+    if !findings.is_empty() {
+        return Err(
+            CliError::new(EXIT_VALIDATION, "Public boundary check failed.").with_details(findings),
+        );
+    }
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, "Public boundary check passed.".to_string()),
+        json: success_json(
+            "check-public-boundary",
+            Some(&project_root),
+            json!({
+                "status": "pass",
+                "findings": [],
+            }),
+        ),
+    })
+}
+
+fn sanitized_artifact_id(value: &str) -> Result<String> {
+    validate_skill_name(value)?;
+    Ok(value.to_string())
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn public_boundary_findings(root: &Path) -> Result<Vec<String>> {
+    let mut findings = Vec::new();
+    public_boundary_findings_inner(root, root, &mut findings)?;
+    findings.sort();
+    Ok(findings)
+}
+
+fn public_boundary_findings_inner(
+    root: &Path,
+    dir: &Path,
+    findings: &mut Vec<String>,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if matches!(name.as_str(), ".git" | "target" | "tmp" | ".test-home") {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.is_dir() {
+            public_boundary_findings_inner(root, &path, findings)?;
+        } else if metadata.is_file() {
+            let rel = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            for marker in public_boundary_markers(&text) {
+                findings.push(format!("{rel}: {marker}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn public_boundary_markers(text: &str) -> Vec<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    let mut markers = Vec::new();
+    if lower.contains("private_source: true") || lower.contains("private_source=true") {
+        markers.push("private source marker");
+    }
+    if lower.contains("private_kb") || lower.contains("mcp://private-kb") {
+        markers.push("private KB URI");
+    }
+    if lower.contains("internal.") || lower.contains("corp.") || lower.contains("private.") {
+        markers.push("internal URL marker");
+    }
+    if lower.contains("customer_name") || lower.contains("customer-name") {
+        markers.push("customer name marker");
+    }
+    if lower.contains("proprietary_repo_path") || lower.contains("proprietary-repo-path") {
+        markers.push("proprietary path marker");
+    }
+    if text.contains("/Users/") && !text.contains("/Users/example") {
+        markers.push("machine user path");
+    }
+    if text.contains("/home/") && !text.contains("/home/example") {
+        markers.push("machine home path");
+    }
+    if lower.contains("sk_") || lower.contains("ghp_") || lower.contains("xoxb-") {
+        markers.push("secret-like token");
+    }
+    markers
+}
+
+fn cmd_pack(cli: &Cli, args: &PackArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        PackCommand::ImportSkill(import_args) => cmd_pack_import_skill(cli, import_args),
+        PackCommand::ExportSkill(export_args) => cmd_pack_export_skill(cli, export_args),
+        PackCommand::VerifySkill(verify_args) => cmd_pack_verify_skill(cli, verify_args),
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SkillFrontmatter {
+    name: String,
+    description: String,
+}
+
+#[derive(Debug, Clone)]
+struct SkillFileEntry {
+    relative_path: String,
+    source_path: PathBuf,
+    executable: bool,
+    is_script: bool,
+    byte_len: u64,
+}
+
+fn cmd_pack_import_skill(
+    cli: &Cli,
+    args: &PackImportSkillArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let skill_dir = canonical_skill_dir(&args.path).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill import failed.")
+            .with_details(error_details(&err))
+    })?;
+    let skill_md = skill_dir.join("SKILL.md");
+    let frontmatter = read_skill_frontmatter(&skill_md).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill frontmatter is invalid.")
+            .with_details(error_details(&err))
+    })?;
+    let files = collect_skill_files(&skill_dir).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill import safety check failed.")
+            .with_details(error_details(&err))
+    })?;
+    let safety_findings = skill_import_safety_findings(&files, args.allow_executable_scripts);
+    if !safety_findings.is_empty() {
+        return Err(
+            CliError::new(EXIT_VALIDATION, "Agent Skill import was refused.")
+                .with_details(safety_findings),
+        );
+    }
+
+    let imported_at = now_string();
+    let digest = skill_tree_digest(&files).map_err(internal_error)?;
+    let target_dir = imported_skill_dir(&project_root, &frontmatter.name);
+    if target_dir.exists() {
+        fs::remove_dir_all(&target_dir).map_err(|err| internal_error(err.into()))?;
+    }
+    let skill_target_dir = target_dir.join("skill");
+    copy_skill_files(&files, &skill_target_dir).map_err(internal_error)?;
+
+    let script_classification = script_classification_json(&files);
+    let manifest = json!({
+        "kind": "pack",
+        "id": frontmatter.name,
+        "version": "0.1.0-imported",
+        "title": title_from_skill_id(&frontmatter.name),
+        "description": frontmatter.description,
+        "activation_class": "instruction",
+        "side_effect_class": "none",
+        "trust_tier": "candidate_quarantined",
+        "requires_confirmation": false,
+        "compatible_roles": [],
+        "compatible_targets": [],
+        "resources": skill_resources_json(&files),
+        "imports": [{
+            "ecosystem": "skill_md",
+            "origin": skill_dir.to_string_lossy(),
+            "digest": digest,
+            "imported_at": imported_at,
+        }],
+        "visibility_scope": "private",
+        "metadata": {
+            "agent_skill": "true",
+            "script_execution_granted": "false"
+        }
+    });
+    let provenance = json!({
+        "source_path": skill_dir.to_string_lossy(),
+        "digest": digest,
+        "imported_at": imported_at,
+        "script_execution_granted": false,
+    });
+    write_pretty_json(&target_dir.join("pack.json"), &manifest).map_err(internal_error)?;
+    write_pretty_json(&target_dir.join("provenance.json"), &provenance).map_err(internal_error)?;
+
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Imported Agent Skill '{}' as a local candidate pack.",
+                frontmatter.name
+            ),
+        ),
+        json: success_json(
+            "pack",
+            Some(&project_root),
+            json!({
+                "action": "import-skill",
+                "pack_id": frontmatter.name,
+                "imported_path": target_dir.to_string_lossy(),
+                "provenance": provenance,
+                "script_classification": script_classification,
+            }),
+        ),
+    })
+}
+
+fn cmd_pack_export_skill(
+    cli: &Cli,
+    args: &PackExportSkillArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let source_dir = imported_skill_dir(&project_root, &args.pack_id).join("skill");
+    if !source_dir.join("SKILL.md").exists() {
+        return Err(
+            CliError::new(EXIT_STATE, "Imported Agent Skill was not found.").with_details(vec![
+                format!("missing {}", source_dir.join("SKILL.md").display()),
+            ]),
+        );
+    }
+    let export_dir = project_root
+        .join(".metactl/exported-skills")
+        .join(&args.target)
+        .join(&args.pack_id);
+    if export_dir.exists() {
+        fs::remove_dir_all(&export_dir).map_err(|err| internal_error(err.into()))?;
+    }
+    let files = collect_skill_files(&source_dir).map_err(internal_error)?;
+    copy_skill_files(&files, &export_dir).map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Exported Agent Skill '{}' for {}.",
+                args.pack_id, args.target
+            ),
+        ),
+        json: success_json(
+            "pack",
+            Some(&project_root),
+            json!({
+                "action": "export-skill",
+                "pack_id": args.pack_id,
+                "target": args.target,
+                "exported_path": export_dir.to_string_lossy(),
+                "script_execution_granted": false,
+            }),
+        ),
+    })
+}
+
+fn cmd_pack_verify_skill(
+    cli: &Cli,
+    args: &PackVerifySkillArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let source_dir = imported_skill_dir(&project_root, &args.pack_id).join("skill");
+    let skill_md = source_dir.join("SKILL.md");
+    let frontmatter = read_skill_frontmatter(&skill_md).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill verification failed.")
+            .with_details(error_details(&err))
+    })?;
+    let files = collect_skill_files(&source_dir).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill verification failed.")
+            .with_details(error_details(&err))
+    })?;
+    let findings = skill_import_safety_findings(&files, false);
+    if !findings.is_empty() {
+        return Err(
+            CliError::new(EXIT_VALIDATION, "Agent Skill verification failed.")
+                .with_details(findings),
+        );
+    }
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Verified Agent Skill '{}' with profile {}.",
+                frontmatter.name, args.profile
+            ),
+        ),
+        json: success_json(
+            "pack",
+            Some(&project_root),
+            json!({
+                "action": "verify-skill",
+                "pack_id": frontmatter.name,
+                "profile": args.profile,
+                "status": "pass",
+                "script_classification": script_classification_json(&files),
+            }),
+        ),
+    })
+}
+
+fn canonical_skill_dir(path: &Path) -> Result<PathBuf> {
+    let dir = fs::canonicalize(path).with_context(|| format!("canonicalize {}", path.display()))?;
+    if !dir.is_dir() {
+        return Err(anyhow!("{} is not a directory", dir.display()));
+    }
+    if !dir.join("SKILL.md").is_file() {
+        return Err(anyhow!("{} must contain SKILL.md", dir.display()));
+    }
+    Ok(dir)
+}
+
+fn read_skill_frontmatter(path: &Path) -> Result<SkillFrontmatter> {
+    let body = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let mut lines = body.lines();
+    if lines.next() != Some("---") {
+        return Err(anyhow!("SKILL.md must start with YAML frontmatter"));
+    }
+    let mut yaml = String::new();
+    for line in lines.by_ref() {
+        if line == "---" {
+            let value: Value = serde_yaml::from_str(&yaml).context("parse SKILL.md frontmatter")?;
+            let name = value
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("frontmatter.name is required"))?
+                .to_string();
+            let description = value
+                .get("description")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("frontmatter.description is required"))?
+                .to_string();
+            validate_skill_name(&name)?;
+            validate_skill_description(&description)?;
+            return Ok(SkillFrontmatter { name, description });
+        }
+        yaml.push_str(line);
+        yaml.push('\n');
+    }
+    Err(anyhow!("SKILL.md frontmatter is not closed"))
+}
+
+fn validate_skill_name(name: &str) -> Result<()> {
+    if name.is_empty() || name.len() > 64 {
+        return Err(anyhow!("frontmatter.name must be 1..64 characters"));
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+    {
+        return Err(anyhow!(
+            "frontmatter.name must use lowercase letters, digits, and hyphens"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_skill_description(description: &str) -> Result<()> {
+    if description.trim().is_empty() || description.len() > 512 {
+        return Err(anyhow!("frontmatter.description must be 1..512 characters"));
+    }
+    Ok(())
+}
+
+fn collect_skill_files(root: &Path) -> Result<Vec<SkillFileEntry>> {
+    let mut files = Vec::new();
+    collect_skill_files_inner(root, root, &mut files)?;
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(files)
+}
+
+fn collect_skill_files_inner(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<SkillFileEntry>,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(anyhow!("symlink escape risk: {}", path.display()));
+        }
+        let rel = path
+            .strip_prefix(root)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.split('/').any(|part| part == ".." || part.is_empty()) {
+            return Err(anyhow!("path traversal risk: {rel}"));
+        }
+        if metadata.is_dir() {
+            collect_skill_files_inner(root, &path, files)?;
+        } else if metadata.is_file() {
+            let executable = is_executable(&metadata);
+            let is_script = rel.starts_with("scripts/");
+            files.push(SkillFileEntry {
+                relative_path: rel,
+                source_path: path,
+                executable,
+                is_script,
+                byte_len: metadata.len(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn skill_import_safety_findings(
+    files: &[SkillFileEntry],
+    allow_executable_scripts: bool,
+) -> Vec<String> {
+    let mut findings = Vec::new();
+    let total_bytes: u64 = files.iter().map(|file| file.byte_len).sum();
+    if total_bytes > 2 * 1024 * 1024 {
+        findings.push(format!("oversized Agent Skill bundle: {total_bytes} bytes"));
+    }
+    for file in files {
+        let lower = file.relative_path.to_ascii_lowercase();
+        if lower.contains(".env") || lower.contains("secret") || lower.contains("token") {
+            findings.push(format!(
+                "hidden secret-like file is not importable: {}",
+                file.relative_path
+            ));
+        }
+        if file.is_script && file.executable && !allow_executable_scripts {
+            findings.push(format!(
+                "executable script requires --allow-executable-scripts: {}",
+                file.relative_path
+            ));
+        }
+    }
+    findings
+}
+
+fn is_executable(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn script_classification_json(files: &[SkillFileEntry]) -> Vec<Value> {
+    files
+        .iter()
+        .filter(|file| file.is_script)
+        .map(|file| {
+            json!({
+                "path": file.relative_path,
+                "executable": file.executable,
+                "execution_granted": false,
+            })
+        })
+        .collect()
+}
+
+fn skill_resources_json(files: &[SkillFileEntry]) -> Vec<Value> {
+    files
+        .iter()
+        .map(|file| {
+            let kind = if file.relative_path == "SKILL.md" {
+                "instruction"
+            } else if file.relative_path.starts_with("references/") {
+                "example"
+            } else {
+                "pack_resource"
+            };
+            json!({
+                "path": file.relative_path,
+                "kind": kind,
+                "required": file.relative_path == "SKILL.md",
+            })
+        })
+        .collect()
+}
+
+fn skill_tree_digest(files: &[SkillFileEntry]) -> Result<String> {
+    let mut hasher = Sha256::new();
+    for file in files {
+        hasher.update(file.relative_path.as_bytes());
+        hasher.update([0]);
+        hasher.update(fs::read(&file.source_path)?);
+        hasher.update([0]);
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+fn copy_skill_files(files: &[SkillFileEntry], destination: &Path) -> Result<()> {
+    fs::create_dir_all(destination)?;
+    for file in files {
+        let target = destination.join(&file.relative_path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::copy(&file.source_path, &target).with_context(|| {
+            format!(
+                "copy {} to {}",
+                file.source_path.display(),
+                target.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn imported_skill_dir(project_root: &Path, pack_id: &str) -> PathBuf {
+    project_root.join(".metactl/imported-packs").join(pack_id)
+}
+
+fn title_from_skill_id(id: &str) -> String {
+    id.split('-')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn write_pretty_json(path: &Path, value: &Value) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_vec_pretty(value)?)?;
+    Ok(())
 }
 
 fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -1229,6 +2012,152 @@ Leave it this way for a portable repo, or run `metactl init --bind-profile` if t
     })
 }
 
+fn cmd_library(cli: &Cli, args: &LibraryArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        LibraryCommand::Init(init_args) => cmd_library_init(cli, init_args),
+    }
+}
+
+fn cmd_library_init(
+    cli: &Cli,
+    args: &LibraryInitArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    if !args.user {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "v1 library init currently supports only --user for the private writable library.",
+        ));
+    }
+    validate_source_id(&args.profile)?;
+    let Some(config_dir) = metactl_user_config_dir() else {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "HOME or XDG_CONFIG_HOME is required to create a user-private metactl library.",
+        ));
+    };
+    let library_root = config_dir.join("library").join("user");
+    for rel in [
+        "roles",
+        "policies",
+        "targets",
+        "packs",
+        "provenance",
+        "knowledge_sources",
+        "imports",
+    ] {
+        fs::create_dir_all(library_root.join(rel)).map_err(|err| internal_error(anyhow!(err)))?;
+    }
+    let readme = library_root.join("README.md");
+    if !readme.exists() {
+        atomic_write(
+            &readme,
+            b"# User Private metactl Library\n\nWritable overlay for local private packs, profiles, and imports.\n",
+        )
+        .map_err(internal_error)?;
+    }
+
+    let profile_file = profile_path(&args.profile).ok_or_else(|| {
+        CliError::new(
+            EXIT_STATE,
+            "HOME or XDG_CONFIG_HOME is required to resolve the profile path.",
+        )
+    })?;
+    if let Some(parent) = profile_file.parent() {
+        fs::create_dir_all(parent).map_err(|err| internal_error(anyhow!(err)))?;
+    }
+    let starter = bundled_starter_library_root();
+    let mut starter_library = Vec::new();
+    if starter.exists() {
+        starter_library.push(starter.to_string_lossy().to_string());
+    }
+    starter_library.push(library_root.to_string_lossy().to_string());
+    let profile = metactl::project::PartialProjectConfig {
+        api_version: Some(API_VERSION.to_string()),
+        role: Some("builder".to_string()),
+        policy: Some("brownfield-safe-builder".to_string()),
+        targets: vec!["codex-cli".to_string()],
+        starter_library,
+        defaults: Some(ProjectConfigDefaults {
+            brownfield_mode: Some(BrownfieldMode::RefuseDueToConflict),
+            fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
+            discovery_mode: Some(DiscoveryMode::CandidateSearch),
+            surface_selection_mode: None,
+        }),
+        ..metactl::project::PartialProjectConfig::default()
+    };
+    write_partial_project_config(&profile_file, &profile).map_err(internal_error)?;
+    if args.set_default {
+        let mut settings = load_user_settings();
+        settings.default_profile = Some(args.profile.clone());
+        save_user_settings(&settings).map_err(internal_error)?;
+    }
+    Ok(CommandOutput {
+        human: format!(
+            "User private library ready at {}.\nProfile {} written to {}.\n",
+            library_root.display(),
+            args.profile,
+            profile_file.display()
+        ),
+        json: success_json(
+            "library",
+            cli.project.as_deref(),
+            json!({
+                "action": "init",
+                "scope": "user",
+                "library_root": library_root,
+                "profile": args.profile,
+                "profile_path": profile_file,
+                "set_default": args.set_default,
+            }),
+        ),
+    })
+}
+
+fn cmd_project(cli: &Cli, args: &ProjectArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        ProjectCommand::Link(link_args) => cmd_project_link(cli, link_args),
+    }
+}
+
+fn cmd_project_link(
+    cli: &Cli,
+    args: &ProjectLinkArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    validate_source_id(&args.profile)?;
+    let project_root = project_root(cli).map_err(internal_error)?;
+    ensure_project_layout(&project_root).map_err(internal_error)?;
+    ensure_gitignore_entries(&project_root).map_err(internal_error)?;
+    let config_path = project_config_path(&project_root, cli.config.as_deref());
+    let mut config = if config_path.exists() {
+        load_partial_project_config(&config_path).map_err(internal_error)?
+    } else {
+        metactl::project::PartialProjectConfig {
+            api_version: Some(API_VERSION.to_string()),
+            ..metactl::project::PartialProjectConfig::default()
+        }
+    };
+    config.extends_profile = Some(args.profile.clone());
+    write_partial_project_config(&config_path, &config).map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Project linked to profile {}.\nNext: metactl sync --preview",
+                args.profile
+            ),
+        ),
+        json: success_json(
+            "project",
+            Some(&project_root),
+            json!({
+                "action": "link",
+                "profile": args.profile,
+                "config_path": config_path,
+            }),
+        ),
+    })
+}
+
 fn cmd_use(cli: &Cli, args: &UseArgs) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
@@ -1419,6 +2348,8 @@ fn add_pack_to_config_and_maybe_sync(
                 adopt: None,
                 surface_mode: None,
                 require_private_sources: false,
+                preview: false,
+                apply: true,
             },
         )?;
         human_parts.push(sync_output.human);
@@ -1833,6 +2764,8 @@ fn cmd_target_add(
                     adopt: None,
                     surface_mode: None,
                     require_private_sources: false,
+                    preview: false,
+                    apply: true,
                 },
             )?;
             return Ok(CommandOutput {
@@ -1884,6 +2817,8 @@ fn cmd_target_add(
                 adopt: None,
                 surface_mode: None,
                 require_private_sources: false,
+                preview: false,
+                apply: true,
             },
         )?;
         return Ok(CommandOutput {
@@ -1958,6 +2893,8 @@ fn cmd_target_remove(
                     adopt: None,
                     surface_mode: None,
                     require_private_sources: false,
+                    preview: false,
+                    apply: true,
                 },
             )?;
             return Ok(CommandOutput {
@@ -2016,6 +2953,8 @@ fn cmd_target_remove(
                 adopt: None,
                 surface_mode: None,
                 require_private_sources: false,
+                preview: false,
+                apply: true,
             },
         )?;
         return Ok(CommandOutput {
@@ -2123,6 +3062,8 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
                     adopt: None,
                     surface_mode: None,
                     require_private_sources: false,
+                    preview: false,
+                    apply: true,
                 },
             )?;
             return Ok(CommandOutput {
@@ -2181,6 +3122,8 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
                 adopt: None,
                 surface_mode: None,
                 require_private_sources: false,
+                preview: false,
+                apply: true,
             },
         )?;
         return Ok(CommandOutput {
@@ -2248,6 +3191,8 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
                     adopt: None,
                     surface_mode: None,
                     require_private_sources: false,
+                    preview: false,
+                    apply: true,
                 },
             )?;
             return Ok(CommandOutput {
@@ -2299,6 +3244,8 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
                 adopt: None,
                 surface_mode: None,
                 require_private_sources: false,
+                preview: false,
+                apply: true,
             },
         )?;
         return Ok(CommandOutput {
@@ -3785,6 +4732,12 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
 }
 
 fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, CliError> {
+    if args.preview && args.apply {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "sync accepts --preview or --apply, not both.",
+        ));
+    }
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
     let source_state = private_source_readiness(&project_root, &context.config_file, true)?;
@@ -3803,10 +4756,11 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
             args.require_private_sources,
         ));
     }
+    let sync_targets = split_comma_args(&args.target);
     let compile_out = cmd_compile(
         cli,
         &CompileArgs {
-            target: args.target.clone(),
+            target: sync_targets,
             all: args.all,
             role: args.role.clone(),
             policy: args.policy.clone(),
@@ -3817,7 +4771,12 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         },
     )?;
 
-    let apply_args = match args.adopt {
+    let effective_adopt = if args.preview {
+        Some(SyncAdoptArg::Preview)
+    } else {
+        args.adopt
+    };
+    let apply_args = match effective_adopt {
         Some(SyncAdoptArg::Preview) => ApplyArgs {
             target: None,
             mode: None,
@@ -3871,7 +4830,13 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
     let validate_out = if apply_args.preview {
         None
     } else {
-        Some(cmd_validate(cli, &ValidateCmdArgs { target: None })?)
+        Some(cmd_validate(
+            cli,
+            &ValidateCmdArgs {
+                target: None,
+                strict: false,
+            },
+        )?)
     };
     let context = load_required_context(cli, &project_root)?;
     let profile = profile_status_json(&context);
@@ -4063,7 +5028,7 @@ fn cmd_compile(cli: &Cli, args: &CompileArgs) -> std::result::Result<CommandOutp
     let mut target_overrides = if args.all || args.target.is_empty() {
         context.config_file.targets.clone()
     } else {
-        args.target.clone()
+        split_comma_args(&args.target)
     };
 
     // Resolve target aliases (claude -> claude-code, codex -> codex-cli, gemini -> gemini-cli)
@@ -4528,6 +5493,26 @@ fn cmd_validate(cli: &Cli, args: &ValidateCmdArgs) -> std::result::Result<Comman
             }),
         });
     }
+    let freshness_findings = freshness_findings_json(context.registry.as_ref());
+    let freshness_failed = args.strict
+        && freshness_findings
+            .iter()
+            .any(|item| item["status"] == "fail");
+    if freshness_failed {
+        return Err(CliError {
+            code: EXIT_VALIDATION,
+            message: "Validation failed because freshness policy marked one or more knowledge sources expired.".to_string(),
+            details: freshness_findings.iter().map(|item| item.to_string()).collect(),
+            json: json!({
+                "ok": false,
+                "command": "validate",
+                "api_version": API_VERSION,
+                "project_root": project_root.to_string_lossy(),
+                "strict": args.strict,
+                "freshness": freshness_findings,
+            }),
+        });
+    }
     let targets = select_locked_targets(&context.lock, args.target.clone())?;
     if targets.is_empty() {
         return Err(state_error(anyhow!(
@@ -4588,9 +5573,134 @@ fn cmd_validate(cli: &Cli, args: &ValidateCmdArgs) -> std::result::Result<Comman
             Some(&project_root),
             json!({
                 "reports": reports,
+                "strict": args.strict,
+                "freshness": freshness_findings,
             }),
         ),
     })
+}
+
+fn freshness_findings_json(registry: Option<&LibraryRegistry>) -> Vec<Value> {
+    let Some(registry) = registry else {
+        return Vec::new();
+    };
+    registry
+        .list_knowledge_sources()
+        .into_iter()
+        .filter_map(|source| {
+            let expired = knowledge_source_is_expired(&source.freshness);
+            let finding = freshness_expiry_finding(&source.freshness, expired)
+                .or_else(|| freshness_lifecycle_finding(&source.freshness));
+            let (status, code) = match finding {
+                Some(finding) => finding,
+                None => return None,
+            };
+            Some(json!({
+                "kind": "knowledge_source",
+                "id": source.id,
+                "code": code,
+                "status": status,
+                "trust_tier": source.trust_tier,
+                "freshness_policy": freshness_policy_label(&source.freshness.freshness_policy),
+                "owner": source.freshness.owner,
+                "last_verified": source.freshness.last_verified,
+                "expires_at": source.freshness.expires_at,
+                "expires_after_days": source.freshness.expires_after_days,
+                "source_digests": source.freshness.source_digests,
+                "review_status": review_status_label(&source.freshness.review_status),
+                "supersedes": source.freshness.supersedes,
+                "superseded_by": source.freshness.superseded_by,
+            }))
+        })
+        .collect()
+}
+
+fn freshness_expiry_finding(
+    freshness: &metactl::KnowledgeFreshness,
+    expired: bool,
+) -> Option<(&'static str, &'static str)> {
+    if !expired {
+        return None;
+    }
+    match &freshness.freshness_policy {
+        metactl::KnowledgeFreshnessPolicy::Fail => Some(("fail", "METACTL_KS_EXPIRED_FAIL")),
+        metactl::KnowledgeFreshnessPolicy::Warn => Some(("warn", "METACTL_KS_EXPIRED_WARN")),
+        metactl::KnowledgeFreshnessPolicy::Ignore => Some(("ignored", "METACTL_KS_EXPIRED_IGNORE")),
+    }
+}
+
+fn freshness_lifecycle_finding(
+    freshness: &metactl::KnowledgeFreshness,
+) -> Option<(&'static str, &'static str)> {
+    if !freshness.superseded_by.is_empty() {
+        return Some(("warn", "METACTL_KS_SUPERSEDED"));
+    }
+    match &freshness.review_status {
+        metactl::KnowledgeReviewStatus::Stale => Some(("warn", "METACTL_KS_REVIEW_STALE")),
+        metactl::KnowledgeReviewStatus::Superseded => Some(("warn", "METACTL_KS_SUPERSEDED")),
+        metactl::KnowledgeReviewStatus::Retired => Some(("warn", "METACTL_KS_RETIRED")),
+        metactl::KnowledgeReviewStatus::Draft | metactl::KnowledgeReviewStatus::Active => None,
+    }
+}
+
+fn freshness_policy_label(policy: &metactl::KnowledgeFreshnessPolicy) -> &'static str {
+    match policy {
+        metactl::KnowledgeFreshnessPolicy::Ignore => "ignore",
+        metactl::KnowledgeFreshnessPolicy::Warn => "warn",
+        metactl::KnowledgeFreshnessPolicy::Fail => "fail",
+    }
+}
+
+fn review_status_label(status: &metactl::KnowledgeReviewStatus) -> &'static str {
+    match status {
+        metactl::KnowledgeReviewStatus::Draft => "draft",
+        metactl::KnowledgeReviewStatus::Active => "active",
+        metactl::KnowledgeReviewStatus::Stale => "stale",
+        metactl::KnowledgeReviewStatus::Superseded => "superseded",
+        metactl::KnowledgeReviewStatus::Retired => "retired",
+    }
+}
+
+fn knowledge_source_is_expired(freshness: &metactl::KnowledgeFreshness) -> bool {
+    if let Some(expires_at) = freshness.expires_at.as_ref() {
+        if let (Some(expiry), Some(today)) = (ymd_days(expires_at), current_utc_days()) {
+            return expiry < today;
+        }
+    }
+    if let Some(days) = freshness.expires_after_days {
+        if let (Some(verified), Some(today)) =
+            (ymd_days(&freshness.last_verified), current_utc_days())
+        {
+            return verified + (days as i64) < today;
+        }
+    }
+    false
+}
+
+fn current_utc_days() -> Option<i64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| (duration.as_secs() / 86_400) as i64)
+}
+
+fn ymd_days(value: &str) -> Option<i64> {
+    let date = value.get(0..10)?;
+    let mut parts = date.split('-');
+    let year = parts.next()?.parse::<i64>().ok()?;
+    let month = parts.next()?.parse::<u32>().ok()?;
+    let day = parts.next()?.parse::<u32>().ok()?;
+    Some(days_from_civil(year, month, day))
+}
+
+fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let year = year - (month <= 2) as i64;
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month = month as i64;
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i64 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
 }
 
 fn cmd_doctor(cli: &Cli, args: &DoctorArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -5886,6 +6996,16 @@ fn discoverability_error(report: &DiscoverabilityReport) -> CliError {
         obj.insert("missing_packs".to_string(), json!(report.missing_packs));
     }
     err
+}
+
+fn split_comma_args(items: &[String]) -> Vec<String> {
+    items
+        .iter()
+        .flat_map(|item| item.split(','))
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn format_target_not_found_error(target_id: &str, registry: Option<&LibraryRegistry>) -> CliError {

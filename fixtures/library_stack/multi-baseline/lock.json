@@ -1,0 +1,60 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack_lock",
+  "stack_ref": {
+    "kind": "artifact",
+    "id": "fixture-multi-baseline",
+    "version": "1.0.0"
+  },
+  "profile_ref": {
+    "kind": "artifact",
+    "id": "default",
+    "version": "1.0.0"
+  },
+  "resolved_artifacts": [
+    {
+      "artifact_ref": {
+        "kind": "policy",
+        "id": "release-policy",
+        "version": "1.0.0"
+      },
+      "source_id": "org-baseline",
+      "source_role": "baseline",
+      "source_digest": "sha256:62665ee14ebd6a54da51753cb025303f15b85ad7094a1bd4e9d980d2e0dc25fe",
+      "artifact_digest": "sha256:ca9eb8a3f8895a2f7132f557eb0b302478d76f81095260ccce4564aba35f0884",
+      "locked": false,
+      "override_status": "none",
+      "generated_paths": []
+    },
+    {
+      "artifact_ref": {
+        "kind": "pack",
+        "id": "team-pack",
+        "version": "1.0.0"
+      },
+      "source_id": "team-baseline",
+      "source_role": "baseline",
+      "source_digest": "sha256:3b8808ffdb018afa1dde0a03bdf7374fa4dbb18158bb6a229f6e4b4fc4ff8a0a",
+      "artifact_digest": "sha256:df7cfdf019b6cd83219f2b42b3aa186acc9195659a3e68d53263896fa1da8eda",
+      "locked": false,
+      "override_status": "none",
+      "generated_paths": []
+    },
+    {
+      "artifact_ref": {
+        "kind": "pack",
+        "id": "user-pack",
+        "version": "1.0.0"
+      },
+      "source_id": "user-overlay",
+      "source_role": "overlay",
+      "source_digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d",
+      "artifact_digest": "sha256:c1001d372471d3640982ea8ca930a9aa24c4299c3e9107ea49b3ddf4ef7ce432",
+      "locked": false,
+      "override_status": "none",
+      "generated_paths": []
+    }
+  ],
+  "conflicts": [],
+  "warnings": []
+}

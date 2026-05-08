@@ -310,6 +310,286 @@ fn init_project(project: &Path) {
 }
 
 #[test]
+fn cli_pack_import_export_verify_skill_roundtrip_records_provenance() {
+    let project = TempDir::new().expect("tempdir");
+    let skill_root = project.path().join("release-manager");
+    let scripts_dir = skill_root.join("scripts");
+    fs::create_dir_all(&scripts_dir).expect("scripts dir");
+    fs::write(
+        skill_root.join("SKILL.md"),
+        r#"---
+name: release-manager
+description: Portable release manager skill for verification handoffs.
+---
+
+# Release Manager
+
+Run release verification and produce a handoff.
+"#,
+    )
+    .expect("write skill");
+    fs::write(
+        scripts_dir.join("check.sh"),
+        "#!/usr/bin/env bash\necho check\n",
+    )
+    .expect("write script");
+
+    let import = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "pack",
+            "import-skill",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(import.status.success(), "{}", stderr(&import));
+    let import_json = json_output(&import);
+    assert_json_contract(&import_json, "pack", Some(project.path()));
+    assert_eq!(import_json["action"], json!("import-skill"));
+    assert_eq!(import_json["pack_id"], json!("release-manager"));
+    assert_eq!(
+        import_json["script_classification"][0]["path"],
+        json!("scripts/check.sh")
+    );
+    assert_eq!(
+        import_json["script_classification"][0]["executable"],
+        json!(false)
+    );
+    assert!(import_json["provenance"]["digest"].as_str().is_some());
+    assert!(project
+        .path()
+        .join(".metactl/imported-packs/release-manager/pack.json")
+        .exists());
+
+    let export = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "pack",
+            "export-skill",
+            "release-manager",
+            "--target",
+            "codex-cli",
+        ],
+    );
+    assert!(export.status.success(), "{}", stderr(&export));
+    let export_json = json_output(&export);
+    assert_json_contract(&export_json, "pack", Some(project.path()));
+    assert_eq!(export_json["action"], json!("export-skill"));
+    assert!(project
+        .path()
+        .join(".metactl/exported-skills/codex-cli/release-manager/SKILL.md")
+        .exists());
+
+    let verify = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "pack",
+            "verify-skill",
+            "release-manager",
+            "--profile",
+            "portable",
+        ],
+    );
+    assert!(verify.status.success(), "{}", stderr(&verify));
+    let verify_json = json_output(&verify);
+    assert_json_contract(&verify_json, "pack", Some(project.path()));
+    assert_eq!(verify_json["action"], json!("verify-skill"));
+    assert_eq!(verify_json["profile"], json!("portable"));
+    assert_eq!(verify_json["status"], json!("pass"));
+}
+
+#[test]
+fn cli_pack_import_skill_rejects_unsafe_agent_skill_fixtures() {
+    let project = TempDir::new().expect("tempdir");
+
+    let executable_skill = project.path().join("executable-skill");
+    let executable_scripts = executable_skill.join("scripts");
+    fs::create_dir_all(&executable_scripts).expect("scripts dir");
+    fs::write(
+        executable_skill.join("SKILL.md"),
+        r#"---
+name: executable-skill
+description: Skill with an executable script fixture.
+---
+
+# Executable Skill
+"#,
+    )
+    .expect("write skill");
+    let executable_script = executable_scripts.join("run.sh");
+    fs::write(&executable_script, "#!/usr/bin/env bash\necho unsafe\n").expect("write script");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = fs::metadata(&executable_script)
+            .expect("script metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&executable_script, permissions).expect("chmod script");
+    }
+
+    let executable_import = run_cli(
+        project.path(),
+        &[
+            "pack",
+            "import-skill",
+            executable_skill.to_str().expect("skill path"),
+        ],
+    );
+    assert!(!executable_import.status.success(), "import should fail");
+    assert!(
+        stderr(&executable_import)
+            .contains("executable script requires --allow-executable-scripts"),
+        "stderr: {}",
+        stderr(&executable_import)
+    );
+
+    let secret_skill = project.path().join("secret-skill");
+    fs::create_dir_all(&secret_skill).expect("secret dir");
+    fs::write(
+        secret_skill.join("SKILL.md"),
+        r#"---
+name: secret-skill
+description: Skill with a hidden secret fixture.
+---
+
+# Secret Skill
+"#,
+    )
+    .expect("write skill");
+    fs::write(secret_skill.join(".env.secret"), "TOKEN=secret\n").expect("write secret");
+    let secret_import = run_cli(
+        project.path(),
+        &[
+            "pack",
+            "import-skill",
+            secret_skill.to_str().expect("skill path"),
+        ],
+    );
+    assert!(!secret_import.status.success(), "secret import should fail");
+    assert!(
+        stderr(&secret_import).contains("hidden secret-like file"),
+        "stderr: {}",
+        stderr(&secret_import)
+    );
+}
+
+#[test]
+fn cli_export_sanitized_and_check_public_boundary_commands_gate_private_markers() {
+    let project = TempDir::new().expect("tempdir");
+
+    let public_example = run_cli(
+        project.path(),
+        &["--json", "export", "public-example", "release-manager"],
+    );
+    assert!(
+        public_example.status.success(),
+        "{}",
+        stderr(&public_example)
+    );
+    let public_json = json_output(&public_example);
+    assert_json_contract(&public_json, "export", Some(project.path()));
+    assert_eq!(public_json["action"], json!("public-example"));
+    assert!(project
+        .path()
+        .join(".metactl/exports/public-examples/release-manager/SKILL.md")
+        .exists());
+
+    let sanitized = run_cli(
+        project.path(),
+        &["--json", "export", "sanitized", "release-manager"],
+    );
+    assert!(sanitized.status.success(), "{}", stderr(&sanitized));
+    let sanitized_json = json_output(&sanitized);
+    assert_json_contract(&sanitized_json, "export", Some(project.path()));
+    assert_eq!(sanitized_json["action"], json!("sanitized"));
+    assert!(sanitized_json["export_lock"]["original_digest"]
+        .as_str()
+        .is_some());
+    assert!(sanitized_json["export_lock"]["sanitized_digest"]
+        .as_str()
+        .is_some());
+
+    let clean_check = run_cli(project.path(), &["--json", "check-public-boundary"]);
+    assert!(clean_check.status.success(), "{}", stderr(&clean_check));
+    let clean_json = json_output(&clean_check);
+    assert_json_contract(&clean_json, "check-public-boundary", Some(project.path()));
+    assert_eq!(clean_json["status"], json!("pass"));
+
+    fs::write(
+        project.path().join("unsafe-export.md"),
+        "private_source: true\nprivate_kb: mcp://private-kb/release-policy\n",
+    )
+    .expect("write unsafe marker");
+    let unsafe_check = run_cli(project.path(), &["--json", "check-public-boundary"]);
+    assert!(!unsafe_check.status.success(), "unsafe check should fail");
+    let unsafe_json = json_output(&unsafe_check);
+    assert_eq!(unsafe_json["ok"], json!(false));
+    assert!(unsafe_json["details"][0]
+        .as_str()
+        .unwrap_or_default()
+        .contains("unsafe-export.md"));
+}
+
+#[test]
+fn committed_projection_profile_fixture_and_stale_lockfile_contract_are_explicit() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let profile: Value = serde_json::from_slice(
+        &fs::read(root.join("fixtures/library_stack/private-committed-projection/profile.json"))
+            .expect("committed_projection profile fixture"),
+    )
+    .expect("profile json");
+    assert_eq!(profile["committed_projection"]["enabled"], json!(true));
+    assert_eq!(
+        profile["committed_projection"]["public_boundary_gate"],
+        json!("required")
+    );
+    assert!(profile["committed_projection"]["allowed_repo_classes"]
+        .as_array()
+        .expect("allowed repo classes")
+        .iter()
+        .any(|item| item == "private"));
+
+    let committed_lockfile: Value = serde_json::from_slice(
+        &fs::read(root.join("fixtures/library_stack/private-committed-projection/lock.json"))
+            .expect("committed_projection lock fixture"),
+    )
+    .expect("committed lock json");
+    let resolved_artifact = &committed_lockfile["resolved_artifacts"][0];
+    assert_eq!(
+        resolved_artifact["x-provenance"]["source_id"],
+        json!("user-overlay")
+    );
+    assert_eq!(
+        resolved_artifact["x-provenance"]["artifact_digest"],
+        resolved_artifact["artifact_digest"]
+    );
+    assert_eq!(resolved_artifact["x-freshness"]["status"], json!("fresh"));
+    assert_eq!(
+        resolved_artifact["x-freshness"]["code"],
+        json!("METACTL_KS_FRESH")
+    );
+
+    let stale_lockfile: Value = serde_json::from_slice(
+        &fs::read(root.join("fixtures/library_stack/stale-lockfile/lock.json"))
+            .expect("stale lockfile fixture"),
+    )
+    .expect("stale lockfile json");
+    assert_eq!(stale_lockfile["x-stale-lockfile"]["status"], json!("stale"));
+    assert_eq!(
+        stale_lockfile["x-stale-lockfile"]["reason"],
+        json!("source_digest_changed")
+    );
+    assert_eq!(
+        stale_lockfile["x-stale-lockfile"]["code"],
+        json!("METACTL_STACK_SOURCE_DIGEST_CHANGED")
+    );
+}
+
+#[test]
 fn cli_help_and_parsing_main_help() {
     let output = Command::new(cli_bin())
         .arg("--help")
@@ -2437,6 +2717,257 @@ fn cli_init_bind_profile_writes_extends_profile() {
     assert!(init.status.success(), "{}", stderr(&init));
     let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("read config");
     assert!(config.contains("extends_profile: team-profile"), "{config}");
+}
+
+#[test]
+fn cli_check_strict_fails_expired_fail_policy_knowledge_source() {
+    let project = TempDir::new().expect("tempdir");
+    let custom = TempDir::new().expect("custom library");
+    let ks_dir = custom.path().join("knowledge_sources");
+    fs::create_dir_all(&ks_dir).expect("knowledge dir");
+    fs::write(
+        ks_dir.join("expired.json"),
+        serde_json::to_string_pretty(&json!({
+            "kind": "knowledge_source",
+            "id": "expired-standards",
+            "version": "1.0.0",
+            "title": "Expired Standards",
+            "source_kind": "filesystem_markdown",
+            "uri_scheme": "file",
+            "allowed_targets": ["codex-cli"],
+            "byte_budget": {"max_search_bytes": 4096, "max_read_bytes": 4096, "max_search_results": 5},
+            "trust_tier": "org_validated",
+            "freshness": {
+                "owner": "fixtures",
+                "last_verified": "2000-01-01T00:00:00Z",
+                "expires_after_days": 1,
+                "source_digests": ["sha256:0123456789abcdef0123456789abcdef"],
+                "freshness_policy": "fail",
+                "review_status": "active"
+            },
+            "operations": {
+                "search": {"enabled": true, "max_bytes": 4096, "max_results": 5},
+                "read": {"enabled": true, "max_bytes": 4096, "max_results": 1},
+                "freshness": {"enabled": true, "max_bytes": 1024, "max_results": 1},
+                "propose_update": {"enabled": false, "mode": "request_only"}
+            },
+            "adapter": {"base_path": "docs", "allowed_uri_prefixes": ["file:docs/"]}
+        }))
+        .expect("knowledge json"),
+    )
+    .expect("write knowledge source");
+
+    fs::write(
+        project.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1
+role: builder
+policy: brownfield-safe-builder
+targets:
+- codex-cli
+starter_library:
+- {}
+- {}
+",
+            starter_library_root(),
+            custom.path().display()
+        ),
+    )
+    .expect("write config");
+
+    let sync = run_cli(
+        project.path(),
+        &["--json", "sync", "--target", "codex", "--apply"],
+    );
+    assert!(sync.status.success(), "{}", stderr(&sync));
+
+    let check = run_cli(project.path(), &["--json", "check", "--strict"]);
+    assert!(!check.status.success(), "strict check should fail");
+    let check_json = json_output(&check);
+    assert_eq!(check_json["ok"], json!(false));
+    assert_eq!(check_json["freshness"][0]["id"], json!("expired-standards"));
+    assert_eq!(check_json["freshness"][0]["status"], json!("fail"));
+    assert_eq!(
+        check_json["freshness"][0]["code"],
+        json!("METACTL_KS_EXPIRED_FAIL")
+    );
+    assert_eq!(
+        check_json["freshness"][0]["source_digests"][0],
+        json!("sha256:0123456789abcdef0123456789abcdef")
+    );
+}
+
+#[test]
+fn cli_check_strict_reports_warn_ignore_and_superseded_knowledge_sources() {
+    let project = TempDir::new().expect("tempdir");
+    let custom = TempDir::new().expect("custom library");
+    let ks_dir = custom.path().join("knowledge_sources");
+    fs::create_dir_all(&ks_dir).expect("knowledge dir");
+
+    let write_source = |file_name: &str, manifest: Value| {
+        fs::write(
+            ks_dir.join(file_name),
+            serde_json::to_string_pretty(&manifest).expect("knowledge json"),
+        )
+        .expect("write knowledge source");
+    };
+    let source = |id: &str,
+                  freshness_policy: &str,
+                  review_status: &str,
+                  superseded_by: Vec<&str>| {
+        json!({
+            "kind": "knowledge_source",
+            "id": id,
+            "version": "1.0.0",
+            "title": id,
+            "source_kind": "filesystem_markdown",
+            "uri_scheme": "file",
+            "allowed_targets": ["codex-cli"],
+            "byte_budget": {"max_search_bytes": 4096, "max_read_bytes": 4096, "max_search_results": 5},
+            "trust_tier": "org_validated",
+            "freshness": {
+                "owner": "fixtures",
+                "last_verified": "2000-01-01T00:00:00Z",
+                "expires_after_days": 1,
+                "source_digests": ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+                "freshness_policy": freshness_policy,
+                "review_status": review_status,
+                "superseded_by": superseded_by
+            },
+            "operations": {
+                "search": {"enabled": true, "max_bytes": 4096, "max_results": 5},
+                "read": {"enabled": true, "max_bytes": 4096, "max_results": 1},
+                "freshness": {"enabled": true, "max_bytes": 1024, "max_results": 1},
+                "propose_update": {"enabled": false, "mode": "request_only"}
+            },
+            "adapter": {"base_path": "docs", "allowed_uri_prefixes": ["file:docs/"]}
+        })
+    };
+    write_source(
+        "expired-warn.json",
+        source("expired-warn", "warn", "active", Vec::new()),
+    );
+    write_source(
+        "expired-ignore.json",
+        source("expired-ignore", "ignore", "active", Vec::new()),
+    );
+    let mut superseded_source = source(
+        "superseded-source",
+        "warn",
+        "superseded",
+        vec!["knowledge_source:current-source"],
+    );
+    superseded_source["freshness"]["last_verified"] = json!("2999-01-01T00:00:00Z");
+    write_source("superseded-source.json", superseded_source);
+
+    fs::write(
+        project.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1
+role: builder
+policy: brownfield-safe-builder
+targets:
+- codex-cli
+starter_library:
+- {}
+- {}
+",
+            starter_library_root(),
+            custom.path().display()
+        ),
+    )
+    .expect("write config");
+
+    let sync = run_cli(
+        project.path(),
+        &["--json", "sync", "--target", "codex", "--apply"],
+    );
+    assert!(sync.status.success(), "{}", stderr(&sync));
+
+    let check = run_cli(project.path(), &["--json", "check", "--strict"]);
+    assert!(check.status.success(), "{}", stderr(&check));
+    let check_json = json_output(&check);
+    let freshness = check_json["freshness"]
+        .as_array()
+        .expect("freshness findings");
+    let by_id = |id: &str| {
+        freshness
+            .iter()
+            .find(|item| item["id"] == id)
+            .unwrap_or_else(|| panic!("missing freshness finding for {id}: {freshness:?}"))
+    };
+
+    let warn = by_id("expired-warn");
+    assert_eq!(warn["status"], json!("warn"));
+    assert_eq!(warn["code"], json!("METACTL_KS_EXPIRED_WARN"));
+    assert_eq!(
+        warn["source_digests"][0],
+        json!("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    );
+    assert_eq!(warn["trust_tier"], json!("org_validated"));
+
+    let ignored = by_id("expired-ignore");
+    assert_eq!(ignored["status"], json!("ignored"));
+    assert_eq!(ignored["code"], json!("METACTL_KS_EXPIRED_IGNORE"));
+    assert_eq!(ignored["freshness_policy"], json!("ignore"));
+
+    let superseded = by_id("superseded-source");
+    assert_eq!(superseded["status"], json!("warn"));
+    assert_eq!(superseded["code"], json!("METACTL_KS_SUPERSEDED"));
+    assert_eq!(
+        superseded["superseded_by"][0],
+        json!("knowledge_source:current-source")
+    );
+}
+
+#[test]
+fn cli_v1_user_private_library_project_link_sync_and_check_flow() {
+    let project = TempDir::new().expect("tempdir");
+
+    let init = run_cli(
+        project.path(),
+        &["--json", "library", "init", "--user", "--profile", "solo"],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+    let init_json = json_output(&init);
+    assert_json_contract(&init_json, "library", Some(project.path()));
+    let library_root = PathBuf::from(init_json["library_root"].as_str().expect("library root"));
+    assert!(library_root.join("packs").is_dir());
+    assert!(PathBuf::from(init_json["profile_path"].as_str().expect("profile path")).exists());
+
+    let link = run_cli(
+        project.path(),
+        &["--json", "project", "link", "--profile", "solo"],
+    );
+    assert!(link.status.success(), "{}", stderr(&link));
+    let link_json = json_output(&link);
+    assert_json_contract(&link_json, "project", Some(project.path()));
+    let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("config");
+    assert!(config.contains("extends_profile: solo"), "{config}");
+
+    let preview = run_cli(
+        project.path(),
+        &["--json", "sync", "--target", "codex,claude", "--preview"],
+    );
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let preview_json = json_output(&preview);
+    assert_json_contract(&preview_json, "sync", Some(project.path()));
+    assert_eq!(preview_json["preview"], json!(true));
+    assert!(!project.path().join("AGENTS.md").exists());
+
+    let apply = run_cli(
+        project.path(),
+        &["--json", "sync", "--target", "codex,claude", "--apply"],
+    );
+    assert!(apply.status.success(), "{}", stderr(&apply));
+    assert!(project.path().join("AGENTS.md").exists());
+    assert!(project.path().join("CLAUDE.md").exists());
+
+    let check = run_cli(project.path(), &["--json", "check", "--strict"]);
+    assert!(check.status.success(), "{}", stderr(&check));
+    let check_json = json_output(&check);
+    assert_json_contract(&check_json, "validate", Some(project.path()));
+    assert_eq!(check_json["strict"], json!(true));
 }
 
 #[test]

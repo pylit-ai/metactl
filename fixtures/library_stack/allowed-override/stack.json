@@ -1,0 +1,84 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack",
+  "id": "fixture-allowed-override",
+  "version": "1.0.0",
+  "title": "Fixture allowed-override",
+  "active_profile_ref": "default",
+  "sources": [
+    {
+      "kind": "library_source",
+      "id": "org-baseline",
+      "version": "1.0.0",
+      "title": "org-baseline",
+      "source_role": "baseline",
+      "read_only": true,
+      "writable": false,
+      "pinned": true,
+      "visibility_scope": "shared",
+      "trust_tier": "org_validated",
+      "source": {
+        "type": "local_path",
+        "path": "sources/org-baseline",
+        "digest": "sha256:62665ee14ebd6a54da51753cb025303f15b85ad7094a1bd4e9d980d2e0dc25fe"
+      },
+      "artifacts": [
+        {
+          "artifact_ref": {
+            "kind": "pack",
+            "id": "python-refactor",
+            "version": "1.0.0"
+          },
+          "digest": "sha256:7b7a04caa8336d88ccf1c2c79fa66ba798c6dd35133e5ba32ccb8790273d5d9e",
+          "source_path": "packs/python-refactor.json",
+          "override_policy": "allow_overlay",
+          "override_reason": "profile permits local specialization"
+        }
+      ]
+    },
+    {
+      "kind": "library_source",
+      "id": "user-overlay",
+      "version": "1.0.0",
+      "title": "user-overlay",
+      "source_role": "overlay",
+      "read_only": false,
+      "writable": true,
+      "pinned": true,
+      "visibility_scope": "private",
+      "trust_tier": "first_party_validated",
+      "source": {
+        "type": "local_path",
+        "path": "sources/user-overlay",
+        "digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d"
+      },
+      "artifacts": [
+        {
+          "artifact_ref": {
+            "kind": "pack",
+            "id": "python-refactor",
+            "version": "1.0.1"
+          },
+          "digest": "sha256:a60528bd35f8e330f1ce40190c02fa7c0f74457eef754594f4c5b51ba00faf4a",
+          "source_path": "packs/python-refactor.json"
+        }
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "kind": "library_profile",
+      "id": "default",
+      "version": "1.0.0",
+      "title": "default",
+      "baseline_refs": [
+        "org-baseline"
+      ],
+      "overlay_ref": "user-overlay",
+      "baseline_precedence": "fail_on_conflict",
+      "default_targets": [
+        "codex-cli"
+      ]
+    }
+  ]
+}

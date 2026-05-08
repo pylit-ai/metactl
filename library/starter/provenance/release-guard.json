@@ -5,7 +5,7 @@
     "id": "release-guard",
     "version": "1.1.0"
   },
-  "digest": "sha256:release-guard-1.1.0",
+  "digest": "sha256:2061b2b2b93458a566c6d8280228e49e47cff2908707420e3ca0f68047245280",
   "origin": "library/starter/packs/release-guard.json",
   "imported_from_ecosystem": "first_party",
   "review": {

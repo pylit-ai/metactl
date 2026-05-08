@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/starter_library_manifest.schema.json",
+  "title": "metactl Starter Library Manifest",
+  "type": "object",
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "kind": { "const": "starter_library" },
+    "id": { "$ref": "common.schema.json#/$defs/slug" },
+    "version": { "$ref": "common.schema.json#/$defs/version_string" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "owner": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "minimum_roles": { "type": "integer", "minimum": 0 },
+    "minimum_packs": { "type": "integer", "minimum": 0 },
+    "supported_targets": { "$ref": "common.schema.json#/$defs/string_list" },
+    "promotion_requirements": { "$ref": "common.schema.json#/$defs/string_list" }
+  },
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "version",
+    "title",
+    "owner",
+    "minimum_roles",
+    "minimum_packs",
+    "supported_targets",
+    "promotion_requirements"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

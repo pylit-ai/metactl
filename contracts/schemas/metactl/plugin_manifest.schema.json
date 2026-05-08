@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/plugin_manifest.schema.json",
+  "title": "metactl Starter Plugin Manifest",
+  "type": "object",
+  "properties": {
+    "name": { "$ref": "common.schema.json#/$defs/slug" },
+    "entrypoint": { "$ref": "common.schema.json#/$defs/path" },
+    "description": { "type": "string", "minLength": 1, "maxLength": 1000 }
+  },
+  "required": ["name", "entrypoint", "description"],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

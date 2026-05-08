@@ -30,7 +30,7 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["role", "pack", "policy", "target", "artifact", "rule", "output", "overlay"]
+          "enum": ["role", "pack", "policy", "target", "artifact", "rule", "output", "overlay", "knowledge_source"]
         },
         "id": { "$ref": "#/$defs/slug" },
         "version": { "$ref": "#/$defs/version_string" }

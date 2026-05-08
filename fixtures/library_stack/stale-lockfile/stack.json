@@ -1,0 +1,52 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack",
+  "id": "fixture-stale-lockfile",
+  "version": "1.0.0",
+  "title": "fixture-stale-lockfile",
+  "active_profile_ref": "default",
+  "sources": [
+    {
+      "kind": "library_source",
+      "id": "user-overlay",
+      "version": "1.0.0",
+      "title": "user-overlay",
+      "source_role": "overlay",
+      "read_only": false,
+      "writable": true,
+      "pinned": true,
+      "visibility_scope": "private",
+      "trust_tier": "first_party_validated",
+      "source": {
+        "type": "local_path",
+        "path": "sources/user-overlay",
+        "digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d"
+      },
+      "artifacts": [
+        {
+          "artifact_ref": {
+            "kind": "pack",
+            "id": "user-pack",
+            "version": "1.0.0"
+          },
+          "digest": "sha256:c1001d372471d3640982ea8ca930a9aa24c4299c3e9107ea49b3ddf4ef7ce432",
+          "source_path": "packs/user-pack.json"
+        }
+      ]
+    }
+  ],
+  "profiles": [
+    {
+      "kind": "library_profile",
+      "id": "default",
+      "version": "1.0.0",
+      "title": "default",
+      "baseline_refs": [],
+      "overlay_ref": "user-overlay",
+      "baseline_precedence": "fail_on_conflict",
+      "default_targets": [
+        "codex-cli"
+      ]
+    }
+  ]
+}

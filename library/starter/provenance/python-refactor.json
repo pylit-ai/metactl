@@ -5,7 +5,7 @@
     "id": "python-refactor",
     "version": "2.0.0"
   },
-  "digest": "sha256:python-refactor",
+  "digest": "sha256:742e7a50940bd580666811769ccff2cc2501f432841e15572f81242f6144f6c9",
   "origin": "library/starter/packs/python-refactor.json",
   "imported_from_ecosystem": "first_party",
   "review": {

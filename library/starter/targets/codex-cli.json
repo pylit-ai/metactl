@@ -33,6 +33,12 @@
       "surface_merge_strategy": "optional"
     }
   ],
+  "apply_modes": [
+    "copy",
+    "patch",
+    "symlink",
+    "takeover"
+  ],
   "local_projection": {
     "support": "degraded",
     "notes": "Codex CLI does not natively support a local instruction overlay file."

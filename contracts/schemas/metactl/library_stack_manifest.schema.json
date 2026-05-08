@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/library_stack_manifest.schema.json",
+  "title": "metactl Library Stack Manifest",
+  "type": "object",
+  "properties": {
+    "api_version": {
+      "const": "metactl/v2alpha1"
+    },
+    "kind": {
+      "const": "library_stack"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version_string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "active_profile_ref": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "$ref": "library_source_manifest.schema.json"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "library_profile_manifest.schema.json"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
+  },
+  "required": [
+    "api_version",
+    "kind",
+    "id",
+    "version",
+    "title",
+    "active_profile_ref",
+    "sources",
+    "profiles"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

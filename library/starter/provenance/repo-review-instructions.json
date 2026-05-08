@@ -5,7 +5,7 @@
     "id": "repo-review-instructions",
     "version": "1.0.0"
   },
-  "digest": "sha256:repo-review-instructions",
+  "digest": "sha256:e933325d2d285dc2b141a44d48bcc1ac45960970b852508cd0f6d5be435ad785",
   "origin": "library/starter/packs/repo-review-instructions.json",
   "imported_from_ecosystem": "first_party",
   "review": {

@@ -10,9 +10,9 @@ MCP_SCOPE ?= project
 MCP_LIBRARY_ROOT ?= $(CURDIR)/library/starter
 MCP_PROJECT_ROOT ?= $(CURDIR)
 
-.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval run-metactld smoke-stdio smoke-cli smoke-dogfood verify
+.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval run-metactld smoke-stdio smoke-cli smoke-dogfood verify-v1-charter verify-public-boundary verify-docs-links verify-v1-release-gate verify-v1-lightweight-control-plane verify
 validate-contracts: $(VALIDATE_STAMP)
-	$(VALIDATE_PYTHON) scripts/validate_contracts.py
+	$(VALIDATE_PYTHON) scripts/validate_contracts.py --include-starter-library --include-targets --include-knowledge-fixtures --library-stack-fixtures
 
 metactl-validate-contracts: validate-contracts
 
@@ -56,7 +56,23 @@ smoke-cli:
 smoke-dogfood:
 	bash scripts/smoke_dogfood.sh
 
-verify: metactl-validate-contracts metactl-test metactl-check smoke-stdio smoke-cli smoke-dogfood
+verify-v1-charter:
+	$(PYTHON) scripts/verify_v1_charter.py
+
+verify-public-boundary:
+	bash scripts/check_public_boundary.sh
+	$(PYTHON) scripts/verify_public_boundary.py
+
+verify-docs-links:
+	$(PYTHON) scripts/verify_docs_links.py
+
+verify-v1-release-gate: $(VALIDATE_STAMP)
+	$(VALIDATE_PYTHON) scripts/verify_v1_release_gate.py
+
+verify-v1-lightweight-control-plane: $(VALIDATE_STAMP)
+	$(VALIDATE_PYTHON) scripts/verify_v1_lightweight_control_plane.py --report tmp/v1-lightweight-control-plane-report.json
+
+verify: verify-v1-charter verify-public-boundary verify-docs-links verify-v1-release-gate metactl-validate-contracts metactl-test metactl-check smoke-stdio smoke-cli smoke-dogfood
 
 $(VALIDATE_STAMP): requirements-dev.txt
 	$(PYTHON) -m venv $(VALIDATE_VENV)

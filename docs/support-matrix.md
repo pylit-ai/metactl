@@ -7,6 +7,7 @@ Support tiers describe what this repository verifies today.
 | Codex CLI | Tier 1, conformance-covered | Public fixtures and smoke tests cover generated Codex surfaces. |
 | Claude Code | Tier 1, conformance-covered | Public fixtures and smoke tests cover generated Claude surfaces. |
 | Cursor | Tier 2, preview | Public fixtures cover the target, but compatibility is not yet a release promise. |
+| Filesystem Agent | Experimental | Generic descriptor fixture for agents that read files from a project tree. |
 | Gemini CLI | Tier 2, preview | Public fixtures cover the target, but compatibility is not yet a release promise. |
 
 ## Tier Definitions

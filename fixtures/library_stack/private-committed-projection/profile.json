@@ -1,0 +1,19 @@
+{
+  "kind": "library_profile",
+  "id": "private-cloud-agent",
+  "version": "1.0.0",
+  "title": "Private Cloud Agent Profile",
+  "overlay_source_id": "user-overlay",
+  "baseline_source_ids": [
+    "org-baseline"
+  ],
+  "committed_projection": {
+    "enabled": true,
+    "public_boundary_gate": "required",
+    "allowed_repo_classes": [
+      "private"
+    ],
+    "lockfile_required": true,
+    "records_projection_mode": true
+  }
+}

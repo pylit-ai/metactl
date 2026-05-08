@@ -5,7 +5,7 @@
     "id": "migration-guard",
     "version": "1.0.0"
   },
-  "digest": "sha256:migration-guard",
+  "digest": "sha256:47d3d4a7d28b21bbb104d53275faabad7e5daefccea32e236862a8e1910b35d3",
   "origin": "library/starter/packs/migration-guard.json",
   "imported_from_ecosystem": "first_party",
   "review": {

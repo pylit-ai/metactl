@@ -13,15 +13,15 @@ use crate::types::{
     ActivationClass, ApplyMode, ApplyReport, CapabilityGap, CompileManifest, CompileParams,
     CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus, ExplainParams,
     ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
-    InvocationOverlay, LocalProjectionSupport, PackImport, PackManifest, PackResource,
-    PolicyEnforcementReport, PolicyManifest, PolicyOperator, PolicyRuleReport, PolicySelectors,
-    PolicySubject, PromotionStatus, ProvenanceEnvelope, ProvenanceReview, RealizedEnforcementClass,
-    ReasonCode, Ref, RefKind, RequestedEnforcementClass, ResolveGraph, ResolveParams, ResourceKind,
-    RevertReport, RoleManifest, RuntimeTemplateRef, SearchMatch, SearchMatchEvidence, SearchParams,
-    SearchResult, SideEffectClass, SuppressedRef, SuppressedSubject, SurfaceMergeStatus,
-    SurfaceMergeStrategy, SurfaceRelevanceTier, SurfaceSelectionDecision, SurfaceSelectionMode,
-    TargetCapabilityMatrix, TrustTier, ValidateParams, ValidationCheck, ValidationReport,
-    ValidationStatus, VisibilityScope,
+    InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport, PackImport, PackManifest,
+    PackResource, PolicyEnforcementReport, PolicyManifest, PolicyOperator, PolicyRuleReport,
+    PolicySelectors, PolicySubject, PromotionStatus, ProvenanceEnvelope, ProvenanceReview,
+    RealizedEnforcementClass, ReasonCode, Ref, RefKind, RequestedEnforcementClass, ResolveGraph,
+    ResolveParams, ResourceKind, RevertReport, RoleManifest, RuntimeTemplateRef, SearchMatch,
+    SearchMatchEvidence, SearchParams, SearchResult, SideEffectClass, SuppressedRef,
+    SuppressedSubject, SurfaceMergeStatus, SurfaceMergeStrategy, SurfaceRelevanceTier,
+    SurfaceSelectionDecision, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier,
+    ValidateParams, ValidationCheck, ValidationReport, ValidationStatus, VisibilityScope,
 };
 
 const CANDIDATE_VERSION: &str = "0.0.0-candidate";
@@ -35,6 +35,7 @@ pub struct LibraryRegistry {
     roles: BTreeMap<String, RoleManifest>,
     policies: BTreeMap<String, PolicyManifest>,
     targets: BTreeMap<String, TargetCapabilityMatrix>,
+    knowledge_sources: BTreeMap<String, KnowledgeSourceManifest>,
     packs: BTreeMap<String, DiscoveredPack>,
 }
 
@@ -139,6 +140,7 @@ impl LibraryRegistry {
             roles: BTreeMap::new(),
             policies: BTreeMap::new(),
             targets: BTreeMap::new(),
+            knowledge_sources: BTreeMap::new(),
             packs: BTreeMap::new(),
         };
         let mut provenance_by_subject = BTreeMap::new();
@@ -182,6 +184,10 @@ impl LibraryRegistry {
         self.targets.values().cloned().collect()
     }
 
+    pub fn list_knowledge_sources(&self) -> Vec<KnowledgeSourceManifest> {
+        self.knowledge_sources.values().cloned().collect()
+    }
+
     pub fn list_packs(&self) -> Vec<ListedPack> {
         self.packs
             .values()
@@ -202,6 +208,10 @@ impl LibraryRegistry {
 
     pub fn target_by_id(&self, id: &str) -> Option<TargetCapabilityMatrix> {
         self.targets.get(id).cloned()
+    }
+
+    pub fn knowledge_source_by_id(&self, id: &str) -> Option<KnowledgeSourceManifest> {
+        self.knowledge_sources.get(id).cloned()
     }
 
     pub fn pack_by_id(&self, id: &str) -> Option<ListedPack> {
@@ -763,6 +773,10 @@ impl LibraryRegistry {
             let manifest: TargetCapabilityMatrix = load_json(path.clone())?;
             self.register_target(path, manifest)?;
         }
+        for path in sorted_glob_json(&root.join("knowledge_sources"))? {
+            let manifest: KnowledgeSourceManifest = load_json(path.clone())?;
+            self.register_knowledge_source(path, manifest)?;
+        }
         for path in sorted_glob_json(&root.join("packs"))? {
             let manifest: PackManifest = load_json(path.clone())?;
             self.register_pack(root, path, manifest, None)?;
@@ -819,6 +833,22 @@ impl LibraryRegistry {
             path.display().to_string().as_str(),
             |existing: &TargetCapabilityMatrix| Some(existing.version.clone()),
             |current: &TargetCapabilityMatrix| Some(current.version.clone()),
+        )
+    }
+
+    fn register_knowledge_source(
+        &mut self,
+        path: PathBuf,
+        manifest: KnowledgeSourceManifest,
+    ) -> Result<()> {
+        register_unique_manifest(
+            &mut self.knowledge_sources,
+            manifest.id.clone(),
+            manifest,
+            "knowledge_source",
+            path.display().to_string().as_str(),
+            |existing: &KnowledgeSourceManifest| Some(existing.version.clone()),
+            |current: &KnowledgeSourceManifest| Some(current.version.clone()),
         )
     }
 
@@ -1514,15 +1544,15 @@ fn dedupe_degradations(degradations: &mut Vec<CapabilityGap>) {
 }
 
 fn supported_apply_modes(target: &TargetCapabilityMatrix) -> Vec<ApplyMode> {
+    if !target.apply_modes.is_empty() {
+        return target.apply_modes.clone();
+    }
     let mut modes = vec![ApplyMode::Copy];
     if target.capabilities.layered_instructions {
         modes.push(ApplyMode::Patch);
     }
     if target.capabilities.local_scripts {
         modes.push(ApplyMode::Symlink);
-    }
-    if target.target_id == "codex-cli" {
-        modes.push(ApplyMode::Takeover);
     }
     modes
 }
@@ -2923,6 +2953,7 @@ fn normalize_agents_candidate(
         task_tags: infer_tags(&contents, &pack_id),
         compatible_roles: Vec::new(),
         compatible_targets: Vec::new(),
+        knowledge_refs: Vec::new(),
         resources: vec![PackResource {
             path: relative_path(root, path)?,
             kind: ResourceKind::Instruction,
@@ -2981,6 +3012,7 @@ fn normalize_skill_candidate(
         task_tags: infer_tags(&contents, &pack_id),
         compatible_roles: Vec::new(),
         compatible_targets: Vec::new(),
+        knowledge_refs: Vec::new(),
         resources,
         imports: vec![PackImport {
             ecosystem: ImportEcosystem::SkillMd,
@@ -3782,6 +3814,7 @@ mod tests {
             task_tags: Vec::new(),
             compatible_roles: Vec::new(),
             compatible_targets: vec!["codex-cli".to_string()],
+            knowledge_refs: Vec::new(),
             resources: vec![PackResource {
                 path: "packs/roundtrip/SKILL.md".to_string(),
                 kind: ResourceKind::Instruction,
@@ -3956,6 +3989,7 @@ mod tests {
                 task_tags: Vec::new(),
                 compatible_roles: Vec::new(),
                 compatible_targets: vec!["codex-cli".to_string()],
+                knowledge_refs: Vec::new(),
                 resources: vec![
                     PackResource {
                         path: "packs/demo-pack/+++!!.md".to_string(),
@@ -4035,6 +4069,7 @@ mod tests {
                 task_tags: Vec::new(),
                 compatible_roles: Vec::new(),
                 compatible_targets: vec!["codex-cli".to_string()],
+                knowledge_refs: Vec::new(),
                 resources: vec![PackResource {
                     path: "packs/demo-pack/cli-audit/SKILL.md".to_string(),
                     kind: ResourceKind::Instruction,

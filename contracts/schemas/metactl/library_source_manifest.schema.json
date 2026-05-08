@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/library_source_manifest.schema.json",
+  "title": "metactl Library Source Manifest",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "library_source"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version_string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "source_role": {
+      "type": "string",
+      "enum": [
+        "baseline",
+        "overlay"
+      ]
+    },
+    "read_only": {
+      "type": "boolean"
+    },
+    "writable": {
+      "type": "boolean"
+    },
+    "pinned": {
+      "type": "boolean"
+    },
+    "visibility_scope": {
+      "$ref": "common.schema.json#/$defs/visibility_scope"
+    },
+    "trust_tier": {
+      "$ref": "common.schema.json#/$defs/trust_tier"
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "local_path",
+            "git"
+          ]
+        },
+        "path": {
+          "$ref": "common.schema.json#/$defs/path"
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "common.schema.json#/$defs/digest"
+        }
+      },
+      "required": [
+        "type",
+        "digest"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "local_path"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "git"
+            }
+          },
+          "required": [
+            "url",
+            "ref"
+          ]
+        }
+      ],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifact_ref": {
+            "$ref": "common.schema.json#/$defs/ref"
+          },
+          "digest": {
+            "$ref": "common.schema.json#/$defs/digest"
+          },
+          "source_path": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
+          "locked": {
+            "type": "boolean",
+            "default": false
+          },
+          "override_policy": {
+            "type": "string",
+            "enum": [
+              "none",
+              "allow_overlay",
+              "allow_baseline_precedence"
+            ],
+            "default": "none"
+          },
+          "override_reason": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "artifact_ref",
+          "digest",
+          "source_path"
+        ],
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
+  },
+  "required": [
+    "kind",
+    "id",
+    "version",
+    "title",
+    "source_role",
+    "read_only",
+    "writable",
+    "pinned",
+    "visibility_scope",
+    "trust_tier",
+    "source",
+    "artifacts"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

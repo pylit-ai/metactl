@@ -2,6 +2,7 @@ pub mod fixture_kernel;
 pub mod jsonrpc;
 pub mod kernel;
 pub mod library_registry;
+pub mod library_stack;
 pub mod materializer;
 pub mod mcp;
 pub mod project;

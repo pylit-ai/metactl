@@ -1,0 +1,130 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "conformance_matrix",
+  "id": "v1-core-targets",
+  "version": "1.0.0",
+  "title": "metactl v1 Core Target Conformance",
+  "targets": [
+    {
+      "target_id": "claude-code",
+      "support_level": "conformant",
+      "required_outputs": [
+        "CLAUDE.md",
+        ".claude/commands/{pack_id}/{resource_name}"
+      ],
+      "apply_modes": [
+        "copy",
+        "patch",
+        "symlink"
+      ],
+      "gates": [
+        "cargo test -p metactl cli_sync_multi_target_root_instruction_outputs_are_regular_files"
+      ],
+      "evidence_refs": [
+        "library/starter/targets/claude-code.json"
+      ]
+    },
+    {
+      "target_id": "codex-cli",
+      "support_level": "conformant",
+      "required_outputs": [
+        "AGENTS.md",
+        ".codex/skills/{pack_id}/{surface_slug}/SKILL.md"
+      ],
+      "apply_modes": [
+        "copy",
+        "patch",
+        "symlink",
+        "takeover"
+      ],
+      "gates": [
+        "cargo test -p metactl cli_v1_user_private_library_project_link_sync_and_check_flow"
+      ],
+      "evidence_refs": [
+        "library/starter/targets/codex-cli.json"
+      ]
+    },
+    {
+      "target_id": "cursor",
+      "support_level": "conformant",
+      "required_outputs": [
+        "AGENTS.md",
+        ".cursor/rules/metactl-pack-index.mdc"
+      ],
+      "apply_modes": [
+        "copy",
+        "patch",
+        "symlink"
+      ],
+      "gates": [
+        "cargo test -p metactl cursor_compile_produces_expected_output_paths"
+      ],
+      "evidence_refs": [
+        "library/starter/targets/cursor.json"
+      ]
+    },
+    {
+      "target_id": "filesystem-agent",
+      "support_level": "experimental",
+      "required_outputs": [
+        "AGENTS.md",
+        ".metactl/filesystem-agent/{pack_id}/{resource_name}"
+      ],
+      "apply_modes": [
+        "copy",
+        "patch",
+        "symlink"
+      ],
+      "gates": [
+        "filesystem-agent compile fixture"
+      ],
+      "evidence_refs": [
+        "library/starter/targets/filesystem-agent.json"
+      ],
+      "notes": "Generic descriptor for agents that read project files directly."
+    },
+    {
+      "target_id": "gemini-cli",
+      "support_level": "conformant",
+      "required_outputs": [
+        ".gemini/extensions/{pack_id}/gemini-extension.json"
+      ],
+      "apply_modes": [
+        "copy",
+        "patch",
+        "symlink"
+      ],
+      "gates": [
+        "cargo test -p metactl cli_sync_gemini_produces_extension_bundle"
+      ],
+      "evidence_refs": [
+        "library/starter/targets/gemini-cli.json"
+      ]
+    },
+    {
+      "target_id": "openclaw",
+      "support_level": "experimental",
+      "required_outputs": [
+        "OPENCLAW.md"
+      ],
+      "apply_modes": [
+        "copy",
+        "patch",
+        "symlink"
+      ],
+      "gates": [
+        "cargo test -p metactl cli_sync_all_targets_no_double_path_segments"
+      ],
+      "evidence_refs": [
+        "library/starter/targets/openclaw.json"
+      ]
+    }
+  ],
+  "release_gates": [
+    "make verify-v1-charter",
+    "make verify-public-boundary",
+    "make verify-docs-links",
+    "make validate-contracts",
+    "cargo test -p metactl"
+  ]
+}

@@ -20,6 +20,11 @@ It is not an upstream standards dossier; use upstream vendor documentation for f
 - Rules: `.cursor/rules/*.mdc`
 - Skills: `.cursor/skills/<pack_id>/<surface_slug>/SKILL.md`
 
+## Filesystem Agent
+
+- Root instruction document: `AGENTS.md`
+- Generic pack resources: `.metactl/filesystem-agent/<pack_id>/<resource_name>`
+
 ## Gemini CLI
 
 - Root instruction document: `GEMINI.md`

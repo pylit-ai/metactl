@@ -5,7 +5,7 @@
     "id": "local-only-example",
     "version": "1.0.0"
   },
-  "digest": "sha256:local-only-example",
+  "digest": "sha256:88d570e75b96fa3916f7a72f60c4cc8c1b40788df21908393caa1c139411c983",
   "origin": "library/starter/packs/local-only-example.json",
   "imported_from_ecosystem": "first_party",
   "review": {

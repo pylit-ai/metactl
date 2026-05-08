@@ -1,0 +1,25 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "sanitized_export",
+  "id": "sample-public-pack-export",
+  "source_artifact": "private://example/source-pack.json",
+  "sanitizer_transform": "drop_private_source_markers_and_replace_paths",
+  "dropped_fields": [
+    "private_source",
+    "customer_name",
+    "proprietary_repo_path"
+  ],
+  "reviewer_diff_path": "fixtures/v1/sample-public-pack-export.diff",
+  "original_digest": "sha256:318c69eac317a0e89d890f20121c54d908b3e5732cc5a3958a15d9860893c2e1",
+  "sanitized_digest": "sha256:8e8a0bbef32665202479e50f399ed542aa3999f35eecb15f3fa1b1660a97c9dd",
+  "exported_at": "2026-05-07T00:00:00Z",
+  "applied_sanitizers": [
+    "private-marker-denylist",
+    "local-path-placeholder"
+  ],
+  "public_boundary_status": "pass",
+  "review_status": "reviewed",
+  "metadata": {
+    "example": "true"
+  }
+}

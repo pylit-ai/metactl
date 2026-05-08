@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/knowledge_source_manifest.schema.json",
+  "title": "metactl Knowledge Source Manifest",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "const": "knowledge_source"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/slug"
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/version_string"
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "source_kind": {
+      "type": "string",
+      "enum": [
+        "filesystem_markdown",
+        "llms_txt_index",
+        "mcp_resource"
+      ]
+    },
+    "uri_scheme": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9+.-]*$"
+    },
+    "allowed_targets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "byte_budget": {
+      "type": "object",
+      "properties": {
+        "max_search_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "max_read_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "max_search_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "max_search_bytes",
+        "max_read_bytes",
+        "max_search_results"
+      ],
+      "additionalProperties": false
+    },
+    "trust_tier": {
+      "$ref": "common.schema.json#/$defs/trust_tier"
+    },
+    "freshness": {
+      "type": "object",
+      "properties": {
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "last_verified": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "expires_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "expires_after_days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3660
+        },
+        "source_digests": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/digest"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "freshness_policy": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "warn",
+            "fail"
+          ]
+        },
+        "review_status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "active",
+            "stale",
+            "superseded",
+            "retired"
+          ]
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "superseded_by": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "owner",
+        "last_verified",
+        "source_digests",
+        "freshness_policy",
+        "review_status"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "expires_at"
+          ]
+        },
+        {
+          "required": [
+            "expires_after_days"
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "operations": {
+      "type": "object",
+      "properties": {
+        "search": {
+          "$ref": "#/$defs/bounded_operation"
+        },
+        "read": {
+          "$ref": "#/$defs/bounded_operation"
+        },
+        "freshness": {
+          "$ref": "#/$defs/bounded_operation"
+        },
+        "propose_update": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "disabled",
+                "draft_only",
+                "pull_request_only",
+                "request_only"
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "mode"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "search",
+        "read",
+        "freshness",
+        "propose_update"
+      ],
+      "additionalProperties": false
+    },
+    "adapter": {
+      "type": "object",
+      "properties": {
+        "base_path": {
+          "$ref": "common.schema.json#/$defs/path"
+        },
+        "include_globs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "index_uri": {
+          "type": "string"
+        },
+        "static_index_path": {
+          "$ref": "common.schema.json#/$defs/path"
+        },
+        "server_id": {
+          "$ref": "common.schema.json#/$defs/slug"
+        },
+        "allowed_uri_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "static_fallback_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "allowed_uri_prefixes"
+      ],
+      "additionalProperties": false
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/string_map"
+    }
+  },
+  "required": [
+    "kind",
+    "id",
+    "version",
+    "title",
+    "source_kind",
+    "uri_scheme",
+    "allowed_targets",
+    "byte_budget",
+    "trust_tier",
+    "freshness",
+    "operations",
+    "adapter"
+  ],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "bounded_operation": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1048576
+        },
+        "max_results": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "enabled",
+        "max_bytes"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

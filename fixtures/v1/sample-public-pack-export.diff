@@ -1,0 +1,5 @@
+--- private/source-pack.json
++++ public/source-pack.json
+@@
+-private_source: true
++visibility_scope: shared

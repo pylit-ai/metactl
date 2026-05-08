@@ -1,0 +1,55 @@
+{
+  "kind": "knowledge_source",
+  "id": "fixture-llms-txt-index",
+  "version": "1.0.0",
+  "title": "Fixture llms.txt Index",
+  "source_kind": "llms_txt_index",
+  "uri_scheme": "https",
+  "allowed_targets": [
+    "codex-cli"
+  ],
+  "byte_budget": {
+    "max_search_bytes": 32768,
+    "max_read_bytes": 32768,
+    "max_search_results": 20
+  },
+  "trust_tier": "external_unreviewed",
+  "freshness": {
+    "owner": "fixtures",
+    "last_verified": "2026-05-07T00:00:00Z",
+    "expires_after_days": 30,
+    "source_digests": [
+      "sha256:3d060a5deade5f4ef4c578d8adca7f3d06a7cc6048fefb8af79211eca3d9e922"
+    ],
+    "freshness_policy": "warn",
+    "review_status": "active"
+  },
+  "operations": {
+    "search": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 20
+    },
+    "read": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 1
+    },
+    "freshness": {
+      "enabled": true,
+      "max_bytes": 4096,
+      "max_results": 1
+    },
+    "propose_update": {
+      "enabled": false,
+      "mode": "request_only"
+    }
+  },
+  "adapter": {
+    "index_uri": "https://example.invalid/llms.txt",
+    "static_index_path": "content/llms.txt",
+    "allowed_uri_prefixes": [
+      "https://example.invalid/"
+    ]
+  }
+}

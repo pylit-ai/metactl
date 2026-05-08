@@ -1,0 +1,46 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "kind": "library_stack_lock",
+  "stack_ref": {
+    "kind": "artifact",
+    "id": "fixture-one-baseline",
+    "version": "1.0.0"
+  },
+  "profile_ref": {
+    "kind": "artifact",
+    "id": "default",
+    "version": "1.0.0"
+  },
+  "resolved_artifacts": [
+    {
+      "artifact_ref": {
+        "kind": "pack",
+        "id": "baseline-pack",
+        "version": "1.0.0"
+      },
+      "source_id": "org-baseline",
+      "source_role": "baseline",
+      "source_digest": "sha256:62665ee14ebd6a54da51753cb025303f15b85ad7094a1bd4e9d980d2e0dc25fe",
+      "artifact_digest": "sha256:04d5b01e7563872bfe1acaf4e8092f4cc1bbf4b774074eb658ed8acf21a3a58b",
+      "locked": false,
+      "override_status": "none",
+      "generated_paths": []
+    },
+    {
+      "artifact_ref": {
+        "kind": "pack",
+        "id": "user-pack",
+        "version": "1.0.0"
+      },
+      "source_id": "user-overlay",
+      "source_role": "overlay",
+      "source_digest": "sha256:f247c381275c94b191008c3884a6d1dabdfdde465009df019cb62977affd1f5d",
+      "artifact_digest": "sha256:c1001d372471d3640982ea8ca930a9aa24c4299c3e9107ea49b3ddf4ef7ce432",
+      "locked": false,
+      "override_status": "none",
+      "generated_paths": []
+    }
+  ],
+  "conflicts": [],
+  "warnings": []
+}

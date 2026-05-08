@@ -1,0 +1,57 @@
+{
+  "kind": "knowledge_source",
+  "id": "fixture-mcp-resource",
+  "version": "1.0.0",
+  "title": "Fixture MCP Resource",
+  "source_kind": "mcp_resource",
+  "uri_scheme": "mcp",
+  "allowed_targets": [
+    "codex-cli"
+  ],
+  "byte_budget": {
+    "max_search_bytes": 8192,
+    "max_read_bytes": 8192,
+    "max_search_results": 10
+  },
+  "trust_tier": "org_validated",
+  "freshness": {
+    "owner": "fixtures",
+    "last_verified": "2026-05-07T00:00:00Z",
+    "expires_after_days": 30,
+    "source_digests": [
+      "sha256:0123456789abcdef0123456789abcdef"
+    ],
+    "freshness_policy": "warn",
+    "review_status": "active"
+  },
+  "operations": {
+    "search": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 20
+    },
+    "read": {
+      "enabled": true,
+      "max_bytes": 32768,
+      "max_results": 1
+    },
+    "freshness": {
+      "enabled": true,
+      "max_bytes": 4096,
+      "max_results": 1
+    },
+    "propose_update": {
+      "enabled": false,
+      "mode": "request_only"
+    }
+  },
+  "adapter": {
+    "server_id": "fixture-mcp",
+    "allowed_uri_prefixes": [
+      "mcp://fixture/"
+    ],
+    "static_fallback_refs": [
+      "mcp://fixture/docs/release"
+    ]
+  }
+}
