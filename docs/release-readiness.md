@@ -1,14 +1,14 @@
 # Release Readiness
 
-Last local verification: 2026-05-04.
+Last local verification: 2026-05-08.
 
 ## Dependency And License Scan
 
 - `cargo metadata --locked --format-version 1`: passed.
 - `cargo tree -d`: passed with no duplicate dependency versions reported.
 - `cargo audit`: passed.
-- `cargo publish -p metactl --dry-run --allow-dirty`: passed.
-- `cargo publish -p metactld --dry-run --allow-dirty`: deferred until `metactl` is published to crates.io, because `metactld` depends on `metactl = 0.1.0`.
+- `cargo publish -p metactl --dry-run --locked --allow-dirty`: passed for `0.1.1`.
+- `cargo publish -p metactld --dry-run --locked --allow-dirty`: deferred until `metactl` is published to crates.io, because `metactld` depends on the same published `metactl` version.
 
 License summary from Cargo metadata:
 
@@ -36,16 +36,21 @@ cargo fmt --check
 cargo check -p metactl -p metactld
 cargo test -p metactl
 make verify
+make verify-v1-release-gate
 cargo package -p metactl --allow-dirty --list
 cargo package -p metactld --allow-dirty --list
 ```
 
 Release artifacts should be created through `.github/workflows/release.yml`, which produces SHA-256 checksums and GitHub provenance attestations.
-Until `metactl` is present in the crates.io index, the release workflow packages only the `metactl` crate archive; `metactld` is still built into the binary archive, and its crate publish verification runs after `metactl` reaches the index.
+Until the matching `metactl` crate version is present in the crates.io index, the release workflow packages only the `metactl` crate archive; `metactld` is still built into the binary archive, and its crate publish verification runs after `metactl` reaches the index.
 
 Publish order for crates.io:
 
 1. Publish `metactl`.
-2. Wait for `metactl = 0.1.0` to appear in the crates.io index.
+2. Wait for `metactl = 0.1.1` to appear in the crates.io index.
 3. Run `cargo publish -p metactld --dry-run`.
 4. Publish `metactld`.
+
+## Public/Private Release Sync
+
+The public package manifests, public Git tag, and GitHub release are the source of truth for release versioning. A private overlay may drive release prep, but it should record the exact public commit, version, and tag it verified instead of defining a separate package version. Public release automation must not depend on the private overlay.

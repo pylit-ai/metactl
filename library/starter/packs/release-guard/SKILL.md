@@ -16,15 +16,17 @@ Use this skill to convert vague "looks ready" claims into an explicit release ga
    Record branch, commit SHA, status, remotes, local tags, remote tags, and existing package versions. Do not infer release freshness from local files alone.
 3. Choose the version and tag.
    Use the repo's declared version source (`Cargo.toml`, `pyproject.toml`, package manifest, or release config). If a tag already exists locally or remotely, stop and choose the next valid version before publishing.
-4. Run release gates before commit.
+4. Check version synchronization.
+   Keep the public package/tag version authoritative. Align workspace member versions and internal dependency versions, and, when a private overlay drives the release, verify the private overlay records the intended public commit, version, and tag rather than defining its own package version.
+5. Run release gates before commit.
    Execute the repo-specific local gates and any private-overlay leak/boundary checks. Treat skipped, unavailable, or failing gates as release blockers unless the user explicitly accepts the risk.
-5. Commit only the intended release diff.
+6. Commit only the intended release diff.
    Stage a reviewed set of files. Do not include unrelated local edits, generated caches, private notes, credentials, or environment files.
-6. Push code before tags.
+7. Push code before tags.
    Push the release commit first, observe required remote CI until green, then create and push the tag or trigger the release workflow.
-7. Verify release artifacts.
+8. Verify release artifacts.
    Confirm the GitHub release, registry package, checksums, provenance attestations, and install smoke tests appropriate to the project.
-8. Record recovery.
+9. Record recovery.
    Note exactly how to yank/unpublish where supported, delete a draft release, delete a bad tag, or publish a corrective patch.
 
 ## Rust/Cargo Procedure
@@ -43,10 +45,26 @@ Adjust for workspace dependency order. If one crate depends on another workspace
 
 For repos with public/private split, also run the private leak check and public boundary check before commit and before tag push.
 
+## Public/Private Version Sync
+
+Use one authoritative release version: the public package manifest and public release tag. Private overlays may keep release ledgers, internal checklists, or compatibility notes, but those records must point at the public repo commit/tag/version they verified. Do not let a private overlay introduce a second semantic version for the public artifact.
+
+Recommended private overlay record fields:
+
+- `public_repo`
+- `public_head`
+- `public_version`
+- `public_tag`
+- `verified_at`
+- `verification_commands`
+
+If a private overlay has its own internal spec or workflow version, name it separately as an overlay or protocol version, not as the public package version.
+
 ## Output Format
 
 - Release unit:
 - Version and tag:
+- Public/private sync:
 - Local gates:
 - Remote gates:
 - Published artifacts:
@@ -59,6 +77,7 @@ For repos with public/private split, also run the private leak check and public 
 - Do not push a tag before the release commit is on the intended branch.
 - Do not call a release complete until required remote CI and release workflows are green.
 - Do not publish a dependent Cargo crate until its dependency crate version exists in the registry index.
+- Do not let public package versions, workspace dependency versions, README status, and release tag drift apart.
 - Do not include private-overlay instructions, local paths, account names, credentials, or generated agent state in public release artifacts.
 - Do not hand off a release without a recovery note.
 - Use `references/checklist.md` for the portable checklist and `references/rust-crate-release.md` for Rust/Cargo releases.

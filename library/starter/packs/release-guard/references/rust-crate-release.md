@@ -10,6 +10,7 @@ Use this procedure for Rust workspaces, CLIs, and libraries that publish GitHub 
 - Release tag, usually `vX.Y.Z`.
 - Release workflow trigger, usually tag push or manual `workflow_dispatch`.
 - Publish target: GitHub release, crates.io, both, or internal handoff only.
+- Private overlay release record or sync check, when a private overlay drives the public release.
 
 ## Preflight
 
@@ -36,6 +37,7 @@ make verify
 ```
 
 For private-overlay releases, run the private leak check before touching the public release tag.
+If the private overlay has a release sync checker, run it against the public checkout before commit and again before tagging.
 
 ## Version And Tag
 
@@ -44,6 +46,8 @@ For private-overlay releases, run the private leak check before touching the pub
 3. Check the registry if publishing to crates.io.
 4. If a tag or registry version already exists, bump to the next valid version before commit.
 5. Keep internal workspace dependency versions aligned.
+6. Keep human-facing version references aligned, such as README project status and release-readiness docs.
+7. For private-overlay releases, record the public commit, version, and tag in the private overlay; do not create a second package version in private docs.
 
 For a workspace where `metactld` depends on `metactl = "X.Y.Z"`, publish order is:
 
@@ -64,6 +68,17 @@ cargo publish --dry-run --workspace --locked
 
 If a workspace member cannot dry-run because an unpublished sibling crate is not in the registry yet, dry-run and publish in dependency order instead of weakening the gate.
 For binary archive workflows, it is acceptable to skip packaging a dependent crate until its sibling dependency exists in the registry, but still build and smoke-test the dependent binary.
+
+## Public/Private Synchronization
+
+For a public repo with a private overlay:
+
+1. Treat the public crate/package manifest as the version source of truth.
+2. Treat the public Git tag as the release identity.
+3. Keep private overlay release records as pointers: public repo, public commit, public version, public tag, verification time, and commands.
+4. Run public boundary checks in the public repo and private leak checks in the private overlay.
+5. Never make public CI or package metadata require the private overlay.
+6. Before tagging, verify the private release record matches the exact public commit that will receive the tag.
 
 ## Commit, Push, Release
 

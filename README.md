@@ -249,7 +249,7 @@ Public-boundary rules:
 
 ## Project Status
 
-Current crate version: `0.1.0`.
+Current crate version: `0.1.1`.
 
 Current API version: `metactl/v2alpha1`.
 

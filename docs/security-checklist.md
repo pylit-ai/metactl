@@ -8,6 +8,7 @@ Run this checklist before a public release.
 - Public tree contains no generated local agent roots.
 - Public examples use neutral placeholders.
 - Public package file lists exclude generated `.metactl/` state.
+- If a private overlay drove the release, it records the exact public commit, version, and tag it verified.
 
 ## Dependencies
 
@@ -24,6 +25,7 @@ Current scan record: `docs/release-readiness.md`.
 - `cargo check -p metactl -p metactld`
 - `cargo test -p metactl`
 - `make verify`
+- `make verify-v1-release-gate`
 - `cargo package -p metactl --allow-dirty --list`
 - `cargo package -p metactld --allow-dirty --list`
 - `cargo publish -p metactl --dry-run --allow-dirty`

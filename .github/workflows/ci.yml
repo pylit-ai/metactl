@@ -20,5 +20,7 @@ jobs:
         run: cargo test -p metactl
       - name: Validate contracts
         run: make metactl-validate-contracts
+      - name: V1 release gate
+        run: make verify-v1-release-gate
       - name: Public boundary
         run: bash scripts/check_public_boundary.sh

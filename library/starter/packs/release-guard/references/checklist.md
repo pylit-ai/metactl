@@ -2,6 +2,8 @@
 
 - release unit identified
 - version source checked
+- workspace package versions and internal dependency versions aligned
+- public/private release sync recorded when applicable
 - local and remote tags checked
 - changelog or release notes updated
 - local validation complete

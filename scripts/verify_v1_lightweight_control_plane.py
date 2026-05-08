@@ -27,10 +27,13 @@ REQUIRED_PATHS = {
 }
 
 COMMAND_GATES = [
+    ["cargo", "build", "-p", "metactl", "-p", "metactld"],
     [sys.executable, "scripts/verify_v1_charter.py"],
     ["bash", "scripts/check_public_boundary.sh"],
     [sys.executable, "scripts/verify_public_boundary.py"],
     [sys.executable, "scripts/verify_docs_links.py"],
+    [sys.executable, "scripts/verify_docs_commands.py"],
+    [sys.executable, "scripts/verify_mcp_adversarial.py"],
     [
         sys.executable,
         "scripts/validate_contracts.py",

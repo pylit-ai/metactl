@@ -29,6 +29,7 @@ jobs:
           cargo fmt --check
           cargo check -p metactl -p metactld
           cargo test -p metactl
+          make verify-v1-release-gate
           make metactl-validate-contracts
           bash scripts/check_public_boundary.sh
       - name: Package crates
