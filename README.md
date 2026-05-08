@@ -78,6 +78,23 @@ Expected success signal:
 Installed package `metactld v0.1.1` (executable `metactld`)
 ```
 
+The pinned commands above are reproducible for this release. To update to the
+latest published crates.io versions later:
+
+```bash
+cargo install metactl --locked --force
+cargo install metactld --locked --force
+```
+
+Check installed versions:
+
+```bash
+metactl --version
+metactld --help
+```
+
+`metactld` currently exposes `--help`, not `--version`.
+
 For source builds:
 
 ```bash
