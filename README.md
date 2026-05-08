@@ -57,25 +57,25 @@ Validation:
 ## Install
 
 ```bash
-cargo install metactl --version 0.1.1 --locked
+cargo install metactl --version 0.1.2 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.1` (executable `metactl`)
+Installed package `metactl v0.1.2` (executable `metactl`)
 ```
 
 For local MCP or JSON-RPC integration, install the daemon too:
 
 ```bash
-cargo install metactld --version 0.1.1 --locked
+cargo install metactld --version 0.1.2 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactld v0.1.1` (executable `metactld`)
+Installed package `metactld v0.1.2` (executable `metactld`)
 ```
 
 The pinned commands above are reproducible for this release. To update to the
@@ -104,7 +104,7 @@ cargo install --path crates/metactl --locked
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.1 (...)` (executable `metactl`)
+Installed package `metactl v0.1.2 (...)` (executable `metactl`)
 ```
 
 For local development without installing:
@@ -288,7 +288,7 @@ Public-boundary rules:
 
 ## Project Status
 
-Current crate version: `0.1.1`.
+Current crate version: `0.1.2`.
 
 Current API version: `metactl/v2alpha1`.
 

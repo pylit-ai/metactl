@@ -7,25 +7,25 @@ This guide covers the public local `metactl` CLI.
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.1 --locked
+cargo install metactl --version 0.1.2 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.1` (executable `metactl`)
+Installed package `metactl v0.1.2` (executable `metactl`)
 ```
 
 Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 
 ```bash
-cargo install metactld --version 0.1.1 --locked
+cargo install metactld --version 0.1.2 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactld v0.1.1` (executable `metactld`)
+Installed package `metactld v0.1.2` (executable `metactld`)
 ```
 
 The pinned commands above reproduce this release. To update to the latest

@@ -7,10 +7,10 @@ Last local verification: 2026-05-08.
 - `cargo metadata --locked --format-version 1`: passed.
 - `cargo tree -d`: passed with no duplicate dependency versions reported.
 - `cargo audit`: passed.
-- `cargo publish -p metactl --dry-run --locked --allow-dirty`: passed for `0.1.1`.
-- `cargo publish -p metactld --dry-run --locked --allow-dirty`: passed after `metactl = 0.1.1` was published to crates.io.
-- `cargo search metactl --limit 5`: verified `metactl = "0.1.1"` on crates.io.
-- `cargo search metactld --limit 5`: verified `metactld = "0.1.1"` on crates.io.
+- `cargo publish -p metactl --dry-run --locked --allow-dirty`: passed for `0.1.2`.
+- `cargo publish -p metactld --dry-run --locked --allow-dirty`: run after `metactl = 0.1.2` is published to crates.io.
+- `cargo search metactl --limit 5`: verify `metactl = "0.1.2"` after publication.
+- `cargo search metactld --limit 5`: verify `metactld = "0.1.2"` after publication.
 
 License summary from Cargo metadata:
 
@@ -50,7 +50,7 @@ The release workflow packages GitHub binary archives. crates.io publishing is ru
 Publish order for crates.io:
 
 1. Publish `metactl`.
-2. Wait for `metactl = 0.1.1` to appear in the crates.io index.
+2. Wait for `metactl = 0.1.2` to appear in the crates.io index.
 3. Run `cargo publish -p metactld --dry-run`.
 4. Publish `metactld`.
 
