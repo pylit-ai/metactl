@@ -33,27 +33,17 @@ Example from a repository being onboarded, using a separate metactl checkout:
 
 ```bash
 make -C /path/to/metactl metactl-mcp-install MCP_CLIENT=cursor MCP_PROJECT_ROOT="$PWD"
-```
-
-**Expected output:**
-
-```text
-Installed metactl MCP server for cursor.
-Config: /path/to/repo/.cursor/mcp.json
-Server: metactl
+# Installed metactl MCP server for cursor.
+# Config: /path/to/repo/.cursor/mcp.json
+# Server: metactl
 ```
 
 The helper is idempotent for entries it owns. It refuses to overwrite an existing unmanaged `metactl` server unless run with `--force`:
 
 ```bash
 python3 scripts/install_metactl_mcp.py cursor --force
-```
-
-**Expected output:**
-
-```text
-Updated .cursor/mcp.json
-Server `metactl` now points at metactld --mcp --stdio.
+# Updated .cursor/mcp.json
+# Server `metactl` now points at metactld --mcp --stdio.
 ```
 
 ## Direct Server Command
@@ -81,22 +71,12 @@ Prefer the installer above for consistency. These native commands are useful whe
 
 ```bash
 claude mcp add --transport stdio --scope project metactl -- "$(command -v metactld)" --mcp --stdio --library-root "$PWD/library/starter"
-```
-
-**Expected output:**
-
-```text
-Added project-scoped MCP server `metactl`.
+# Added project-scoped MCP server `metactl`.
 ```
 
 ```bash
 gemini mcp add -s project metactl "$(command -v metactld)" -- --mcp --stdio --library-root "$PWD/library/starter"
-```
-
-**Expected output:**
-
-```text
-Added MCP server `metactl`.
+# Added MCP server `metactl`.
 ```
 
 ## Verification
@@ -111,14 +91,9 @@ From another repository, run it through the metactl checkout:
 
 ```bash
 make -C /path/to/metactl metactl-mcp-smoke
-```
-
-**Expected output:**
-
-```text
-ok negotiated protocol: 2025-06-18
-ok tools: metactl_search_packs, metactl_explain, metactl_compile_preview, metactl_validate
-ok search first match: metactl-project-onboarding
+# ok negotiated protocol: 2025-06-18
+# ok tools: metactl_search_packs, metactl_explain, metactl_compile_preview, metactl_validate
+# ok search first match: metactl-project-onboarding
 ```
 
 If you run the server by hand, use an absolute library root:

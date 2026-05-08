@@ -73,12 +73,7 @@ Error: Apply refused for target codex-cli.
 
 ```bash
 make metactl-mcp-smoke
-```
-
-**Expected output:**
-
-```text
-ok negotiated protocol: 2025-06-18
-ok tools: metactl_search_packs, metactl_explain, metactl_compile_preview, metactl_validate
-ok search first match: metactl-project-onboarding
+# ok negotiated protocol: 2025-06-18
+# ok tools: metactl_search_packs, metactl_explain, metactl_compile_preview, metactl_validate
+# ok search first match: metactl-project-onboarding
 ```

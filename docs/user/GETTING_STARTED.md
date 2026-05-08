@@ -8,30 +8,14 @@ Install the CLI from crates.io:
 
 ```bash
 cargo install metactl --version 0.1.4 --locked
-```
-
-Expected success signal:
-
-```text
-Installed package `metactl v0.1.4` (executable `metactl`)
+# Installed package `metactl v0.1.4` (executable `metactl`)
 ```
 
 Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 
 ```bash
 cargo install metactld --version 0.1.4 --locked
-```
-
-**Expected output:**
-
-```text
-Installed package `metactld v0.1.4` (executable `metactld`)
-```
-
-Expected success signal:
-
-```text
-Installed package `metactld v0.1.4` (executable `metactld`)
+# Installed package `metactld v0.1.4` (executable `metactld`)
 ```
 
 The pinned commands above reproduce this release. To update to the latest
@@ -40,13 +24,8 @@ published crates.io versions later:
 ```bash
 cargo install metactl --locked --force
 cargo install metactld --locked --force
-```
-
-**Expected output:**
-
-```text
-Installed package `metactl v0.1.4` (executable `metactl`)
-Installed package `metactld v0.1.4` (executable `metactld`)
+# Installed package `metactl v0.1.4` (executable `metactl`)
+# Installed package `metactld v0.1.4` (executable `metactld`)
 ```
 
 Check installed binaries:
@@ -54,13 +33,8 @@ Check installed binaries:
 ```bash
 metactl --version
 metactld --version
-```
-
-**Expected output:**
-
-```text
-metactl 0.1.4 (metactl/v2alpha1)
-metactld 0.1.4
+# metactl 0.1.4 (metactl/v2alpha1)
+# metactld 0.1.4
 ```
 
 For source development:
@@ -69,14 +43,9 @@ For source development:
 git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo build -p metactl -p metactld
-```
-
-**Expected output:**
-
-```text
-   Compiling metactl v0.1.4 (...)
-   Compiling metactld v0.1.4 (...)
-    Finished `dev` profile ...
+#    Compiling metactl v0.1.4 (...)
+#    Compiling metactld v0.1.4 (...)
+#     Finished `dev` profile ...
 ```
 
 ## Initialize A Project
@@ -109,12 +78,7 @@ When done, remove the sandbox and its generated files:
 
 ```bash
 metactl demo destroy --yes
-```
-
-**Expected output:**
-
-```text
-Removed demo sandbox: /tmp/.../metactl-demo
+# Removed demo sandbox: /tmp/.../metactl-demo
 ```
 
 `demo destroy` only removes directories with a `.metactl-demo/manifest.json`

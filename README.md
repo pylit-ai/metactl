@@ -54,12 +54,7 @@ Install the CLI from crates.io:
 ```bash
 cargo install metactl --version 0.1.4 --locked
 metactl version
-```
-
-**Expected output:**
-
-```text
-metactl 0.1.4 (metactl/v2alpha1)
+# metactl 0.1.4 (metactl/v2alpha1)
 ```
 
 Run the built-in demo sandbox. It creates a disposable brownfield Python repo with an existing `AGENTS.md`, previews the metactl-generated Codex CLI surface, applies a patch adoption inside that sandbox, validates it, then removes only the sentinel-marked demo directory.
@@ -97,12 +92,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-```
-
-**Expected output:**
-
-```text
-metactl 0.1.4 (metactl/v2alpha1)
+# metactl 0.1.4 (metactl/v2alpha1)
 ```
 
 </details>
@@ -115,12 +105,7 @@ metactl 0.1.4 (metactl/v2alpha1)
 ```bash
 cargo install metactld --version 0.1.4 --locked
 metactld --version
-```
-
-**Expected output:**
-
-```text
-metactld 0.1.4
+# metactld 0.1.4
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
