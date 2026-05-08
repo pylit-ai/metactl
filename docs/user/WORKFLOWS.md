@@ -4,10 +4,11 @@
 
 ```bash
 cargo build -p metactl
-cargo run -p metactl -- --project /tmp/metactl-demo init --target codex-cli
-cargo run -p metactl -- --project /tmp/metactl-demo add python-refactor
-cargo run -p metactl -- --project /tmp/metactl-demo sync
-cargo run -p metactl -- --project /tmp/metactl-demo validate
+cargo run -p metactl -- demo create --sync
+cd "$(cargo run -q -p metactl -- demo path)"
+cargo run -p metactl -- --project "$PWD" status
+cargo run -p metactl -- --project "$PWD" validate
+cargo run -p metactl -- demo destroy --yes
 ```
 
 ## Preview Before Applying

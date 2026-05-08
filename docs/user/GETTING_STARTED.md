@@ -7,25 +7,25 @@ This guide covers the public local `metactl` CLI.
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.2 --locked
+cargo install metactl --version 0.1.3 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.2` (executable `metactl`)
+Installed package `metactl v0.1.3` (executable `metactl`)
 ```
 
 Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 
 ```bash
-cargo install metactld --version 0.1.2 --locked
+cargo install metactld --version 0.1.3 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactld v0.1.2` (executable `metactld`)
+Installed package `metactld v0.1.3` (executable `metactld`)
 ```
 
 The pinned commands above reproduce this release. To update to the latest
@@ -52,6 +52,25 @@ cargo build -p metactl -p metactld
 ```
 
 ## Initialize A Project
+
+To try metactl without touching an existing repo, create a disposable brownfield sandbox:
+
+```bash
+metactl demo create --sync
+cd "$(metactl demo path)"
+metactl status
+metactl sync --adopt patch
+metactl validate
+```
+
+When done, remove the sandbox and its generated files:
+
+```bash
+metactl demo destroy --yes
+```
+
+`demo destroy` only removes directories with a `.metactl-demo/manifest.json`
+sentinel created by metactl.
 
 ```bash
 metactl --project /path/to/project init --target codex-cli

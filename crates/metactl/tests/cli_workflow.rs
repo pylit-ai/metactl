@@ -5857,3 +5857,99 @@ fn cli_sync_gemini_produces_extension_bundle() {
         skill_files
     );
 }
+
+#[test]
+fn cli_demo_create_list_path_and_destroy_lifecycle() {
+    let project = TempDir::new().expect("tempdir");
+    let demo_home = project.path().join("demo-home");
+    let demo_home_str = demo_home.to_string_lossy().to_string();
+    let envs = [("METACTL_DEMO_HOME", demo_home_str.as_str())];
+
+    let create = run_cli_env(
+        project.path(),
+        &[
+            "--json",
+            "demo",
+            "create",
+            "--name",
+            "alpha",
+            "--target",
+            "codex-cli",
+            "--sync",
+        ],
+        &envs,
+    );
+    assert!(
+        create.status.success(),
+        "create failed: {}",
+        stderr(&create)
+    );
+    let create_json = json_output(&create);
+    assert_eq!(create_json["ok"], true);
+    assert_eq!(create_json["command"], "demo create");
+    let demo_path = PathBuf::from(create_json["path"].as_str().expect("demo path"));
+    assert!(demo_path.join(".metactl-demo/manifest.json").exists());
+    assert!(demo_path.join("AGENTS.md").exists());
+    assert!(demo_path.join("metactl.yaml").exists());
+    assert_eq!(create_json["sync_preview"], true);
+    assert!(create_json["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .iter()
+        .any(|item| item.as_str() == Some("metactl validate")));
+
+    let list = run_cli_env(project.path(), &["--json", "demo", "list"], &envs);
+    assert!(list.status.success(), "list failed: {}", stderr(&list));
+    let list_json = json_output(&list);
+    assert_eq!(list_json["command"], "demo list");
+    assert_eq!(list_json["demos"].as_array().expect("demos").len(), 1);
+    assert_eq!(list_json["demos"][0]["name"], "alpha");
+
+    let path = run_cli_env(
+        project.path(),
+        &["--json", "demo", "path", "--name", "alpha"],
+        &envs,
+    );
+    assert!(path.status.success(), "path failed: {}", stderr(&path));
+    assert_eq!(
+        json_output(&path)["path"],
+        Value::String(demo_path.to_string_lossy().to_string())
+    );
+
+    let refused = run_cli_env(
+        project.path(),
+        &["demo", "destroy", "--name", "alpha"],
+        &envs,
+    );
+    assert_eq!(refused.status.code(), Some(12));
+    assert!(demo_path.exists());
+
+    let destroy = run_cli_env(
+        project.path(),
+        &["--json", "--yes", "demo", "destroy", "--name", "alpha"],
+        &envs,
+    );
+    assert!(
+        destroy.status.success(),
+        "destroy failed: {}",
+        stderr(&destroy)
+    );
+    assert!(!demo_path.exists());
+    assert_eq!(json_output(&destroy)["removed"], true);
+}
+
+#[test]
+fn cli_demo_destroy_refuses_unmanaged_path() {
+    let project = TempDir::new().expect("tempdir");
+    let unmanaged = project.path().join("not-a-demo");
+    fs::create_dir_all(&unmanaged).expect("unmanaged dir");
+    fs::write(unmanaged.join("important.txt"), "keep\n").expect("write unmanaged file");
+    let unmanaged_str = unmanaged.to_string_lossy().to_string();
+
+    let destroy = run_cli(
+        project.path(),
+        &["--yes", "demo", "destroy", "--path", unmanaged_str.as_str()],
+    );
+    assert_eq!(destroy.status.code(), Some(12));
+    assert!(unmanaged.join("important.txt").exists());
+}

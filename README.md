@@ -8,26 +8,29 @@
 
 `metactl` is a local control plane for agent instructions. It compiles reusable roles, packs, policies, and targets into reviewable tool-specific files for Codex CLI, Claude Code, Cursor, Gemini CLI, OpenClaw, filesystem agents, and local MCP/JSON-RPC clients.
 
-<!-- TODO: Add terminal GIF showing `cargo install metactl` through `metactl validate` using the Quickstart flow below. -->
-<!-- TODO: Add screenshot of generated `AGENTS.md` and `.codex/skills/...` after `metactl use python-refactor`. -->
+<!-- TODO: Add terminal GIF showing `metactl demo create --sync` through `metactl demo destroy --yes`. -->
+<!-- TODO: Add screenshot of the demo sandbox's seeded brownfield `AGENTS.md` and generated `.codex/skills/...` after `metactl sync --adopt patch`. -->
 <!-- TODO: Add public architecture diagram for CLI -> reference kernel -> target adapters once the API surface stabilizes. -->
 
 ```bash
-PROJECT="$(mktemp -d /tmp/metactl-demo.XXXXXX)"
-metactl --project "$PROJECT" init -t codex-cli --no-input
-metactl --project "$PROJECT" use python-refactor
-metactl --project "$PROJECT" validate
+metactl demo create --sync
+cd "$(metactl demo path)"
+metactl sync --adopt patch
+metactl validate
+metactl demo destroy --yes
 ```
 
 Expected result:
 
 ```text
-Initialized /tmp/metactl-demo...
-Resolved "python-refactor" -> pack python-refactor
+Demo sandbox ready: .../metactl-demo
+Seed: small brownfield Python repo with an existing AGENTS.md
+Preview sync completed; runtime files were not applied.
 Sync complete.
-  codex-cli [ready]
+  codex-cli [degraded] (patch, surface: full, ...)
 Validation:
   codex-cli [pass]
+Removed demo sandbox: .../metactl-demo
 ```
 
 ## Why It Exists
@@ -48,37 +51,39 @@ Modern coding agents read different files, directories, skill formats, and rule 
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.2 --locked
+cargo install metactl --version 0.1.3 --locked
 metactl version
 ```
 
 Expected output:
 
 ```text
-metactl 0.1.2 (metactl/v2alpha1)
+metactl 0.1.3 (metactl/v2alpha1)
 ```
 
-Create a disposable project, activate a pack, and validate the generated Codex CLI surface:
+Run the built-in demo sandbox. It creates a disposable brownfield Python repo with an existing `AGENTS.md`, previews the metactl-generated Codex CLI surface, applies a patch adoption inside that sandbox, validates it, then removes only the sentinel-marked demo directory.
 
 ```bash
-PROJECT="$(mktemp -d /tmp/metactl-demo.XXXXXX)"
-metactl --project "$PROJECT" init -t codex-cli --no-input
-metactl --project "$PROJECT" use python-refactor
-metactl --project "$PROJECT" status
-metactl --project "$PROJECT" validate
+metactl demo create --sync
+cd "$(metactl demo path)"
+metactl sync --adopt patch
+metactl validate
+metactl demo destroy --yes
 ```
 
 Expected output includes:
 
 ```text
+Demo sandbox ready: .../metactl-demo
+Seed: small brownfield Python repo with an existing AGENTS.md
+Preview sync completed; runtime files were not applied.
 Role:    builder
 Policy:  brownfield-safe-builder
 Targets: codex-cli
-Packs:   python-refactor
-Execution readiness: ready
 
 Validation:
   codex-cli [pass]
+Removed demo sandbox: .../metactl-demo
 ```
 
 No API keys or model-provider credentials are required for this path.
@@ -96,7 +101,7 @@ metactl version
 Expected output:
 
 ```text
-metactl 0.1.2 (metactl/v2alpha1)
+metactl 0.1.3 (metactl/v2alpha1)
 ```
 
 </details>
@@ -107,14 +112,14 @@ metactl 0.1.2 (metactl/v2alpha1)
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.2 --locked
+cargo install metactld --version 0.1.3 --locked
 metactld --version
 ```
 
 Expected output:
 
 ```text
-metactld 0.1.2
+metactld 0.1.3
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -151,6 +156,7 @@ metactl validate
 | --- | --- |
 | `metactl init -t codex-cli --no-input` | Create `metactl.yaml`, `.metactl/`, and a Codex CLI target. |
 | `metactl init --detect` | Detect targets from existing repo surfaces. |
+| `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
 | `metactl use <pack>` | Resolve, add, sync, and validate a pack-oriented workflow. |
 | `metactl add <pack> --sync` | Add a known pack and immediately materialize it. |
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
@@ -180,6 +186,46 @@ metactl validate
 ```
 
 `metactl` is intentionally conservative around unmanaged files. If a target file already exists and is not tracked by metactl, expect a reviewable conflict rather than silent overwrite.
+
+</details>
+
+## Demo Sandbox
+
+Use `metactl demo` when you want to try brownfield behavior without touching a real repo:
+
+```bash
+metactl demo create --sync
+metactl demo list
+metactl demo path
+metactl demo reset --yes
+metactl demo destroy --yes
+```
+
+Expected output includes:
+
+```text
+Demo sandbox ready: .../metactl-demo
+Seed: small brownfield Python repo with an existing AGENTS.md
+Target: codex-cli
+Preview sync completed; runtime files were not applied.
+Demo sandboxes under ...
+Removed demo sandbox: .../metactl-demo
+```
+
+`demo destroy` and `demo reset` verify a `.metactl-demo/manifest.json` sentinel before removing files.
+
+<details>
+<summary>Demo commands</summary>
+
+| Command | Purpose |
+| --- | --- |
+| `metactl demo create --sync` | Create the sandbox and run a preview sync. |
+| `metactl demo list` | List demo sandboxes under the metactl demo home. |
+| `metactl demo path` | Print the sandbox path for shell navigation. |
+| `metactl demo reset --yes` | Recreate a sentinel-marked sandbox from scratch. |
+| `metactl demo destroy --yes` | Remove a sentinel-marked sandbox. |
+
+Set `METACTL_DEMO_HOME` to isolate demos in CI or temporary test runs.
 
 </details>
 
@@ -358,9 +404,9 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.2` for both `metactl` and `metactld`.
+Current public crate version: `0.1.3` for both `metactl` and `metactld`.
 
-`metactl` is ready for local CLI workflows, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
+`metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 
 ## License
 
