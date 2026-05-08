@@ -35,10 +35,25 @@ Example from a repository being onboarded, using a separate metactl checkout:
 make -C /path/to/metactl metactl-mcp-install MCP_CLIENT=cursor MCP_PROJECT_ROOT="$PWD"
 ```
 
+The output is similar to the following:
+
+```text
+Installed metactl MCP server for cursor.
+Config: /path/to/repo/.cursor/mcp.json
+Server: metactl
+```
+
 The helper is idempotent for entries it owns. It refuses to overwrite an existing unmanaged `metactl` server unless run with `--force`:
 
 ```bash
 python3 scripts/install_metactl_mcp.py cursor --force
+```
+
+The output is similar to the following:
+
+```text
+Updated .cursor/mcp.json
+Server `metactl` now points at metactld --mcp --stdio.
 ```
 
 ## Direct Server Command
@@ -48,6 +63,8 @@ All client entries point at the same stdio server shape:
 ```bash
 metactld --mcp --stdio --library-root "$PWD/library/starter"
 ```
+
+This command starts a stdio server and waits for MCP input. It normally does not print a success banner.
 
 Use an absolute `--library-root` in committed or user-level config because MCP clients may spawn the server from a different working directory.
 
@@ -66,8 +83,20 @@ Prefer the installer above for consistency. These native commands are useful whe
 claude mcp add --transport stdio --scope project metactl -- "$(command -v metactld)" --mcp --stdio --library-root "$PWD/library/starter"
 ```
 
+The output is similar to the following:
+
+```text
+Added project-scoped MCP server `metactl`.
+```
+
 ```bash
 gemini mcp add -s project metactl "$(command -v metactld)" -- --mcp --stdio --library-root "$PWD/library/starter"
+```
+
+The output is similar to the following:
+
+```text
+Added MCP server `metactl`.
 ```
 
 ## Verification
@@ -96,6 +125,18 @@ If you run the server by hand, use an absolute library root:
 
 ```bash
 metactld --mcp --once <(printf '%s\n' '{"jsonrpc":"2.0","id":"tools","method":"tools/list","params":{}}') --library-root "/path/to/metactl/library/starter"
+```
+
+The output is similar to the following:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "tools",
+  "result": {
+    "tools": [ ... ]
+  }
+}
 ```
 
 Client-specific checks:

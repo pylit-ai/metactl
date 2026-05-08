@@ -20,17 +20,18 @@ metactl validate
 metactl demo destroy --yes
 ```
 
-Expected result:
+The output is similar to the following:
 
 ```text
-Demo sandbox ready: .../metactl-demo
+Demo sandbox ready: /tmp/.../metactl-demo
 Seed: small brownfield Python repo with an existing AGENTS.md
 Preview sync completed; runtime files were not applied.
 Sync complete.
-  codex-cli [degraded] (patch, surface: full, ...)
+  codex-cli [degraded] (patch, surface: full, 72 files)
+...
 Validation:
   codex-cli [pass]
-Removed demo sandbox: .../metactl-demo
+Removed demo sandbox: /tmp/.../metactl-demo
 ```
 
 ## Why It Exists
@@ -51,14 +52,14 @@ Modern coding agents read different files, directories, skill formats, and rule 
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.3 --locked
+cargo install metactl --version 0.1.4 --locked
 metactl version
 ```
 
-Expected output:
+The output is the following:
 
 ```text
-metactl 0.1.3 (metactl/v2alpha1)
+metactl 0.1.4 (metactl/v2alpha1)
 ```
 
 Run the built-in demo sandbox. It creates a disposable brownfield Python repo with an existing `AGENTS.md`, previews the metactl-generated Codex CLI surface, applies a patch adoption inside that sandbox, validates it, then removes only the sentinel-marked demo directory.
@@ -71,10 +72,10 @@ metactl validate
 metactl demo destroy --yes
 ```
 
-Expected output includes:
+The output is similar to the following:
 
 ```text
-Demo sandbox ready: .../metactl-demo
+Demo sandbox ready: /tmp/.../metactl-demo
 Seed: small brownfield Python repo with an existing AGENTS.md
 Preview sync completed; runtime files were not applied.
 Role:    builder
@@ -83,7 +84,7 @@ Targets: codex-cli
 
 Validation:
   codex-cli [pass]
-Removed demo sandbox: .../metactl-demo
+Removed demo sandbox: /tmp/.../metactl-demo
 ```
 
 No API keys or model-provider credentials are required for this path.
@@ -98,10 +99,10 @@ cargo install --path crates/metactl --locked
 metactl version
 ```
 
-Expected output:
+The output is the following:
 
 ```text
-metactl 0.1.3 (metactl/v2alpha1)
+metactl 0.1.4 (metactl/v2alpha1)
 ```
 
 </details>
@@ -112,14 +113,14 @@ metactl 0.1.3 (metactl/v2alpha1)
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.3 --locked
+cargo install metactld --version 0.1.4 --locked
 metactld --version
 ```
 
-Expected output:
+The output is the following:
 
 ```text
-metactld 0.1.3
+metactld 0.1.4
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -141,12 +142,38 @@ metactl validate
 
 Success signal: `status` reports `Execution readiness: ready`, `sync` compiles and applies configured targets, and `validate` reports each target as `[pass]`.
 
+The output is similar to the following:
+
+```text
+Initialized /path/to/project.
+...
+Resolved "python-refactor" -> pack python-refactor
+Sync complete.
+  codex-cli [ready] (symlink, surface: full, 4 files)
+...
+Execution readiness: ready
+Validation:
+  codex-cli [pass]
+```
+
 Use a two-step review flow when you want to inspect generated files before they land in the working tree:
 
 ```bash
 metactl compile
 metactl apply --mode copy
 metactl validate
+```
+
+The output is similar to the following:
+
+```text
+Project: /path/to/project
+Compiled:
+  codex-cli (4 outputs, surface: full)
+Applied:
+  codex-cli [ready]
+Validation:
+  codex-cli [pass]
 ```
 
 <details>
@@ -178,11 +205,32 @@ metactl compile
 metactl validate
 ```
 
+The output is similar to the following:
+
+```text
+Initialized /path/to/project.
+Detected targets: codex-cli
+Compiled:
+  codex-cli (...)
+Validation:
+  codex-cli [warn]
+    warn No managed state found for target codex-cli.
+```
+
 Then apply only after reviewing `.metactl/generated/`:
 
 ```bash
 metactl apply --mode copy
 metactl validate
+```
+
+The output is similar to the following:
+
+```text
+Applied:
+  codex-cli [ready]
+Validation:
+  codex-cli [pass]
 ```
 
 `metactl` is intentionally conservative around unmanaged files. If a target file already exists and is not tracked by metactl, expect a reviewable conflict rather than silent overwrite.
@@ -201,15 +249,15 @@ metactl demo reset --yes
 metactl demo destroy --yes
 ```
 
-Expected output includes:
+The output is similar to the following:
 
 ```text
-Demo sandbox ready: .../metactl-demo
+Demo sandbox ready: /tmp/.../metactl-demo
 Seed: small brownfield Python repo with an existing AGENTS.md
 Target: codex-cli
 Preview sync completed; runtime files were not applied.
 Demo sandboxes under ...
-Removed demo sandbox: .../metactl-demo
+Removed demo sandbox: /tmp/.../metactl-demo
 ```
 
 `demo destroy` and `demo reset` verify a `.metactl-demo/manifest.json` sentinel before removing files.
@@ -254,6 +302,16 @@ scripts/check_public_boundary.sh
 
 Expected result: dogfood and contract checks pass, and the public boundary scanner reports no private-source leaks.
 
+The output is similar to the following:
+
+```text
+metactl dogfood smoke passed
+validated: fixtures/library/evals/activation-trace.sample.json
+...
+contracts: OK
+Public boundary OK
+```
+
 <details>
 <summary>What dogfooding covers</summary>
 
@@ -276,6 +334,16 @@ metactl fleet sync --preview
 
 Expected result: `status` reports linked project readiness, and `sync --preview` shows planned project updates without applying them.
 
+The output is similar to the following:
+
+```text
+Fleet controller: team-agents
+Controller source: user_default
+Controller path: /path/to/team-agents
+Fleet sync preview:
+  /path/to/project [ready]
+```
+
 <details>
 <summary>Controller setup</summary>
 
@@ -286,6 +354,16 @@ metactl fleet controller init team-agents
 metactl fleet controller set team-agents /path/to/team-agents
 metactl project link /path/to/project
 metactl fleet status
+```
+
+The output is similar to the following:
+
+```text
+Fleet controller `team-agents` initialized at /path/to/team-agents.
+Next: edit /path/to/team-agents/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
+Fleet controller: team-agents
+Controller source: user_default
+Controller path: /path/to/team-agents
 ```
 
 See [docs/user/FLEET_SYNC.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/FLEET_SYNC.md) for controller layout, sync behavior, preview/apply semantics, and failure modes.
@@ -304,7 +382,7 @@ metactl --project "$PROJECT" status --json
 metactl --project "$PROJECT" validate --json
 ```
 
-Expected response shape:
+The JSON response shape is similar to the following:
 
 ```json
 {
@@ -380,6 +458,16 @@ make metactl-validate-contracts
 scripts/check_public_boundary.sh
 ```
 
+The output is similar to the following:
+
+```text
+test result: ok. ...
+    Finished `dev` profile ...
+validated: fixtures/library/evals/activation-trace.sample.json
+...
+Public boundary OK
+```
+
 Boundary rules:
 
 - Keep private pack sources, account names, customer details, secrets, and local adapter output out of the public repo.
@@ -398,13 +486,23 @@ make smoke-stdio
 make verify
 ```
 
+The output is similar to the following:
+
+```text
+verify-docs-links: OK
+verify-docs-commands: OK
+metactl CLI smoke passed
+metactl stdio smoke passed
+metactl dogfood smoke passed
+```
+
 Use the smallest focused gate for a local edit, then broaden to `make verify` before release-sensitive changes.
 
 </details>
 
 ## Project Status
 
-Current public crate version: `0.1.3` for both `metactl` and `metactld`.
+Current public crate version: `0.1.4` for both `metactl` and `metactld`.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 

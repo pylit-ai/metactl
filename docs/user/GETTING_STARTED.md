@@ -7,25 +7,31 @@ This guide covers the public local `metactl` CLI.
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.3 --locked
+cargo install metactl --version 0.1.4 --locked
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.3` (executable `metactl`)
+Installed package `metactl v0.1.4` (executable `metactl`)
 ```
 
 Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 
 ```bash
-cargo install metactld --version 0.1.3 --locked
+cargo install metactld --version 0.1.4 --locked
+```
+
+The output is similar to the following:
+
+```text
+Installed package `metactld v0.1.4` (executable `metactld`)
 ```
 
 Expected success signal:
 
 ```text
-Installed package `metactld v0.1.3` (executable `metactld`)
+Installed package `metactld v0.1.4` (executable `metactld`)
 ```
 
 The pinned commands above reproduce this release. To update to the latest
@@ -36,11 +42,25 @@ cargo install metactl --locked --force
 cargo install metactld --locked --force
 ```
 
+The output is similar to the following:
+
+```text
+Installed package `metactl v0.1.4` (executable `metactl`)
+Installed package `metactld v0.1.4` (executable `metactld`)
+```
+
 Check installed binaries:
 
 ```bash
 metactl --version
 metactld --version
+```
+
+The output is the following:
+
+```text
+metactl 0.1.4 (metactl/v2alpha1)
+metactld 0.1.4
 ```
 
 For source development:
@@ -49,6 +69,14 @@ For source development:
 git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo build -p metactl -p metactld
+```
+
+The output is similar to the following:
+
+```text
+   Compiling metactl v0.1.4 (...)
+   Compiling metactld v0.1.4 (...)
+    Finished `dev` profile ...
 ```
 
 ## Initialize A Project
@@ -63,10 +91,30 @@ metactl sync --adopt patch
 metactl validate
 ```
 
+The output is similar to the following:
+
+```text
+Demo sandbox ready: /tmp/.../metactl-demo
+Seed: small brownfield Python repo with an existing AGENTS.md
+Preview sync completed; runtime files were not applied.
+...
+Execution readiness: ready
+Sync complete.
+  codex-cli [degraded] (patch, surface: full, 72 files)
+Validation:
+  codex-cli [pass]
+```
+
 When done, remove the sandbox and its generated files:
 
 ```bash
 metactl demo destroy --yes
+```
+
+The output is similar to the following:
+
+```text
+Removed demo sandbox: /tmp/.../metactl-demo
 ```
 
 `demo destroy` only removes directories with a `.metactl-demo/manifest.json`
@@ -74,6 +122,20 @@ sentinel created by metactl.
 
 ```bash
 metactl --project /path/to/project init --target codex-cli
+```
+
+The output is similar to the following:
+
+```text
+Initialized /path/to/project.
+
+  Config:  metactl.yaml
+  Role:    builder
+  Policy:  brownfield-safe-builder
+  Targets: codex-cli
+
+Next steps:
+  metactl use python-refactor    Activate a pack (resolve + add + sync)
 ```
 
 Common target aliases:
@@ -94,6 +156,16 @@ metactl --project /path/to/project add python-refactor
 metactl --project /path/to/project sync
 ```
 
+The output is similar to the following:
+
+```text
+Matches:
+  python-refactor  Python Refactor
+Added pack python-refactor to metactl.yaml.
+Sync complete.
+  codex-cli [ready] (symlink, surface: full, 4 files)
+```
+
 Use `--json` for automation. Treat JSON output as forward-compatible: rely on documented top-level fields and ignore unknown additions.
 
 ## Validate
@@ -102,6 +174,17 @@ Use `--json` for automation. Treat JSON output as forward-compatible: rely on do
 metactl --project /path/to/project status
 metactl --project /path/to/project doctor
 metactl --project /path/to/project validate
+```
+
+The output is similar to the following:
+
+```text
+Execution readiness: ready
+Doctor:
+  [pass] config
+  [pass] lock
+Validation:
+  codex-cli [pass]
 ```
 
 ## Local-Only Packs
@@ -117,6 +200,15 @@ Use Fleet Sync when one controller repo should preview or apply metactl output a
 ```bash
 metactl fleet controller init personal --path /path/to/metactl-library/fleet/personal
 metactl fleet sync --preview
+```
+
+The output is similar to the following:
+
+```text
+Fleet controller `personal` initialized at /path/to/metactl-library/fleet/personal.
+Next: edit /path/to/metactl-library/fleet/personal/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
+Fleet sync preview:
+  /path/to/project [ready]
 ```
 
 The controller project owns `linked_projects`; the global setting only remembers which controller to use by default. For single-machine setup, omit `--path` and metactl creates `~/.config/metactl/fleet/<name>`. For private metactl libraries, `fleet/<name>/metactl.yaml` is a better home than a loose project under a source checkout parent. See `FLEET_SYNC.md`.

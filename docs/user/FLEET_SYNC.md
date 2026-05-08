@@ -31,16 +31,40 @@ metactl fleet controller init personal --path /path/to/metactl-library/fleet/per
 metactl fleet controller show
 ```
 
+The output is similar to the following:
+
+```text
+Fleet controller `personal` initialized at /path/to/metactl-library/fleet/personal.
+Next: edit /path/to/metactl-library/fleet/personal/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
+
+Fleet controller: personal
+Controller source: user_default
+Controller path: /path/to/metactl-library/fleet/personal
+```
+
 For a new single-machine setup, omit `--path` and metactl creates `~/.config/metactl/fleet/<name>`:
 
 ```bash
 metactl fleet controller init personal
 ```
 
+The output is similar to the following:
+
+```text
+Fleet controller `personal` initialized at ~/.config/metactl/fleet/personal.
+Next: edit ~/.config/metactl/fleet/personal/metactl.yaml and add linked_projects, then run `metactl fleet sync --preview`.
+```
+
 Use `set` only when the controller project already exists:
 
 ```bash
 metactl fleet controller set personal /path/to/controller
+```
+
+The output is similar to the following:
+
+```text
+Fleet controller `personal` set to /path/to/controller.
 ```
 
 Controller config:
@@ -87,10 +111,30 @@ Preview is the default and does not write linked project files:
 metactl fleet sync --preview
 ```
 
+The output is similar to the following:
+
+```text
+Project: /path/to/controller
+Fleet controller: personal
+Controller source: user_default
+Controller path: /path/to/controller
+Fleet sync preview:
+  metactl  /path/to/repos/metactl  ready
+  app      /path/to/repos/app      ready
+```
+
 Apply requires explicit automation gates:
 
 ```bash
 metactl --yes --no-input fleet sync --apply
+```
+
+The output is similar to the following:
+
+```text
+Fleet sync apply:
+  metactl  /path/to/repos/metactl  applied
+  app      /path/to/repos/app      applied
 ```
 
 Fleet apply refuses dirty Git worktrees by default. Use `--allow-dirty` only after review.
