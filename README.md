@@ -8,8 +8,8 @@
 
 `metactl` is a local control plane for agent instructions. It compiles reusable roles, packs, policies, and targets into reviewable tool-specific files for Codex CLI, Claude Code, Cursor, Gemini CLI, OpenClaw, filesystem agents, and local MCP/JSON-RPC clients.
 
-<!-- TODO: Add terminal GIF showing `metactl demo create --sync` through `metactl demo destroy --yes`. -->
-<!-- TODO: Add screenshot of the demo sandbox's seeded brownfield `AGENTS.md` and generated `.codex/skills/...` after `metactl sync --adopt patch`. -->
+![metactl quickstart terminal demo](docs/assets/demos/quickstart-hero.gif)
+
 <!-- TODO: Add public architecture diagram for CLI -> reference kernel -> target adapters once the API surface stabilizes. -->
 
 ```bash
@@ -46,6 +46,30 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Brownfield safety | Detect unmanaged files and require explicit handling before overwrite. |
 | Automation | Emit stable JSON with `--json` and expose the reference kernel through `metactld`. |
 | Local multi-repo operations | Preview Fleet Sync before applying changes across linked projects. |
+
+## Demo Gallery
+
+### Search and activate
+
+![metactl search and activate demo](docs/assets/demos/search-use-sync.gif)
+
+### Explain and validate JSON
+
+![metactl explain and validate JSON demo](docs/assets/demos/explain-json.gif)
+
+### Fleet preview
+
+![metactl fleet preview demo](docs/assets/demos/fleet-preview.gif)
+
+### Boundary guardrail
+
+![metactl boundary guardrail demo](docs/assets/demos/boundary-guardrail.gif)
+
+### CI JSON
+
+![metactl CI JSON demo](docs/assets/demos/ci-json.gif)
+
+See [docs/cli-demos.md](docs/cli-demos.md) for placement notes and the complete asset catalog.
 
 ## Quickstart
 
@@ -403,6 +427,7 @@ See [docs/security-checklist.md](https://github.com/pylit-ai/metactl/blob/main/d
 | Reader | Start here |
 | --- | --- |
 | New user | [docs/user/GETTING_STARTED.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/GETTING_STARTED.md) |
+| Demo viewer | [docs/cli-demos.md](https://github.com/pylit-ai/metactl/blob/main/docs/cli-demos.md) |
 | Daily operator | [docs/user/WORKFLOWS.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/WORKFLOWS.md) |
 | Fleet operator | [docs/user/FLEET_SYNC.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/FLEET_SYNC.md) |
 | Pack author | [docs/user/PACK_VISIBILITY.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/PACK_VISIBILITY.md) |
