@@ -8,7 +8,9 @@
 
 `metactl` is a local control plane for agent instructions. It compiles reusable roles, packs, policies, and targets into reviewable tool-specific files for Codex CLI, Claude Code, Cursor, Gemini CLI, OpenClaw, filesystem agents, and local MCP/JSON-RPC clients.
 
-![metactl quickstart terminal demo](docs/assets/demos/quickstart-hero.gif)
+![metactl quickstart terminal demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/quickstart-hero.gif)
+
+More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md).
 
 <!-- TODO: Add public architecture diagram for CLI -> reference kernel -> target adapters once the API surface stabilizes. -->
 
@@ -46,30 +48,6 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Brownfield safety | Detect unmanaged files and require explicit handling before overwrite. |
 | Automation | Emit stable JSON with `--json` and expose the reference kernel through `metactld`. |
 | Local multi-repo operations | Preview Fleet Sync before applying changes across linked projects. |
-
-## Demo Gallery
-
-### Search and activate
-
-![metactl search and activate demo](docs/assets/demos/search-use-sync.gif)
-
-### Explain and validate JSON
-
-![metactl explain and validate JSON demo](docs/assets/demos/explain-json.gif)
-
-### Fleet preview
-
-![metactl fleet preview demo](docs/assets/demos/fleet-preview.gif)
-
-### Boundary guardrail
-
-![metactl boundary guardrail demo](docs/assets/demos/boundary-guardrail.gif)
-
-### CI JSON
-
-![metactl CI JSON demo](docs/assets/demos/ci-json.gif)
-
-See [docs/cli-demos.md](docs/cli-demos.md) for placement notes and the complete asset catalog.
 
 ## Quickstart
 
@@ -164,6 +142,13 @@ Success signal: `status` reports `Execution readiness: ready`, `sync` compiles a
 > Validation:
 >   codex-cli [pass]
 > ```
+
+<details>
+<summary>Watch search and activation</summary>
+
+![metactl search and activate demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/search-use-sync.gif)
+
+</details>
 
 Use a two-step review flow when you want to inspect generated files before they land in the working tree:
 
@@ -352,6 +337,13 @@ Expected result: `status` reports linked project readiness, and `sync --preview`
 > Fleet sync preview:
 >   /path/to/project [ready]
 > ```
+
+<details>
+<summary>Watch Fleet Sync preview</summary>
+
+![metactl fleet preview demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/fleet-preview.gif)
+
+</details>
 
 <details>
 <summary>Controller setup</summary>
