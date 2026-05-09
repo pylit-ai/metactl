@@ -6,7 +6,7 @@
   "title": "metactl First-Party Starter Library",
   "owner": "platform",
   "minimum_roles": 3,
-  "minimum_packs": 9,
+  "minimum_packs": 10,
   "supported_targets": [
     "claude-code",
     "codex-cli",

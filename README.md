@@ -54,9 +54,9 @@ Modern coding agents read different files, directories, skill formats, and rule 
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.4 --locked
+cargo install metactl --version 0.1.5 --locked
 metactl version
-# metactl 0.1.4 (metactl/v2alpha1)
+# metactl 0.1.5 (metactl/v2alpha1)
 ```
 
 Run the built-in demo sandbox. It creates a disposable brownfield Python repo with an existing `AGENTS.md`, previews the metactl-generated Codex CLI surface, applies a patch adoption inside that sandbox, validates it, then removes only the sentinel-marked demo directory.
@@ -94,7 +94,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.4 (metactl/v2alpha1)
+# metactl 0.1.5 (metactl/v2alpha1)
 ```
 
 </details>
@@ -105,9 +105,9 @@ metactl version
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.4 --locked
+cargo install metactld --version 0.1.5 --locked
 metactld --version
-# metactld 0.1.4
+# metactld 0.1.5
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -504,7 +504,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.4` for both `metactl` and `metactld`.
+Current public crate version: `0.1.5` for both `metactl` and `metactld`.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 

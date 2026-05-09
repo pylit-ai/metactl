@@ -1,0 +1,19 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "agentic-artifact-forge",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:f1e74283f98f62e6bfb342142ab21096ba98c87349aa94d4bea070ec27a32c6e",
+  "origin": "library/starter/packs/agentic-artifact-forge.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-05-09T22:34:07Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:starter-library"
+  ]
+}
