@@ -43,6 +43,9 @@ pub struct LibraryRegistry {
 pub struct ListedPack {
     pub manifest: PackManifest,
     pub promotion_status: PromotionStatus,
+    pub source_path: PathBuf,
+    pub library_root: PathBuf,
+    pub provenance_ref: Option<Ref>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +197,9 @@ impl LibraryRegistry {
             .map(|pack| ListedPack {
                 manifest: pack.manifest.clone(),
                 promotion_status: pack.promotion_status.clone(),
+                source_path: pack.source_path.clone(),
+                library_root: pack.library_root.clone(),
+                provenance_ref: pack.provenance_ref.clone(),
             })
             .collect()
     }
@@ -218,6 +224,9 @@ impl LibraryRegistry {
         self.packs.get(id).map(|pack| ListedPack {
             manifest: pack.manifest.clone(),
             promotion_status: pack.promotion_status.clone(),
+            source_path: pack.source_path.clone(),
+            library_root: pack.library_root.clone(),
+            provenance_ref: pack.provenance_ref.clone(),
         })
     }
 
@@ -3806,8 +3815,9 @@ mod tests {
 
         let result = kernel
             .search(SearchParams {
-                query: "install private agent candidate library pre-commit hook source registration"
-                    .to_string(),
+                query:
+                    "install private agent candidate library pre-commit hook source registration"
+                        .to_string(),
                 config: starter_config("builder", "brownfield-safe-builder", "codex-cli"),
                 overlay: None,
                 candidate_packs: Vec::new(),

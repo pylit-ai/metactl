@@ -12,7 +12,7 @@ Current crate version: `0.1.5`
 
 ![metactl quickstart terminal demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/quickstart-hero.gif)
 
-More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md).
+More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md). Codex plugin marketplace export is covered in [docs/user/PLUGIN_MARKETPLACES.md](docs/user/PLUGIN_MARKETPLACES.md).
 
 <!-- TODO: Add public architecture diagram for CLI -> reference kernel -> target adapters once the API surface stabilizes. -->
 

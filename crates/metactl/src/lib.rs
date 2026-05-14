@@ -5,6 +5,7 @@ pub mod library_registry;
 pub mod library_stack;
 pub mod materializer;
 pub mod mcp;
+pub mod plugin_projection;
 pub mod project;
 pub mod reference_kernel;
 pub mod suite_registry;
@@ -15,6 +16,10 @@ pub use jsonrpc::{JsonRpcService, RpcError, RpcRequestEnvelope, RpcResponseEnvel
 pub use kernel::MetactlKernel;
 pub use library_registry::LibraryRegistry;
 pub use mcp::McpService;
+pub use plugin_projection::{
+    export_plugin_marketplace, list_plugin_packs, verify_plugin_marketplace, PluginExportOptions,
+    PluginExportResult, PluginListItem, PluginTier, PluginVerifyOptions, PluginVerifyReport,
+};
 pub use reference_kernel::ReferenceKernel;
 pub use suite_registry::{SuiteContext, SuiteRegistry};
 pub use types::*;

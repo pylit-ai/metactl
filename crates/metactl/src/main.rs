@@ -26,9 +26,10 @@ use metactl::project::{
 };
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
-    ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, ReferenceKernel, ResolveParams,
-    SearchParams, SearchResult, SurfaceMergeStrategy, TargetCapabilityMatrix, ValidateParams,
-    ValidationReport, ValidationStatus, API_VERSION,
+    ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, PluginExportOptions, PluginTier,
+    PluginVerifyOptions, ReferenceKernel, ResolveParams, SearchParams, SearchResult,
+    SurfaceMergeStrategy, TargetCapabilityMatrix, ValidateParams, ValidationReport,
+    ValidationStatus, API_VERSION,
 };
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -127,6 +128,8 @@ enum Commands {
     Library(LibraryArgs),
     /// Import, export, and verify portable Agent Skill folders as metactl packs
     Pack(PackArgs),
+    /// Project packs into local Codex plugin marketplace bundles
+    Plugin(PluginArgs),
     /// Create explicit public example or sanitized export records
     Export(ExportArgs),
     /// Create and remove disposable brownfield demo sandboxes
@@ -513,6 +516,85 @@ struct LibraryArgs {
 struct PackArgs {
     #[command(subcommand)]
     command: PackCommand,
+}
+
+#[derive(Debug, Args)]
+struct PluginArgs {
+    #[command(subcommand)]
+    command: PluginCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCommand {
+    /// List packs eligible for plugin projection
+    List(PluginListArgs),
+    /// Export a Codex plugin bundle into a local marketplace root
+    Export(PluginExportArgs),
+    /// Verify a generated Codex plugin marketplace or bundle
+    Verify(PluginVerifyArgs),
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum PluginTierArg {
+    Public,
+    Private,
+}
+
+impl From<PluginTierArg> for PluginTier {
+    fn from(value: PluginTierArg) -> Self {
+        match value {
+            PluginTierArg::Public => PluginTier::Public,
+            PluginTierArg::Private => PluginTier::Private,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct PluginListArgs {
+    /// Library root to inspect (defaults to bundled public starter library)
+    #[arg(long, value_name = "PATH")]
+    library_root: Option<PathBuf>,
+    /// Target runtime to check for plugin support
+    #[arg(long, default_value = "codex-cli")]
+    target: String,
+    /// Optional output tier filter
+    #[arg(long, value_enum)]
+    tier: Option<PluginTierArg>,
+}
+
+#[derive(Debug, Args)]
+struct PluginExportArgs {
+    /// Output tier to export
+    #[arg(long, value_enum)]
+    tier: PluginTierArg,
+    /// Source library root; required for private exports, defaults to library/starter for public
+    #[arg(long, value_name = "PATH")]
+    library_root: Option<PathBuf>,
+    /// Target runtime to export
+    #[arg(long, default_value = "codex-cli")]
+    target: String,
+    /// Marketplace root receiving the generated plugin bundle
+    #[arg(long, value_name = "PATH")]
+    out: PathBuf,
+    /// Replace the generated bundle when it already exists
+    #[arg(long)]
+    force: bool,
+    /// Override generated plugin name
+    #[arg(long)]
+    name: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct PluginVerifyArgs {
+    /// Marketplace root or plugin bundle path
+    #[arg(long, value_name = "PATH")]
+    path: PathBuf,
+    /// Target runtime to verify
+    #[arg(long, default_value = "codex-cli")]
+    target: String,
+    /// Expected output tier
+    #[arg(long, value_enum)]
+    tier: Option<PluginTierArg>,
 }
 
 #[derive(Debug, Args)]
@@ -1046,6 +1128,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Init(args) => cmd_init(cli, args),
         Commands::Library(args) => cmd_library(cli, args),
         Commands::Pack(args) => cmd_pack(cli, args),
+        Commands::Plugin(args) => cmd_plugin(cli, args),
         Commands::Export(args) => cmd_export(cli, args),
         Commands::Demo(args) => cmd_demo(cli, args),
         Commands::CheckPublicBoundary => cmd_check_public_boundary(cli),
@@ -1094,6 +1177,10 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             PackCommand::ImportSkill(_) => Some("pack import-skill"),
             PackCommand::ExportSkill(_) => Some("pack export-skill"),
             PackCommand::VerifySkill(_) => None,
+        },
+        Commands::Plugin(args) => match &args.command {
+            PluginCommand::List(_) | PluginCommand::Verify(_) => None,
+            PluginCommand::Export(_) => Some("plugin export"),
         },
         Commands::Export(_) => Some("export"),
         Commands::Demo(args) => match &args.command {
@@ -1225,7 +1312,7 @@ fn cmd_demo_create(
         ]));
     }
 
-    fs::create_dir_all(&demo_root).map_err(|err| internal_error(err.into()))?;
+    fs::create_dir_all(&demo_root).map_err(internal_error)?;
     seed_demo_brownfield_repo(&demo_root).map_err(internal_error)?;
     write_demo_manifest(&demo_root, &demo_name, &args.target).map_err(internal_error)?;
 
@@ -1308,9 +1395,9 @@ fn cmd_demo_list(cli: &Cli, args: &DemoListArgs) -> std::result::Result<CommandO
     let demo_home = demo_home_dir().map_err(internal_error)?;
     let mut demos = Vec::new();
     if demo_home.is_dir() {
-        let entries = fs::read_dir(&demo_home).map_err(|err| internal_error(err.into()))?;
+        let entries = fs::read_dir(&demo_home).map_err(internal_error)?;
         for entry in entries {
-            let entry = entry.map_err(|err| internal_error(err.into()))?;
+            let entry = entry.map_err(internal_error)?;
             let path = entry.path();
             let manifest_path = demo_manifest_path(&path);
             if !manifest_path.exists() {
@@ -1392,11 +1479,11 @@ fn cmd_demo_destroy(
     let demo_home = demo_home_dir().map_err(internal_error)?;
     if args.purge && demo_home.is_dir() {
         if fs::read_dir(&demo_home)
-            .map_err(|err| internal_error(err.into()))?
+            .map_err(internal_error)?
             .next()
             .is_none()
         {
-            fs::remove_dir(&demo_home).map_err(|err| internal_error(err.into()))?;
+            fs::remove_dir(&demo_home).map_err(internal_error)?;
         }
     }
     Ok(CommandOutput {
@@ -1520,10 +1607,8 @@ fn read_demo_manifest(root: &Path) -> std::result::Result<Value, CliError> {
             ),
         ));
     }
-    let manifest_text =
-        fs::read_to_string(&manifest_path).map_err(|err| internal_error(err.into()))?;
-    let manifest: Value =
-        serde_json::from_str(&manifest_text).map_err(|err| internal_error(err.into()))?;
+    let manifest_text = fs::read_to_string(&manifest_path).map_err(internal_error)?;
+    let manifest: Value = serde_json::from_str(&manifest_text).map_err(internal_error)?;
     if manifest["kind"] != "metactl-demo" {
         return Err(CliError::new(
             EXIT_CONFLICT,
@@ -1534,9 +1619,7 @@ fn read_demo_manifest(root: &Path) -> std::result::Result<Value, CliError> {
 }
 
 fn remove_demo_root(root: &Path) -> std::result::Result<(), CliError> {
-    let canonical_root = root
-        .canonicalize()
-        .map_err(|err| internal_error(err.into()))?;
+    let canonical_root = root.canonicalize().map_err(internal_error)?;
     if canonical_root.parent().is_none() {
         return Err(CliError::new(
             EXIT_CONFLICT,
@@ -1545,14 +1628,14 @@ fn remove_demo_root(root: &Path) -> std::result::Result<(), CliError> {
     }
     read_demo_manifest(&canonical_root)?;
     let marker = canonical_root.join(DEMO_MARKER_DIR);
-    let marker_meta = fs::symlink_metadata(&marker).map_err(|err| internal_error(err.into()))?;
+    let marker_meta = fs::symlink_metadata(&marker).map_err(internal_error)?;
     if marker_meta.file_type().is_symlink() {
         return Err(CliError::new(
             EXIT_CONFLICT,
             "Refusing to remove demo sandbox with symlinked sentinel directory.",
         ));
     }
-    fs::remove_dir_all(&canonical_root).map_err(|err| internal_error(err.into()))
+    fs::remove_dir_all(&canonical_root).map_err(internal_error)
 }
 
 fn seed_demo_brownfield_repo(root: &Path) -> Result<()> {
@@ -1600,6 +1683,190 @@ fn demo_next_commands(name: &str, root: &Path, synced: bool) -> Vec<String> {
     commands
 }
 
+fn cmd_plugin(cli: &Cli, args: &PluginArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        PluginCommand::List(list_args) => cmd_plugin_list(cli, list_args),
+        PluginCommand::Export(export_args) => cmd_plugin_export(cli, export_args),
+        PluginCommand::Verify(verify_args) => cmd_plugin_verify(cli, verify_args),
+    }
+}
+
+fn cmd_plugin_list(
+    cli: &Cli,
+    args: &PluginListArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let tier = args.tier.map(PluginTier::from);
+    let library_root =
+        resolve_plugin_library_root(cli, tier.unwrap_or(PluginTier::Public), &args.library_root)?;
+    let items =
+        metactl::list_plugin_packs(&library_root, &args.target, tier).map_err(state_error)?;
+    let lines = if items.is_empty() {
+        "No plugin-eligible packs found.".to_string()
+    } else {
+        items
+            .iter()
+            .map(|item| {
+                let tiers = item
+                    .eligible_tiers
+                    .iter()
+                    .map(|tier| tier.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("- {} {} [{}]", item.pack_id, item.version, tiers)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Plugin-capable packs for {} from {}:\n{}",
+                args.target,
+                library_root.display(),
+                lines
+            ),
+        ),
+        json: success_json(
+            "plugin",
+            Some(&project_root),
+            json!({
+                "action": "list",
+                "target": args.target,
+                "tier": tier.map(|tier| tier.as_str()),
+                "library_root": library_root,
+                "packs": items,
+            }),
+        ),
+    })
+}
+
+fn cmd_plugin_export(
+    cli: &Cli,
+    args: &PluginExportArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let tier = PluginTier::from(args.tier);
+    let library_root = resolve_plugin_library_root(cli, tier, &args.library_root)?;
+    let out = resolve_path_against_project(&project_root, &args.out);
+    let result = metactl::export_plugin_marketplace(PluginExportOptions {
+        library_root: library_root.clone(),
+        target: args.target.clone(),
+        tier,
+        out,
+        force: args.force,
+        plugin_name: args.name.clone(),
+    })
+    .map_err(state_error)?;
+    if tier == PluginTier::Public {
+        let findings = public_boundary_findings(&result.plugin_path).map_err(internal_error)?;
+        if !findings.is_empty() {
+            return Err(CliError::new(
+                EXIT_VALIDATION,
+                "Generated public plugin output failed public boundary check.",
+            )
+            .with_details(findings));
+        }
+    }
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Exported Codex plugin bundle: {}\nPacks: {}\nNext: metactl plugin verify --target {} --tier {} --path {}",
+                result.plugin_path.display(),
+                result.pack_ids.len(),
+                result.target,
+                result.tier.as_str(),
+                result.plugin_path.display()
+            ),
+        ),
+        json: success_json(
+            "plugin",
+            Some(&project_root),
+            json!({
+                "action": "export",
+                "library_root": library_root,
+                "result": result,
+            }),
+        ),
+    })
+}
+
+fn cmd_plugin_verify(
+    cli: &Cli,
+    args: &PluginVerifyArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let path = resolve_path_against_project(&project_root, &args.path);
+    let mut report = metactl::verify_plugin_marketplace(PluginVerifyOptions {
+        path: path.clone(),
+        target: args.target.clone(),
+        tier: args.tier.map(PluginTier::from),
+    })
+    .map_err(state_error)?;
+    if report.tier == PluginTier::Public
+        || args.tier.map(PluginTier::from) == Some(PluginTier::Public)
+    {
+        report
+            .findings
+            .extend(public_boundary_findings(&path).map_err(internal_error)?);
+        report.status = if report.findings.is_empty() {
+            "pass".to_string()
+        } else {
+            "fail".to_string()
+        };
+    }
+    if !report.findings.is_empty() {
+        return Err(CliError::new(
+            EXIT_VALIDATION,
+            "Codex plugin marketplace verification failed.",
+        )
+        .with_details(report.findings));
+    }
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Verified Codex plugin marketplace: {}\nBundles: {}\nPacks: {}",
+                report.status, report.plugin_count, report.pack_count
+            ),
+        ),
+        json: success_json(
+            "plugin",
+            Some(&project_root),
+            json!({
+                "action": "verify",
+                "report": report,
+            }),
+        ),
+    })
+}
+
+fn resolve_plugin_library_root(
+    cli: &Cli,
+    tier: PluginTier,
+    provided: &Option<PathBuf>,
+) -> std::result::Result<PathBuf, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    match (tier, provided) {
+        (_, Some(path)) => Ok(resolve_path_against_project(&project_root, path)),
+        (PluginTier::Public, None) => Ok(bundled_starter_library_root()),
+        (PluginTier::Private, None) => Err(CliError::new(
+            EXIT_VALIDATION,
+            "Private plugin export requires --library-root.",
+        )),
+    }
+}
+
+fn resolve_path_against_project(project_root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        project_root.join(path)
+    }
+}
+
 fn cmd_export(cli: &Cli, args: &ExportArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
         ExportCommand::PublicExample(export_args) => cmd_export_public_example(cli, export_args),
@@ -1619,13 +1886,12 @@ fn cmd_export_public_example(
     let export_dir = project_root
         .join(".metactl/exports/public-examples")
         .join(&artifact_id);
-    fs::create_dir_all(&export_dir).map_err(|err| internal_error(err.into()))?;
+    fs::create_dir_all(&export_dir).map_err(internal_error)?;
     let skill_body = format!(
         "---\nname: {artifact_id}\ndescription: Public example skill exported by metactl sanitized-export flow.\n---\n\n# {}\n\nThis public example contains only generic fixture content.\n",
         title_from_skill_id(&artifact_id),
     );
-    fs::write(export_dir.join("SKILL.md"), skill_body.as_bytes())
-        .map_err(|err| internal_error(err.into()))?;
+    fs::write(export_dir.join("SKILL.md"), skill_body.as_bytes()).map_err(internal_error)?;
     let digest = sha256_bytes(skill_body.as_bytes());
     let export_lock = json!({
         "kind": "public_example_export",
@@ -1663,7 +1929,7 @@ fn cmd_export_sanitized(
         CliError::new(EXIT_VALIDATION, "Sanitized export failed.").with_details(error_details(&err))
     })?;
     let export_dir = project_root.join(".metactl/exports/sanitized");
-    fs::create_dir_all(&export_dir).map_err(|err| internal_error(err.into()))?;
+    fs::create_dir_all(&export_dir).map_err(internal_error)?;
     let original_digest = sha256_bytes(format!("source:{artifact_id}").as_bytes());
     let sanitized_body = format!("public sanitized export for {artifact_id}\n");
     let sanitized_digest = sha256_bytes(sanitized_body.as_bytes());
@@ -1851,7 +2117,7 @@ fn cmd_pack_import_skill(
     let digest = skill_tree_digest(&files).map_err(internal_error)?;
     let target_dir = imported_skill_dir(&project_root, &frontmatter.name);
     if target_dir.exists() {
-        fs::remove_dir_all(&target_dir).map_err(|err| internal_error(err.into()))?;
+        fs::remove_dir_all(&target_dir).map_err(internal_error)?;
     }
     let skill_target_dir = target_dir.join("skill");
     copy_skill_files(&files, &skill_target_dir).map_err(internal_error)?;
@@ -1931,7 +2197,7 @@ fn cmd_pack_export_skill(
         .join(&args.target)
         .join(&args.pack_id);
     if export_dir.exists() {
-        fs::remove_dir_all(&export_dir).map_err(|err| internal_error(err.into()))?;
+        fs::remove_dir_all(&export_dir).map_err(internal_error)?;
     }
     let files = collect_skill_files(&source_dir).map_err(internal_error)?;
     copy_skill_files(&files, &export_dir).map_err(internal_error)?;
@@ -7925,7 +8191,11 @@ fn state_error(error: anyhow::Error) -> CliError {
     }
 }
 
-fn internal_error(error: anyhow::Error) -> CliError {
+fn internal_error<E>(error: E) -> CliError
+where
+    E: Into<anyhow::Error>,
+{
+    let error = error.into();
     CliError::new(EXIT_INTERNAL, error.to_string())
 }
 
