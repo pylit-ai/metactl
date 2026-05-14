@@ -4213,17 +4213,102 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
         }),
     );
     if failed {
+        let details = fleet_sync_failure_details(&results);
         let mut err = CliError::new(EXIT_STATE, "one or more fleet projects failed");
         json_payload["ok"] = json!(false);
         json_payload["message"] = json!("one or more fleet projects failed");
+        json_payload["details"] = json!(details);
         err.json = json_payload;
-        err.message = "one or more fleet projects failed".to_string();
+        err.details = details;
         return Err(err);
     }
     Ok(CommandOutput {
         human: project_human_output(&controller.project_root, lines.join("\n")),
         json: json_payload,
     })
+}
+
+fn fleet_sync_failure_details(results: &[Value]) -> Vec<String> {
+    let failures: Vec<&Value> = results
+        .iter()
+        .filter(|item| item["status"] == "failed")
+        .collect();
+    let mut details: Vec<String> = failures
+        .iter()
+        .take(20)
+        .map(|item| {
+            let id = item["id"].as_str().unwrap_or("?");
+            let path = item["path"].as_str().unwrap_or("?");
+            let result = item["result"].as_str().unwrap_or("failed");
+            let message = item["message"]
+                .as_str()
+                .map(fleet_sync_failure_message_summary)
+                .unwrap_or_else(|| "no failure detail returned".to_string());
+            format!("{id} ({path}) {result}: {message}")
+        })
+        .collect();
+    let omitted = failures.len().saturating_sub(20);
+    if omitted > 0 {
+        details.push(format!(
+            "{omitted} more failed project(s); rerun with --json for the full fleet payload"
+        ));
+    }
+    details
+}
+
+fn fleet_sync_failure_message_summary(message: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<Value>(message) {
+        let mut parts = Vec::new();
+        if let Some(text) = value.get("message").and_then(Value::as_str) {
+            parts.push(text.to_string());
+        }
+        if let Some(details) = value.get("details").and_then(Value::as_array) {
+            parts.extend(
+                details
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .take(3)
+                    .map(ToString::to_string),
+            );
+        }
+        if let Some(findings) = value
+            .pointer("/source_audit/findings")
+            .and_then(Value::as_array)
+        {
+            for finding in findings.iter().take(3) {
+                let id = finding
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("source-audit");
+                let text = finding
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("source audit finding");
+                match finding.get("path").and_then(Value::as_str) {
+                    Some(path) => parts.push(format!("{id}: {text} ({path})")),
+                    None => parts.push(format!("{id}: {text}")),
+                }
+            }
+        }
+        if !parts.is_empty() {
+            return fleet_sync_single_line(&parts.join("; "), 600);
+        }
+    }
+    fleet_sync_single_line(message, 600)
+}
+
+fn fleet_sync_single_line(input: &str, max_chars: usize) -> String {
+    let single_line = input.split_whitespace().collect::<Vec<&str>>().join(" ");
+    if single_line.is_empty() {
+        return "no failure detail returned".to_string();
+    }
+    if single_line.chars().count() <= max_chars {
+        return single_line;
+    }
+    let keep_chars = max_chars.saturating_sub(3);
+    let mut truncated = single_line.chars().take(keep_chars).collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 #[derive(Debug)]

@@ -1984,6 +1984,53 @@ fn fleet_sync_apply_refuses_dirty_git_project_by_default() {
 }
 
 #[test]
+fn fleet_sync_apply_human_error_reports_failed_projects() {
+    let project = TempDir::new().expect("tempdir");
+    let ready = TempDir::new().expect("ready");
+    init_project(ready.path());
+    let git_init = Command::new("git")
+        .args([
+            "-C",
+            ready.path().to_str().expect("ready path"),
+            "init",
+            "--quiet",
+        ])
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "{}", stderr(&git_init));
+    fs::write(ready.path().join("local-edit.txt"), "dirty\n").expect("dirty file");
+    fs::write(
+        project.path().join("metactl.yaml"),
+        format!(
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\nlinked_projects:\n- id: ready\n  path: {}\n",
+            ready.path().display()
+        ),
+    )
+    .expect("write metactl.yaml");
+
+    let output = run_cli(
+        project.path(),
+        &["--yes", "--no-input", "fleet", "sync", "--apply"],
+    );
+    let err = stderr(&output);
+    assert_eq!(
+        output.status.code(),
+        Some(10),
+        "stdout:\n{}\nstderr:\n{}",
+        stdout(&output),
+        err
+    );
+    assert!(err.contains("one or more fleet projects failed"), "{err}");
+    assert!(err.contains("ready"), "{err}");
+    assert!(
+        err.contains(ready.path().to_str().expect("ready path")),
+        "{err}"
+    );
+    assert!(err.contains("dirty_worktree"), "{err}");
+    assert!(err.contains("--allow-dirty"), "{err}");
+}
+
+#[test]
 fn fleet_sync_apply_returns_nonzero_for_mixed_project_failure() {
     let project = TempDir::new().expect("tempdir");
     let clean = TempDir::new().expect("clean");
