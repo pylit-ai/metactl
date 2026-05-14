@@ -3800,6 +3800,37 @@ mod tests {
     }
 
     #[test]
+    fn search_finds_agent_candidate_library_installer_for_candidate_source_queries() {
+        let kernel =
+            ReferenceKernel::load_from_library_roots(vec![starter_root()]).expect("library kernel");
+
+        let result = kernel
+            .search(SearchParams {
+                query: "install private agent candidate library pre-commit hook source registration"
+                    .to_string(),
+                config: starter_config("builder", "brownfield-safe-builder", "codex-cli"),
+                overlay: None,
+                candidate_packs: Vec::new(),
+                limit: None,
+            })
+            .expect("search");
+
+        let first = result.matches.first().expect("first match");
+        assert_eq!(first.pack_ref.id, "agent-candidate-library-installer");
+
+        let evidence = first.match_evidence.as_ref().expect("match_evidence");
+        assert!(evidence.matched_resource_paths.iter().any(|path| {
+            path == "packs/agent-candidate-library-installer/SKILL.md"
+                || path
+                    == "packs/agent-candidate-library-installer/references/install-agent-candidate-library.md"
+        }));
+        assert!(evidence
+            .matched_terms
+            .iter()
+            .any(|term| term == "candidate"));
+    }
+
+    #[test]
     fn pack_manifest_lifecycle_metadata_round_trip() {
         let manifest = PackManifest {
             kind: "pack".to_string(),

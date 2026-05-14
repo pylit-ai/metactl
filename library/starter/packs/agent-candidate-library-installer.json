@@ -1,0 +1,80 @@
+{
+  "kind": "pack",
+  "id": "agent-candidate-library-installer",
+  "version": "1.0.0",
+  "title": "Agent Candidate Library Installer",
+  "description": "General installer workflow for adding a private or local agent-authored candidate library to metactl-managed projects, including private source registration, pre-commit hook installation, sync, fleet rollout, and verification.",
+  "activation_class": "instruction",
+  "side_effect_class": "fs_write",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": true,
+  "task_tags": [
+    "metactl",
+    "onboarding",
+    "agent-candidates",
+    "candidate-library",
+    "candidate-source",
+    "private-source",
+    "pre-commit",
+    "hooks",
+    "source-registration",
+    "packs"
+  ],
+  "compatible_roles": [
+    "builder",
+    "reviewer",
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/agent-candidate-library-installer/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/agent-candidate-library-installer/references/install-agent-candidate-library.md",
+      "kind": "example",
+      "required": false,
+      "surface_relevance": "suppressible"
+    },
+    {
+      "path": "packs/agent-candidate-library-installer/scripts/install_candidate_library_hook.py",
+      "kind": "script",
+      "required": false,
+      "surface_relevance": "suppressible"
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "gemini-cli",
+      "openclaw"
+    ],
+    "last_verified_at": "2026-05-14T17:54:28Z",
+    "evidence_refs": [
+      "tests:search_finds_agent_candidate_library_installer_for_candidate_source_queries",
+      "script:install_candidate_library_hook.py",
+      "tests:starter-library"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

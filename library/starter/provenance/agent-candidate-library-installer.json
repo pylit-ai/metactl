@@ -1,0 +1,21 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "agent-candidate-library-installer",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:3d1353b84ddb642b76c07d69d0f016739241185e70ac0e3d859087f9dfc5159d",
+  "origin": "library/starter/packs/agent-candidate-library-installer.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-05-14T17:54:28Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:search_finds_agent_candidate_library_installer_for_candidate_source_queries",
+    "script:install_candidate_library_hook.py",
+    "tests:starter-library"
+  ]
+}
