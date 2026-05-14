@@ -128,7 +128,7 @@ enum Commands {
     Library(LibraryArgs),
     /// Import, export, and verify portable Agent Skill folders as metactl packs
     Pack(PackArgs),
-    /// Project packs into local Codex plugin marketplace bundles
+    /// Project packs into local runtime plugin marketplace bundles
     Plugin(PluginArgs),
     /// Create explicit public example or sanitized export records
     Export(ExportArgs),
@@ -528,9 +528,9 @@ struct PluginArgs {
 enum PluginCommand {
     /// List packs eligible for plugin projection
     List(PluginListArgs),
-    /// Export a Codex plugin bundle into a local marketplace root
+    /// Export a plugin bundle into a local marketplace root
     Export(PluginExportArgs),
-    /// Verify a generated Codex plugin marketplace or bundle
+    /// Verify a generated plugin marketplace or bundle
     Verify(PluginVerifyArgs),
 }
 
@@ -1754,13 +1754,13 @@ fn cmd_plugin_export(
         library_root: library_root.clone(),
         target: args.target.clone(),
         tier,
-        out,
+        out: out.clone(),
         force: args.force,
         plugin_name: args.name.clone(),
     })
     .map_err(state_error)?;
     if tier == PluginTier::Public {
-        let findings = public_boundary_findings(&result.plugin_path).map_err(internal_error)?;
+        let findings = public_boundary_findings(&out).map_err(internal_error)?;
         if !findings.is_empty() {
             return Err(CliError::new(
                 EXIT_VALIDATION,
@@ -1769,16 +1769,19 @@ fn cmd_plugin_export(
             .with_details(findings));
         }
     }
+    let target_label = plugin_target_display_name(&result.target);
     Ok(CommandOutput {
         human: project_human_output(
             &project_root,
             format!(
-                "Exported Codex plugin bundle: {}\nPacks: {}\nNext: metactl plugin verify --target {} --tier {} --path {}",
+                "Exported {} plugin marketplace: {}\nBundle: {}\nPacks: {}\nNext: metactl plugin verify --target {} --tier {} --path {}",
+                target_label,
+                out.display(),
                 result.plugin_path.display(),
                 result.pack_ids.len(),
                 result.target,
                 result.tier.as_str(),
-                result.plugin_path.display()
+                out.display()
             ),
         ),
         json: success_json(
@@ -1818,18 +1821,18 @@ fn cmd_plugin_verify(
         };
     }
     if !report.findings.is_empty() {
-        return Err(CliError::new(
-            EXIT_VALIDATION,
-            "Codex plugin marketplace verification failed.",
-        )
-        .with_details(report.findings));
+        return Err(
+            CliError::new(EXIT_VALIDATION, "plugin marketplace verification failed.")
+                .with_details(report.findings),
+        );
     }
+    let target_label = plugin_target_display_name(&report.target);
     Ok(CommandOutput {
         human: project_human_output(
             &project_root,
             format!(
-                "Verified Codex plugin marketplace: {}\nBundles: {}\nPacks: {}",
-                report.status, report.plugin_count, report.pack_count
+                "Verified {} plugin marketplace: {}\nBundles: {}\nPacks: {}",
+                target_label, report.status, report.plugin_count, report.pack_count
             ),
         ),
         json: success_json(
@@ -1841,6 +1844,14 @@ fn cmd_plugin_verify(
             }),
         ),
     })
+}
+
+fn plugin_target_display_name(target: &str) -> &'static str {
+    match target {
+        "codex-cli" => "Codex",
+        "claude-code" => "Claude Code",
+        _ => "runtime",
+    }
 }
 
 fn resolve_plugin_library_root(

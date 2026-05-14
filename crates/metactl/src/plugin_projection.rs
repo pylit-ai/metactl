@@ -11,8 +11,65 @@ use crate::types::{PackManifest, ResourceKind, VisibilityScope, API_VERSION};
 use crate::LibraryRegistry;
 
 const CODEX_PLUGIN_MANIFEST: &str = ".codex-plugin/plugin.json";
-const METACTL_PROJECTION_MANIFEST: &str = ".codex-plugin/metactl-projection.json";
 const CODEX_MARKETPLACE_MANIFEST: &str = ".agents/plugins/marketplace.json";
+const CODEX_PROJECTION_MANIFEST: &str = ".codex-plugin/metactl-projection.json";
+const CLAUDE_PLUGIN_MANIFEST: &str = ".claude-plugin/plugin.json";
+const CLAUDE_MARKETPLACE_MANIFEST: &str = ".claude-plugin/marketplace.json";
+const CLAUDE_PROJECTION_MANIFEST: &str = ".metactl/plugin-projection.json";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PluginTarget {
+    CodexCli,
+    ClaudeCode,
+}
+
+impl PluginTarget {
+    fn parse(target: &str) -> Result<Self> {
+        match target {
+            "codex-cli" => Ok(Self::CodexCli),
+            "claude-code" => Ok(Self::ClaudeCode),
+            _ => Err(anyhow!(
+                "unsupported plugin target: {} (supported: codex-cli, claude-code)",
+                target
+            )),
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::CodexCli => "Codex",
+            Self::ClaudeCode => "Claude Code",
+        }
+    }
+
+    fn keyword(self) -> &'static str {
+        match self {
+            Self::CodexCli => "codex-cli",
+            Self::ClaudeCode => "claude-code",
+        }
+    }
+
+    fn plugin_manifest_path(self) -> &'static str {
+        match self {
+            Self::CodexCli => CODEX_PLUGIN_MANIFEST,
+            Self::ClaudeCode => CLAUDE_PLUGIN_MANIFEST,
+        }
+    }
+
+    fn marketplace_manifest_path(self) -> &'static str {
+        match self {
+            Self::CodexCli => CODEX_MARKETPLACE_MANIFEST,
+            Self::ClaudeCode => CLAUDE_MARKETPLACE_MANIFEST,
+        }
+    }
+
+    fn projection_manifest_path(self) -> &'static str {
+        match self {
+            Self::CodexCli => CODEX_PROJECTION_MANIFEST,
+            Self::ClaudeCode => CLAUDE_PROJECTION_MANIFEST,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -107,6 +164,7 @@ pub fn list_plugin_packs(
     target: &str,
     tier: Option<PluginTier>,
 ) -> Result<Vec<PluginListItem>> {
+    PluginTarget::parse(target)?;
     let registry = LibraryRegistry::load_from_roots(&[library_root.to_path_buf()])?;
     let mut items = registry
         .list_packs()
@@ -134,7 +192,7 @@ pub fn list_plugin_packs(
 }
 
 pub fn export_plugin_marketplace(options: PluginExportOptions) -> Result<PluginExportResult> {
-    ensure_codex_target(&options.target)?;
+    let target = PluginTarget::parse(&options.target)?;
     let selected = selected_packs(&options.library_root, &options.target, options.tier)?;
     if selected.is_empty() {
         return Err(anyhow!(
@@ -171,10 +229,9 @@ pub fn export_plugin_marketplace(options: PluginExportOptions) -> Result<PluginE
 
     fs::create_dir_all(plugin_path.join("skills"))
         .with_context(|| format!("create {}", plugin_path.join("skills").display()))?;
-    fs::create_dir_all(plugin_path.join(".codex-plugin"))
-        .with_context(|| format!("create {}", plugin_path.join(".codex-plugin").display()))?;
-    fs::create_dir_all(options.out.join(".agents/plugins"))
-        .with_context(|| format!("create {}", options.out.join(".agents/plugins").display()))?;
+    create_parent_dir(&plugin_path.join(target.plugin_manifest_path()))?;
+    create_parent_dir(&plugin_path.join(target.projection_manifest_path()))?;
+    create_parent_dir(&options.out.join(target.marketplace_manifest_path()))?;
 
     let mut pack_records = Vec::new();
     let mut pack_ids = Vec::new();
@@ -206,22 +263,37 @@ pub fn export_plugin_marketplace(options: PluginExportOptions) -> Result<PluginE
         "degraded_surfaces": degraded_surfaces,
         "install": install_instructions(options.tier),
     });
-    let projection_path = plugin_path.join(METACTL_PROJECTION_MANIFEST);
+    let projection_path = plugin_path.join(target.projection_manifest_path());
     write_json(&projection_path, &projection)?;
 
     let projected_pack_ids = pack_ids_for_projection(&projection);
-    let plugin_manifest = codex_plugin_manifest(
+    let plugin_manifest = plugin_manifest(
+        target,
         &plugin_name,
         &plugin_version,
         options.tier,
         &source_label,
         &projected_pack_ids,
     );
-    write_json(&plugin_path.join(CODEX_PLUGIN_MANIFEST), &plugin_manifest)?;
-    write_readme(&plugin_path.join("README.md"), options.tier, &plugin_name)?;
-    let marketplace_manifest = codex_marketplace_manifest(&plugin_name);
     write_json(
-        &options.out.join(CODEX_MARKETPLACE_MANIFEST),
+        &plugin_path.join(target.plugin_manifest_path()),
+        &plugin_manifest,
+    )?;
+    write_readme(
+        &plugin_path.join("README.md"),
+        target,
+        options.tier,
+        &plugin_name,
+    )?;
+    let marketplace_manifest = marketplace_manifest(
+        target,
+        &plugin_name,
+        &plugin_version,
+        options.tier,
+        &source_label,
+    );
+    write_json(
+        &options.out.join(target.marketplace_manifest_path()),
         &marketplace_manifest,
     )?;
 
@@ -243,22 +315,24 @@ pub fn export_plugin_marketplace(options: PluginExportOptions) -> Result<PluginE
 }
 
 pub fn verify_plugin_marketplace(options: PluginVerifyOptions) -> Result<PluginVerifyReport> {
-    ensure_codex_target(&options.target)?;
-    let marketplace_manifest = options.path.join(CODEX_MARKETPLACE_MANIFEST);
-    let is_direct_bundle = options.path.join(CODEX_PLUGIN_MANIFEST).exists();
+    let target = PluginTarget::parse(&options.target)?;
+    let marketplace_manifest = options.path.join(target.marketplace_manifest_path());
+    let is_direct_bundle = options.path.join(target.plugin_manifest_path()).exists();
     if !is_direct_bundle && !marketplace_manifest.exists() {
         return Err(anyhow!(
-            "Codex marketplace root is missing {}",
+            "{} marketplace root is missing {}",
+            target.display_name(),
             marketplace_manifest.display()
         ));
     }
     if marketplace_manifest.exists() {
-        validate_codex_marketplace_manifest(&options.path, &marketplace_manifest)?;
+        validate_marketplace_manifest(target, &options.path, &marketplace_manifest)?;
     }
-    let bundles = plugin_bundles(&options.path)?;
+    let bundles = plugin_bundles(target, &options.path)?;
     if bundles.is_empty() {
         return Err(anyhow!(
-            "no Codex plugin bundle found at {}",
+            "no {} plugin bundle found at {}",
+            target.display_name(),
             options.path.display()
         ));
     }
@@ -268,12 +342,12 @@ pub fn verify_plugin_marketplace(options: PluginVerifyOptions) -> Result<PluginV
     let mut report_tier = options.tier.unwrap_or(PluginTier::Private);
 
     for bundle in &bundles {
-        let plugin_manifest = bundle.join(CODEX_PLUGIN_MANIFEST);
+        let plugin_manifest = bundle.join(target.plugin_manifest_path());
         if !plugin_manifest.exists() {
             findings.push(format!("missing {}", plugin_manifest.display()));
             continue;
         }
-        let projection_path = bundle.join(METACTL_PROJECTION_MANIFEST);
+        let projection_path = bundle.join(target.projection_manifest_path());
         if !projection_path.exists() {
             findings.push(format!("missing {}", projection_path.display()));
             continue;
@@ -516,7 +590,23 @@ fn pack_record(pack: &SelectedPack, tier: PluginTier) -> Value {
     record
 }
 
-fn codex_plugin_manifest(
+fn create_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    Ok(())
+}
+
+fn plugin_description(tier: PluginTier, source_label: &str) -> String {
+    format!(
+        "metactl {} plugin projection for {}. Packs remain canonical in the source library.",
+        tier.as_str(),
+        source_label
+    )
+}
+
+fn plugin_manifest(
+    target: PluginTarget,
     plugin_name: &str,
     plugin_version: &str,
     tier: PluginTier,
@@ -527,55 +617,93 @@ fn codex_plugin_manifest(
         PluginTier::Public => "Public",
         PluginTier::Private => "Private",
     };
-    let description = format!(
-        "metactl {} plugin projection for {}. Packs remain canonical in the source library.",
-        tier.as_str(),
-        source_label
-    );
-    json!({
-        "name": plugin_name,
-        "version": plugin_version,
-        "description": description,
-        "author": { "name": "metactl" },
-        "license": if tier == PluginTier::Public { "Apache-2.0" } else { "UNLICENSED" },
-        "keywords": ["metactl", "packs", "codex-cli", tier.as_str()],
-        "skills": "./skills/",
-        "interface": {
-            "displayName": format!("metactl {} packs", display_tier),
-            "shortDescription": format!("{} metactl pack projection", display_tier),
-            "longDescription": description,
-            "developerName": "metactl",
-            "category": "Engineering",
-            "capabilities": ["Read", "Write"],
-            "defaultPrompt": [
-                format!("Use one of these metactl packs: {}", pack_ids.join(", "))
-            ],
-            "screenshots": []
-        }
-    })
-}
-
-fn codex_marketplace_manifest(plugin_name: &str) -> Value {
-    json!({
-        "name": "metactl-local",
-        "plugins": [
-            {
-                "name": plugin_name,
-                "source": {
-                    "source": "local",
-                    "path": format!("./plugins/{plugin_name}")
-                },
-                "policy": {
-                    "installation": "AVAILABLE",
-                    "authentication": "ON_INSTALL"
-                },
-                "category": "Engineering"
+    let description = plugin_description(tier, source_label);
+    match target {
+        PluginTarget::CodexCli => json!({
+            "name": plugin_name,
+            "version": plugin_version,
+            "description": description,
+            "author": { "name": "metactl" },
+            "license": if tier == PluginTier::Public { "Apache-2.0" } else { "UNLICENSED" },
+            "keywords": ["metactl", "packs", target.keyword(), tier.as_str()],
+            "skills": "./skills/",
+            "interface": {
+                "displayName": format!("metactl {} packs", display_tier),
+                "shortDescription": format!("{} metactl pack projection", display_tier),
+                "longDescription": description,
+                "developerName": "metactl",
+                "category": "Engineering",
+                "capabilities": ["Read", "Write"],
+                "defaultPrompt": [
+                    format!("Use one of these metactl packs: {}", pack_ids.join(", "))
+                ],
+                "screenshots": []
             }
-        ]
-    })
+        }),
+        PluginTarget::ClaudeCode => json!({
+            "name": plugin_name,
+            "version": plugin_version,
+            "description": description,
+            "author": { "name": "metactl" },
+            "license": if tier == PluginTier::Public { "Apache-2.0" } else { "UNLICENSED" },
+            "keywords": ["metactl", "packs", target.keyword(), tier.as_str()],
+            "skills": "./skills/"
+        }),
+    }
 }
 
-fn validate_codex_marketplace_manifest(root: &Path, manifest_path: &Path) -> Result<()> {
+fn marketplace_manifest(
+    target: PluginTarget,
+    plugin_name: &str,
+    plugin_version: &str,
+    tier: PluginTier,
+    source_label: &str,
+) -> Value {
+    let description = plugin_description(tier, source_label);
+    match target {
+        PluginTarget::CodexCli => json!({
+            "name": "metactl-local",
+            "plugins": [
+                {
+                    "name": plugin_name,
+                    "source": {
+                        "source": "local",
+                        "path": format!("./plugins/{plugin_name}")
+                    },
+                    "policy": {
+                        "installation": "AVAILABLE",
+                        "authentication": "ON_INSTALL"
+                    },
+                    "category": "Engineering"
+                }
+            ]
+        }),
+        PluginTarget::ClaudeCode => json!({
+            "name": "metactl-local",
+            "owner": { "name": "metactl" },
+            "metadata": {
+                "description": "Local metactl pack projections."
+            },
+            "plugins": [
+                {
+                    "name": plugin_name,
+                    "source": format!("./plugins/{plugin_name}"),
+                    "description": description,
+                    "version": plugin_version,
+                    "author": { "name": "metactl" },
+                    "category": "productivity",
+                    "keywords": ["metactl", "packs", target.keyword(), tier.as_str()]
+                }
+            ]
+        }),
+    }
+}
+
+fn validate_marketplace_manifest(
+    target: PluginTarget,
+    root: &Path,
+    manifest_path: &Path,
+) -> Result<()> {
     let manifest: Value = serde_json::from_slice(
         &fs::read(manifest_path).with_context(|| format!("read {}", manifest_path.display()))?,
     )
@@ -588,45 +716,59 @@ fn validate_codex_marketplace_manifest(root: &Path, manifest_path: &Path) -> Res
         return Err(anyhow!("{} contains no plugins", manifest_path.display()));
     }
     for plugin in plugins {
-        let source = plugin
-            .get("source")
-            .and_then(Value::as_object)
-            .ok_or_else(|| anyhow!("{} plugin missing source", manifest_path.display()))?;
-        let source_kind = source
-            .get("source")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if source_kind != "local" {
-            return Err(anyhow!(
-                "{} only supports local generated plugin sources, got {}",
-                manifest_path.display(),
-                source_kind
-            ));
-        }
-        let source_path = source
-            .get("path")
-            .and_then(Value::as_str)
-            .ok_or_else(|| anyhow!("{} plugin source missing path", manifest_path.display()))?;
+        let source_path = match target {
+            PluginTarget::CodexCli => {
+                let source = plugin
+                    .get("source")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| anyhow!("{} plugin missing source", manifest_path.display()))?;
+                let source_kind = source
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if source_kind != "local" {
+                    return Err(anyhow!(
+                        "{} only supports local generated plugin sources, got {}",
+                        manifest_path.display(),
+                        source_kind
+                    ));
+                }
+                source.get("path").and_then(Value::as_str).ok_or_else(|| {
+                    anyhow!("{} plugin source missing path", manifest_path.display())
+                })?
+            }
+            PluginTarget::ClaudeCode => plugin
+                .get("source")
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("{} plugin source missing path", manifest_path.display()))?,
+        };
         let bundle_path = root.join(source_path);
-        if !bundle_path.join(CODEX_PLUGIN_MANIFEST).exists() {
+        if !bundle_path.join(target.plugin_manifest_path()).exists() {
             return Err(anyhow!(
                 "{} source path {} does not contain {}",
                 manifest_path.display(),
                 source_path,
-                CODEX_PLUGIN_MANIFEST
+                target.plugin_manifest_path()
             ));
         }
     }
     Ok(())
 }
 
-fn write_readme(path: &Path, tier: PluginTier, plugin_name: &str) -> Result<()> {
+fn write_readme(
+    path: &Path,
+    target: PluginTarget,
+    tier: PluginTier,
+    plugin_name: &str,
+) -> Result<()> {
+    let target_name = target.display_name();
+    let target_arg = target.keyword();
     let body = match tier {
         PluginTier::Public => format!(
-            "# {plugin_name}\n\nGenerated Codex plugin projection from public metactl packs.\n\nPacks remain canonical in the source metactl library. This directory is an installable Codex plugin bundle.\n\nVerify:\n\n```bash\nmetactl plugin verify --target codex-cli --tier public --path /path/to/plugin-marketplace\n```\n\nExpected output:\n\n```text\nVerified Codex plugin marketplace: pass\n```\n"
+            "# {plugin_name}\n\nGenerated {target_name} plugin projection from public metactl packs.\n\nPacks remain canonical in the source metactl library. This directory is an installable {target_name} plugin bundle.\n\nVerify:\n\n```bash\nmetactl plugin verify --target {target_arg} --tier public --path /path/to/plugin-marketplace\n```\n\nExpected output:\n\n```text\nVerified {target_name} plugin marketplace: pass\n```\n"
         ),
         PluginTier::Private => format!(
-            "# {plugin_name}\n\nGenerated Codex plugin projection from private metactl packs.\n\nKeep this bundle in a local or private Git marketplace. Do not publish it unless every included pack has been reviewed for public release.\n\nVerify:\n\n```bash\nmetactl plugin verify --target codex-cli --tier private --path /path/to/private-plugin-marketplace\n```\n\nExpected output:\n\n```text\nVerified Codex plugin marketplace: pass\n```\n"
+            "# {plugin_name}\n\nGenerated {target_name} plugin projection from private metactl packs.\n\nKeep this bundle in a local or private Git marketplace. Do not publish it unless every included pack has been reviewed for public release.\n\nVerify:\n\n```bash\nmetactl plugin verify --target {target_arg} --tier private --path /path/to/private-plugin-marketplace\n```\n\nExpected output:\n\n```text\nVerified {target_name} plugin marketplace: pass\n```\n"
         ),
     };
     fs::write(path, body).with_context(|| format!("write {}", path.display()))?;
@@ -694,17 +836,22 @@ fn install_instructions(tier: PluginTier) -> Vec<String> {
     }
 }
 
-fn plugin_bundles(path: &Path) -> Result<Vec<PathBuf>> {
-    if path.join(CODEX_PLUGIN_MANIFEST).exists() {
+fn plugin_bundles(target: PluginTarget, path: &Path) -> Result<Vec<PathBuf>> {
+    if path.join(target.plugin_manifest_path()).exists() {
         return Ok(vec![path.to_path_buf()]);
     }
     let mut bundles = Vec::new();
-    find_plugin_bundles(path, 0, &mut bundles)?;
+    find_plugin_bundles(target, path, 0, &mut bundles)?;
     bundles.sort();
     Ok(bundles)
 }
 
-fn find_plugin_bundles(path: &Path, depth: usize, bundles: &mut Vec<PathBuf>) -> Result<()> {
+fn find_plugin_bundles(
+    target: PluginTarget,
+    path: &Path,
+    depth: usize,
+    bundles: &mut Vec<PathBuf>,
+) -> Result<()> {
     if depth > 2 || !path.is_dir() {
         return Ok(());
     }
@@ -714,10 +861,10 @@ fn find_plugin_bundles(path: &Path, depth: usize, bundles: &mut Vec<PathBuf>) ->
         if !child.is_dir() {
             continue;
         }
-        if child.join(CODEX_PLUGIN_MANIFEST).exists() {
+        if child.join(target.plugin_manifest_path()).exists() {
             bundles.push(child);
         } else {
-            find_plugin_bundles(&child, depth + 1, bundles)?;
+            find_plugin_bundles(target, &child, depth + 1, bundles)?;
         }
     }
     Ok(())
@@ -772,16 +919,6 @@ fn slugify(value: &str) -> String {
         "plugin".to_string()
     } else {
         slug
-    }
-}
-
-fn ensure_codex_target(target: &str) -> Result<()> {
-    if target == "codex-cli" {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "plugin projection currently supports target codex-cli only; got {target}"
-        ))
     }
 }
 
