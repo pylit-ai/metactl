@@ -135,6 +135,7 @@ Candidate packs should stay quarantined until a human-approved promotion step mo
    ```
 
    Do not enable candidate packs as default active packs until they have passed review.
+   Do not hand-edit global root-agent files such as `~/.codex/AGENTS.md` or `~/.claude/CLAUDE.md` for this setup. Metactl-managed projects should expose this workflow through generated project managed blocks and generated skill surfaces.
 
 7. Preview and apply sync.
 
@@ -143,6 +144,8 @@ Candidate packs should stay quarantined until a human-approved promotion step mo
    metactl sync --preview --require-private-sources
    metactl sync --adopt patch --no-input --require-private-sources
    ```
+
+   After sync, project root instructions should contain a `metactl:begin agents-md` managed block that points to `agent-candidate-library-installer`, and generated adapter trees should contain the corresponding skill. On a different machine, repeat the clone/source registration/sync steps with that machine's checkout path; no manual root-agent edits are required.
 
 8. Roll out to a fleet only when requested.
 
@@ -165,6 +168,7 @@ Capture evidence for:
 - `metactl source sync <source-name> --no-input`
 - `metactl sync --preview --require-private-sources`
 - generated adapter search for `agent-candidate-library-installer`
+- project root managed-block search for `pack:agent-candidate-library-installer`
 
 ## Output
 
