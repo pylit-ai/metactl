@@ -3,7 +3,7 @@
   "id": "agent-candidate-library-installer",
   "version": "1.0.0",
   "title": "Agent Candidate Library Installer",
-  "description": "Managed installer for private or local agent candidate libraries: register the private source, sync generated project managed blocks and skill surfaces, and do not hand-edit global root agent files.",
+  "description": "RULE: Do not hand-edit global root agent files to install candidate libraries. Register the private source, sync managed project blocks and generated skill surfaces, and keep candidate packs inactive unless explicitly selected for review or trial.",
   "activation_class": "instruction",
   "side_effect_class": "fs_write",
   "trust_tier": "first_party_validated",
