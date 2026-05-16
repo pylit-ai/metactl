@@ -31,6 +31,17 @@
       "supports_surface_scripts": true,
       "supports_surface_frontmatter": true,
       "surface_merge_strategy": "optional"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".codex/commands/{resource_name}",
+      "resource_kinds": [
+        "command"
+      ],
+      "command_adapter": {
+        "format": "markdown",
+        "inject_description": true
+      }
     }
   ],
   "apply_modes": [
@@ -41,7 +52,7 @@
   ],
   "local_projection": {
     "support": "degraded",
-    "notes": "Codex CLI does not natively support a local instruction overlay file."
+    "notes": "Codex CLI does not natively support a local instruction overlay file; project slash commands are emitted under .codex/commands."
   },
   "metadata": {
     "starter_status": "stable",

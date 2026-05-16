@@ -4182,16 +4182,20 @@ fn cli_target_native_harness_outputs() {
 
     let sync = run_cli(project.path(), &["sync"]);
     assert!(sync.status.success(), "{}", stderr(&sync));
-    // Spec 019: codex-cli target only emits AGENTS.md and .codex/skills/...
-    // Other .codex/* paths (commands, rules, plugins, scripts, hooks, config.toml)
-    // are not real Codex project surfaces and have been removed.
+    // Spec 019 plus Codex command support: codex-cli emits AGENTS.md,
+    // .codex/skills/..., and project slash commands under .codex/commands.
+    // Other .codex/* paths (rules, plugins, scripts, hooks, config.toml)
+    // are not real Codex project surfaces and remain removed.
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
         .join(".codex/skills/unit-test-loop/unit-test-loop/SKILL.md")
         .exists());
+    assert!(project
+        .path()
+        .join(".codex/commands/run-targeted-tests.md")
+        .exists());
     assert!(!project.path().join(".codex/config.toml").exists());
-    assert!(!project.path().join(".codex/commands").exists());
     assert!(!project.path().join(".codex/rules").exists());
     assert!(!project.path().join(".codex/plugins").exists());
     assert!(!project.path().join(".codex/scripts").exists());

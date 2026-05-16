@@ -531,10 +531,11 @@ fn target_native_pack_resources() {
             "release-manager",
             "release-policy",
             "codex-cli",
-            // Spec 019: codex-cli only emits AGENTS.md + .codex/skills/...
+            // Spec 019 plus Codex command support.
             vec![
                 "AGENTS.md",
                 ".codex/skills/unit-test-loop/unit-test-loop/SKILL.md",
+                ".codex/commands/run-targeted-tests.md",
             ],
         ),
         (
