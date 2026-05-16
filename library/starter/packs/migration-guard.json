@@ -3,7 +3,7 @@
   "id": "migration-guard",
   "version": "1.0.0",
   "title": "Migration Guard",
-  "description": "Prevent edits to migrations unless explicitly approved.",
+  "description": "RULE: Do not edit database or schema migrations unless the user explicitly approves migration changes for the current task.",
   "activation_class": "hook",
   "side_effect_class": "none",
   "trust_tier": "first_party_validated",

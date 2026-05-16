@@ -3,7 +3,7 @@
   "id": "release-guard",
   "version": "1.1.0",
   "title": "Release Guard",
-  "description": "Reusable release readiness protocol for package, tag, CI, and publish handoffs.",
+  "description": "RULE: Do not tag, publish, or call a release complete until version/tag state, deterministic tests, boundary checks, CI, and artifact or registry verification have passed or the remaining blocker is explicitly named.",
   "activation_class": "instruction",
   "side_effect_class": "none",
   "trust_tier": "first_party_validated",
