@@ -3,7 +3,7 @@
   "id": "agent-candidate-library-installer",
   "version": "1.0.0",
   "title": "Agent Candidate Library Installer",
-  "description": "General installer workflow for adding a private or local agent-authored candidate library to metactl-managed projects, including private source registration, pre-commit hook installation, sync, fleet rollout, and verification.",
+  "description": "Managed installer for private or local agent candidate libraries: register the private source, sync generated project managed blocks and skill surfaces, and do not hand-edit global root agent files.",
   "activation_class": "instruction",
   "side_effect_class": "fs_write",
   "trust_tier": "first_party_validated",
