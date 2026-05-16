@@ -2935,10 +2935,7 @@ fn cmd_use(cli: &Cli, args: &UseArgs) -> std::result::Result<CommandOutput, CliE
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
     if !config_path.exists() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "No metactl.yaml found. Run `metactl init` first.",
-        ));
+        return Err(missing_config_error(cli, &project_root));
     }
 
     let context = load_required_context(cli, &project_root)?;
@@ -3344,7 +3341,7 @@ fn source_preflight_error(project_root: &Path, source_state: Value, strict: bool
     CliError {
         code: EXIT_STATE,
         message: message.to_string(),
-        details: Vec::new(),
+        details: source_preflight_detail_lines(&source_state),
         json: json!({
             "ok": false,
             "command": "sync",
@@ -3354,6 +3351,43 @@ fn source_preflight_error(project_root: &Path, source_state: Value, strict: bool
             "source_state": source_state,
         }),
     }
+}
+
+fn source_preflight_detail_lines(source_state: &Value) -> Vec<String> {
+    let mut details = Vec::new();
+    if let Some(items) = source_state["freshness"].as_array() {
+        for item in items {
+            let id = item["id"].as_str().unwrap_or("?");
+            match item["status"].as_str().unwrap_or("unknown") {
+                "stale" | "unlocked" => {
+                    details.push(format!("Next: metactl source sync {id}"));
+                }
+                "missing" => {
+                    if item["type"].as_str() == Some("git") {
+                        details.push(format!("Next: metactl source sync {id}"));
+                    } else {
+                        details.push(format!("Check the configured path for source `{id}`."));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if details.is_empty() {
+        for key in ["stale", "unlocked"] {
+            if let Some(items) = source_state[key].as_array() {
+                for item in items {
+                    if let Some(id) = item.as_str() {
+                        details.push(format!("Next: metactl source sync {id}"));
+                    }
+                }
+            }
+        }
+    }
+    if details.is_empty() {
+        details.push("Next: metactl source list".to_string());
+    }
+    details
 }
 
 fn detect_existing_surfaces(project_root: &Path) -> Vec<(String, String)> {
@@ -3491,10 +3525,7 @@ fn cmd_target_add(
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
     if !config_path.exists() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "No metactl.yaml found. Run `metactl init` first.",
-        ));
+        return Err(missing_config_error(cli, &project_root));
     }
 
     let context = load_required_context(cli, &project_root)?;
@@ -3625,10 +3656,7 @@ fn cmd_target_remove(
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
     if !config_path.exists() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "No metactl.yaml found. Run `metactl init` first.",
-        ));
+        return Err(missing_config_error(cli, &project_root));
     }
 
     let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
@@ -3758,10 +3786,7 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
     if !config_path.exists() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "No metactl.yaml found. Run `metactl init` first.",
-        ));
+        return Err(missing_config_error(cli, &project_root));
     }
 
     let context = load_required_context(cli, &project_root)?;
@@ -3804,11 +3829,32 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        return Err(CliError::new(
-            EXIT_STATE,
-            format!("Pack(s) not found in library: {}", not_found.join(", ")),
-        )
-        .with_details(vec![format!("Available packs: {}", available.join(", "))]));
+        let suggestions = nearest_pack_suggestions(&not_found, &available, 5);
+        let mut details = Vec::new();
+        if !suggestions.is_empty() {
+            details.push(format!("Did you mean: {}", suggestions.join(", ")));
+        }
+        details.push("Next: metactl list packs".to_string());
+        if let Some(first) = not_found.first() {
+            details.push(format!("Next: metactl search {first}"));
+        }
+        details.push(format!(
+            "Available pack count: {} (run `metactl list packs` for the full list).",
+            available.len()
+        ));
+        return Err(CliError {
+            code: EXIT_STATE,
+            message: format!("Pack(s) not found in library: {}", not_found.join(", ")),
+            details,
+            json: json!({
+                "ok": false,
+                "api_version": API_VERSION,
+                "message": format!("Pack(s) not found in library: {}", not_found.join(", ")),
+                "not_found": not_found,
+                "suggestions": suggestions,
+                "available_packs": available,
+            }),
+        });
     }
 
     if to_add.is_empty() {
@@ -3926,10 +3972,7 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
     if !config_path.exists() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "No metactl.yaml found. Run `metactl init` first.",
-        ));
+        return Err(missing_config_error(cli, &project_root));
     }
 
     let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
@@ -4681,7 +4724,32 @@ fn load_required_context_for_path(
         cli.profile.as_deref(),
         cli.overlay.as_deref(),
     )
-    .map_err(state_error)
+    .map_err(|error| {
+        let message = error.to_string();
+        if message.contains("project config") && message.contains("does not exist") {
+            missing_config_error(cli, project_root)
+        } else {
+            state_error(error)
+        }
+    })
+}
+
+fn missing_config_error(cli: &Cli, project_root: &Path) -> CliError {
+    let config_path = project_config_path(project_root, cli.config.as_deref());
+    let mut details = vec![
+        "Next: metactl init --detect".to_string(),
+        "Next: metactl init -t codex-cli".to_string(),
+    ];
+    if cli.config.is_some() {
+        details.push("Check the --config PATH value.".to_string());
+    } else {
+        details.push("If the config lives elsewhere, pass --config PATH.".to_string());
+    }
+    CliError::new(
+        EXIT_STATE,
+        format!("Project config {} does not exist.", config_path.display()),
+    )
+    .with_details(details)
 }
 
 fn resolve_user_path(raw_path: &str) -> PathBuf {
@@ -5195,11 +5263,23 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     }
 
     // Sources
-    if source_count > 0 || !import_roots.is_empty() {
+    let has_source_findings = source_state["findings"]
+        .as_array()
+        .map(|findings| !findings.is_empty())
+        .unwrap_or(false);
+    if source_count > 0 || !import_roots.is_empty() || has_source_findings {
         let total = source_count + import_roots.len();
         lines.push(format!("  Sources: {} configured", total));
         if let Some(state) = source_state["state"].as_str() {
             lines.push(format!("  Source state: {}", state));
+            if let Some(findings) = source_state["findings"].as_array() {
+                if !findings.is_empty() {
+                    lines.push("  next: metactl audit sources".to_string());
+                    for line in source_audit_summary_lines(findings, 3) {
+                        lines.push(format!("    {line}"));
+                    }
+                }
+            }
         }
     }
 
@@ -5598,6 +5678,25 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
     }
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
+    let source_audit_findings = source_audit_findings(&project_root)?;
+    if !source_audit_findings.is_empty() {
+        return Err(CliError {
+            code: EXIT_VALIDATION,
+            message: "Sync refused because private source state may be tracked or exposed."
+                .to_string(),
+            details: source_audit_detail_lines(&source_audit_findings),
+            json: json!({
+                "ok": false,
+                "command": "sync",
+                "api_version": API_VERSION,
+                "project_root": project_root.to_string_lossy(),
+                "source_audit": {
+                    "status": "fail",
+                    "findings": source_audit_findings,
+                },
+            }),
+        });
+    }
     let source_state = private_source_readiness(&project_root, &context.config_file, true)?;
     let source_state_label = source_state["state"].as_str().unwrap_or("unknown");
     let has_unlocked = source_state["unlocked"]
@@ -6334,11 +6433,12 @@ fn cmd_validate(cli: &Cli, args: &ValidateCmdArgs) -> std::result::Result<Comman
     let kernel = kernel_from_context(&context).map_err(internal_error)?;
     let source_audit_findings = source_audit_findings(&project_root)?;
     if !source_audit_findings.is_empty() {
+        let details = source_audit_detail_lines(&source_audit_findings);
         return Err(CliError {
             code: EXIT_VALIDATION,
             message: "Validation failed because private source state may be tracked or exposed."
                 .to_string(),
-            details: Vec::new(),
+            details,
             json: json!({
                 "ok": false,
                 "command": "validate",
@@ -6858,6 +6958,16 @@ fn cmd_doctor(cli: &Cli, args: &DoctorArgs) -> std::result::Result<CommandOutput
             _ => "?",
         };
         doctor_lines.push(format!("  [{}] {}: {}", icon, id, message));
+        if id == "source-audit" {
+            if let Some(findings) = check["findings"].as_array() {
+                if !findings.is_empty() {
+                    doctor_lines.push("    next: metactl audit sources".to_string());
+                    for line in source_audit_summary_lines(findings, 3) {
+                        doctor_lines.push(format!("    {line}"));
+                    }
+                }
+            }
+        }
     }
     Ok(CommandOutput {
         human: project_human_output(&project_root, doctor_lines.join("\n")),
@@ -6895,13 +7005,7 @@ fn load_required_context(
     cli: &Cli,
     project_root: &Path,
 ) -> std::result::Result<metactl::project::ProjectContext, CliError> {
-    load_project_context(
-        project_root,
-        cli.config.as_deref(),
-        cli.profile.as_deref(),
-        cli.overlay.as_deref(),
-    )
-    .map_err(state_error)
+    load_required_context_for_path(cli, project_root)
 }
 
 #[derive(Debug)]
@@ -8362,7 +8466,7 @@ fn cmd_audit_sources(cli: &Cli) -> std::result::Result<CommandOutput, CliError> 
         Err(CliError {
             code: EXIT_VALIDATION,
             message: "Source audit failed.".to_string(),
-            details: Vec::new(),
+            details: source_audit_detail_lines(&findings),
             json: payload,
         })
     } else {
@@ -8382,7 +8486,10 @@ fn source_audit_findings(project_root: &Path) -> std::result::Result<Vec<Value>,
             "severity": "fail",
             "path": path,
             "message": "Private source cache or private source lock is tracked by Git.",
-            "remediation": "Remove the file from the index and install local private source ignores.",
+            "remediation": format!(
+                "Remove the file from the index, then run `{}`.",
+                private_source_ignore_install_command(project_root)
+            ),
         }));
     }
 
@@ -8401,7 +8508,10 @@ fn source_audit_findings(project_root: &Path) -> std::result::Result<Vec<Value>,
                     "severity": "fail",
                     "path": "metactl.lock.json",
                     "message": format!("Public lock contains private path `{forbidden}`."),
-                    "remediation": "Use lock_publicity: private and rewrite source locks.",
+                    "remediation": format!(
+                        "Use lock_publicity: private, rewrite source locks, then run `{}`.",
+                        private_source_ignore_install_command(project_root)
+                    ),
                 }));
             }
         }
@@ -8418,6 +8528,100 @@ fn source_audit_findings(project_root: &Path) -> std::result::Result<Vec<Value>,
     }
 
     Ok(findings)
+}
+
+fn source_audit_detail_lines(findings: &[Value]) -> Vec<String> {
+    findings
+        .iter()
+        .flat_map(|finding| {
+            let path = finding["path"].as_str().unwrap_or("?");
+            let message = finding["message"].as_str().unwrap_or("leak risk");
+            let remediation = finding["remediation"].as_str().unwrap_or("");
+            if remediation.is_empty() {
+                vec![format!("{path}: {message}")]
+            } else {
+                vec![format!("{path}: {message}"), format!("Next: {remediation}")]
+            }
+        })
+        .collect()
+}
+
+fn source_audit_summary_lines(findings: &[Value], limit: usize) -> Vec<String> {
+    let mut lines = findings
+        .iter()
+        .take(limit)
+        .map(|finding| {
+            let path = finding["path"].as_str().unwrap_or("?");
+            let message = finding["message"]
+                .as_str()
+                .unwrap_or("source audit finding");
+            format!("finding: {path}: {message}")
+        })
+        .collect::<Vec<_>>();
+    if findings.len() > limit {
+        lines.push(format!("... {} more finding(s)", findings.len() - limit));
+    }
+    lines
+}
+
+fn private_source_ignore_install_command(project_root: &Path) -> String {
+    if project_root.join(".git").exists() {
+        "metactl ignore install --scope local --include-private-sources".to_string()
+    } else {
+        "metactl ignore install --scope repo --include-private-sources".to_string()
+    }
+}
+
+fn nearest_pack_suggestions(missing: &[String], available: &[String], limit: usize) -> Vec<String> {
+    let mut scored = Vec::new();
+    for requested in missing {
+        let requested_lower = requested.to_ascii_lowercase();
+        for candidate in available {
+            let candidate_lower = candidate.to_ascii_lowercase();
+            let score = if candidate_lower == requested_lower {
+                0
+            } else if candidate_lower.contains(&requested_lower) {
+                1
+            } else if requested_lower.contains(&candidate_lower) {
+                2
+            } else {
+                3 + bounded_edit_distance(&requested_lower, &candidate_lower)
+            };
+            if score <= 10 {
+                scored.push((score, candidate.clone()));
+            }
+        }
+    }
+    scored.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    let mut seen = BTreeSet::new();
+    scored
+        .into_iter()
+        .filter_map(|(_, candidate)| {
+            if seen.insert(candidate.clone()) {
+                Some(candidate)
+            } else {
+                None
+            }
+        })
+        .take(limit)
+        .collect()
+}
+
+fn bounded_edit_distance(left: &str, right: &str) -> usize {
+    let left_chars = left.chars().collect::<Vec<_>>();
+    let right_chars = right.chars().collect::<Vec<_>>();
+    let mut previous = (0..=right_chars.len()).collect::<Vec<_>>();
+    for (i, left_char) in left_chars.iter().enumerate() {
+        let mut current = vec![i + 1];
+        for (j, right_char) in right_chars.iter().enumerate() {
+            let substitution = previous[j] + usize::from(left_char != right_char);
+            let insertion = current[j] + 1;
+            let deletion = previous[j + 1] + 1;
+            current.push(substitution.min(insertion).min(deletion));
+        }
+        previous = current;
+    }
+    previous[right_chars.len()]
 }
 
 fn git_tracked_private_source_paths(
@@ -8571,6 +8775,12 @@ fn cmd_ignore_status(
         "not-protected"
     };
     lines.push(format!("  private-sources   {private_label}"));
+    if private_label == "not-protected" {
+        lines.push(format!(
+            "  next: {}",
+            private_source_ignore_install_command(&project_root)
+        ));
+    }
 
     Ok(CommandOutput {
         human: project_human_output(&project_root, lines.join("\n")),
@@ -9412,10 +9622,7 @@ fn cmd_source_add(cli: &Cli, args: &SourceAddArgs) -> std::result::Result<Comman
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
     if !config_path.exists() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "No metactl.yaml found. Run `metactl init` first.",
-        ));
+        return Err(missing_config_error(cli, &project_root));
     }
 
     validate_source_id(&args.name)?;
@@ -9502,10 +9709,23 @@ fn cmd_source_sync(
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
     let source = find_source_record(&context.config_file, &args.name).ok_or_else(|| {
+        let configured = context
+            .config_file
+            .sources
+            .iter()
+            .map(|source| source.id.clone())
+            .collect::<Vec<_>>();
+        let mut details = vec!["Next: metactl source list".to_string()];
+        if configured.is_empty() {
+            details.push("Next: metactl source add <name> <path-or-git-url> --private".to_string());
+        } else {
+            details.push(format!("Configured sources: {}", configured.join(", ")));
+        }
         CliError::new(
             EXIT_STATE,
             format!("Source '{}' is not configured.", args.name),
         )
+        .with_details(details)
     })?;
     let synced = sync_source(&project_root, &source, args.force)?;
 

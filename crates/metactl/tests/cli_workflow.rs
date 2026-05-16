@@ -1511,6 +1511,10 @@ fn cli_ignore_status_reports_private_source_protection() {
     assert!(before.status.success(), "{}", stderr(&before));
     let before_json = json_output(&before);
     assert_eq!(before_json["private_sources"]["protected"], false);
+    let before_human = run_cli(project.path(), &["ignore", "status"]);
+    assert!(before_human.status.success(), "{}", stderr(&before_human));
+    assert!(stdout(&before_human)
+        .contains("next: metactl ignore install --scope local --include-private-sources"));
 
     let install = run_cli(
         project.path(),
@@ -1594,6 +1598,17 @@ fn audit_sources_fails_on_public_personal_workspace_example() {
         .expect("findings")
         .iter()
         .any(|item| item["id"] == "public-example-personal-workspace"));
+
+    let human_audit = run_cli(project.path(), &["audit", "sources"]);
+    assert_eq!(
+        human_audit.status.code(),
+        Some(13),
+        "{}",
+        stderr(&human_audit)
+    );
+    let human_stderr = stderr(&human_audit);
+    assert!(human_stderr.contains("docs/user/private-source-example.md"));
+    assert!(human_stderr.contains("Use neutral placeholders"));
 }
 
 #[test]
@@ -1617,6 +1632,19 @@ fn doctor_reports_source_audit_failure_for_tracked_private_source_state() {
         .expect("findings")
         .iter()
         .any(|item| item["id"] == "tracked-private-source-state"));
+
+    let human_doctor = run_cli(project.path(), &["doctor"]);
+    assert!(human_doctor.status.success(), "{}", stderr(&human_doctor));
+    let human_doctor_stdout = stdout(&human_doctor);
+    assert!(human_doctor_stdout.contains("next: metactl audit sources"));
+    assert!(human_doctor_stdout.contains(".metactl/cache/sources"));
+
+    let human_status = run_cli(project.path(), &["status"]);
+    assert!(human_status.status.success(), "{}", stderr(&human_status));
+    let human_status_stdout = stdout(&human_status);
+    assert!(human_status_stdout.contains("Source state: private_source_leak_risk"));
+    assert!(human_status_stdout.contains("next: metactl audit sources"));
+    assert!(human_status_stdout.contains(".metactl/cache/sources"));
 }
 
 #[test]
@@ -1633,6 +1661,61 @@ fn validate_fails_source_audit_when_private_source_state_is_tracked() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["command"], "validate");
     assert_eq!(json["source_audit"]["status"], "fail");
+
+    let human_validate = run_cli(project.path(), &["validate"]);
+    assert_eq!(
+        human_validate.status.code(),
+        Some(13),
+        "{}",
+        stderr(&human_validate)
+    );
+    let human_stderr = stderr(&human_validate);
+    assert!(human_stderr.contains(".metactl/cache/sources"));
+    assert!(human_stderr.contains("Remove the file from the index"));
+    assert!(human_stderr.contains("metactl ignore install --scope local --include-private-sources"));
+}
+
+#[test]
+fn sync_preflights_source_audit_before_apply() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_private_source_state(project.path());
+
+    let sync = run_cli(project.path(), &["sync"]);
+    assert_eq!(sync.status.code(), Some(13), "{}", stderr(&sync));
+    let human_stderr = stderr(&sync);
+    assert!(human_stderr.contains("Sync refused"));
+    assert!(human_stderr.contains(".metactl/cache/sources"));
+    assert!(human_stderr.contains("metactl ignore install --scope local --include-private-sources"));
+    assert!(!project.path().join(".codex").exists());
+
+    let json_sync = run_cli(project.path(), &["--json", "sync"]);
+    assert_eq!(json_sync.status.code(), Some(13), "{}", stderr(&json_sync));
+    let json = json_output(&json_sync);
+    assert_eq!(json["command"], "sync");
+    assert_eq!(json["source_audit"]["status"], "fail");
+    assert!(json["source_audit"]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .any(|item| item["id"] == "tracked-private-source-state"));
+}
+
+#[test]
+fn missing_config_errors_include_init_hints() {
+    let project = TempDir::new().expect("tempdir");
+
+    let sync = run_cli(project.path(), &["sync", "--preview"]);
+    assert_eq!(sync.status.code(), Some(10), "{}", stderr(&sync));
+    let sync_stderr = stderr(&sync);
+    assert!(sync_stderr.contains("Project config"));
+    assert!(sync_stderr.contains("metactl init --detect"));
+    assert!(sync_stderr.contains("metactl init -t codex-cli"));
+    assert!(sync_stderr.contains("--config PATH"));
+
+    let validate = run_cli(project.path(), &["validate"]);
+    assert_eq!(validate.status.code(), Some(10), "{}", stderr(&validate));
+    assert!(stderr(&validate).contains("metactl init --detect"));
 }
 
 #[test]
@@ -4935,6 +5018,82 @@ fn source_add_local_writes_typed_source_and_sync_validates_library() {
 }
 
 #[test]
+fn source_sync_missing_source_lists_recovery_commands() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let no_sources = run_cli(project.path(), &["source", "sync", "missing-source"]);
+    assert_eq!(
+        no_sources.status.code(),
+        Some(10),
+        "{}",
+        stderr(&no_sources)
+    );
+    let no_sources_stderr = stderr(&no_sources);
+    assert!(no_sources_stderr.contains("Source 'missing-source' is not configured."));
+    assert!(no_sources_stderr.contains("Next: metactl source list"));
+    assert!(
+        no_sources_stderr.contains("Next: metactl source add <name> <path-or-git-url> --private")
+    );
+
+    let source = TempDir::new().expect("source");
+    seed_private_source_library(source.path(), "team-pack-core-quality");
+    let add = run_cli(
+        project.path(),
+        &[
+            "source",
+            "add",
+            "team-library",
+            source.path().to_str().expect("source path"),
+            "--private",
+        ],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+
+    let wrong_source = run_cli(project.path(), &["source", "sync", "wrong-source"]);
+    assert_eq!(
+        wrong_source.status.code(),
+        Some(10),
+        "{}",
+        stderr(&wrong_source)
+    );
+    let wrong_source_stderr = stderr(&wrong_source);
+    assert!(wrong_source_stderr.contains("Next: metactl source list"));
+    assert!(wrong_source_stderr.contains("Configured sources: team-library"));
+}
+
+#[test]
+fn add_missing_pack_suggests_search_and_nearest_matches() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let human = run_cli(project.path(), &["add", "python-refctor"]);
+    assert_eq!(human.status.code(), Some(10), "{}", stderr(&human));
+    let human_stderr = stderr(&human);
+    assert!(human_stderr.contains("Did you mean:"));
+    assert!(human_stderr.contains("python-refactor"));
+    assert!(human_stderr.contains("Next: metactl list packs"));
+    assert!(human_stderr.contains("Next: metactl search python-refctor"));
+    assert!(human_stderr.contains("Available pack count:"));
+    assert!(!human_stderr.contains("agent-candidate-library-installer"));
+
+    let json = run_cli(project.path(), &["--json", "add", "python-refctor"]);
+    assert_eq!(json.status.code(), Some(10), "{}", stderr(&json));
+    let payload = json_output(&json);
+    assert_eq!(payload["not_found"][0], "python-refctor");
+    assert!(payload["suggestions"]
+        .as_array()
+        .expect("suggestions")
+        .iter()
+        .any(|item| item == "python-refactor"));
+    assert!(payload["available_packs"]
+        .as_array()
+        .expect("available_packs")
+        .iter()
+        .any(|item| item == "agent-candidate-library-installer"));
+}
+
+#[test]
 fn source_add_git_sync_writes_redacted_public_and_private_locks() {
     let project = TempDir::new().expect("tempdir");
     let source = TempDir::new().expect("source");
@@ -5205,6 +5364,15 @@ fn sync_refuses_stale_git_source_cache_until_source_sync() {
     );
     let stale_json = json_output(&stale_sync);
     assert_eq!(stale_json["source_state"]["state"], "private_source_stale");
+
+    let stale_human_sync = run_cli(project.path(), &["sync"]);
+    assert_eq!(
+        stale_human_sync.status.code(),
+        Some(10),
+        "{}",
+        stderr(&stale_human_sync)
+    );
+    assert!(stderr(&stale_human_sync).contains("Next: metactl source sync team-library"));
 
     let refresh = run_cli(
         project.path(),

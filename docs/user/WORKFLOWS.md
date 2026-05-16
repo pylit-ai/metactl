@@ -69,6 +69,26 @@ If a destination file already exists and is not managed by metactl, apply refuse
 >   - Next: metactl sync --adopt takeover
 > ```
 
+## Source-Audit Recovery
+
+When `sync`, `validate`, `status`, or `doctor` reports private source exposure,
+inspect the concrete findings first:
+
+```bash
+metactl audit sources
+```
+
+If `metactl ignore status` reports `private-sources not-protected`, protect this
+checkout's private source cache and lock state:
+
+```bash
+metactl ignore status
+metactl ignore install --scope local --include-private-sources
+```
+
+Local scope writes `.git/info/exclude` and affects only the current checkout.
+Use `--scope repo` only when the ignore posture should be shared by the repo.
+
 ## Local MCP Smoke
 
 ```bash
