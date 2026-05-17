@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::{self, IsTerminal, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -8,16 +9,17 @@ use std::process::{Command, ExitCode};
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use metactl::project::{
-    append_history_entry, atomic_write, brownfield_adoption_hint, bundled_starter_library_root,
-    compile_manifest_path, current_config_digest, current_local_config_digest,
-    current_overlay_digest, default_project_config, detect_brownfield_repo, digest_path,
-    ensure_gitignore_entries, ensure_project_layout, is_candidate_pack, list_user_profiles,
-    load_compile_manifest, load_partial_project_config, load_policy_report, load_profile_partial,
-    load_project_context, load_user_settings, metactl_user_config_dir, policy_report_path,
-    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
-    project_config_path, project_lock_path, resolve_profile_name_for_init, save_user_settings,
-    strip_ansi_codes, target_supports_takeover, update_managed_files_index, user_settings_path,
-    write_lock, write_partial_project_config, write_policy_report, write_private_source_lock,
+    append_history_entry, atomic_write, brownfield_adoption_hint, builtin_profile_templates,
+    bundled_starter_library_root, compile_manifest_path, current_config_digest,
+    current_local_config_digest, current_overlay_digest, default_project_config,
+    detect_brownfield_repo, digest_path, ensure_gitignore_entries, ensure_project_layout,
+    is_candidate_pack, list_user_profiles, load_compile_manifest, load_partial_project_config,
+    load_policy_report, load_profile_partial, load_project_context, load_user_settings,
+    metactl_user_config_dir, policy_report_path, preferred_apply_mode_for_target,
+    private_source_lock_path, profile_path, profiles_directory, project_config_path,
+    project_lock_path, resolve_profile_name_for_init, save_user_settings, strip_ansi_codes,
+    target_supports_takeover, update_managed_files_index, user_settings_path, write_lock,
+    write_partial_project_config, write_policy_report, write_private_source_lock,
     write_project_config, ConfigOverrides, FleetSyncAdoptMode, HistoryEntry, LinkedProject,
     LinkedProjectStatus, LockedSource, LockedTarget, OperationLock, PrivateSourceLock,
     ProfileActivationSource, ProjectConfigDefaults, ProjectConfigFile, ProjectLock,
@@ -48,6 +50,7 @@ Quick start:
   metactl init --detect              # detect targets from existing repo surfaces
   metactl profile set-default NAME   # machine default profile for init when no --profile
   metactl init --bind-profile        # record the active machine default in metactl.yaml
+  metactl preview                    # compile and preview generated changes without applying
   metactl use python-refactor        # resolve, add, and sync a pack in one step
   metactl add python-refactor        # import a pack from the library
   metactl add <pack> --sync          # add (or already added) then sync in one step
@@ -68,7 +71,7 @@ Common workflow:
 
 Expert primitives:
   metactl search \"python refactor\"
-  metactl source add <name> <path>
+  metactl source add <path>          # infer source id, or pass <name> <path>
   metactl explain
   metactl compile
   metactl apply
@@ -95,6 +98,9 @@ struct Cli {
     /// Disable all interactive prompts (safe for CI / automation)
     #[arg(long, global = true)]
     no_input: bool,
+    /// Agent-safe mode: implies --json --no-input and emits stable error fields
+    #[arg(long, global = true)]
+    agent: bool,
     /// Auto-confirm destructive actions without prompting
     #[arg(long, short = 'y', global = true)]
     yes: bool,
@@ -118,6 +124,16 @@ struct Cli {
     quiet: bool,
     #[command(subcommand)]
     command: Commands,
+}
+
+impl Cli {
+    fn machine_output(&self) -> bool {
+        self.json || self.agent
+    }
+
+    fn no_input_enabled(&self) -> bool {
+        self.no_input || self.agent
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -156,6 +172,8 @@ enum Commands {
     Search(SearchArgs),
     /// Show why packs and targets were selected for the current config
     Explain(ExplainArgs),
+    /// Alias for `metactl sync --preview`
+    Preview(SyncArgs),
     /// Compile + apply all targets in one step (the main workflow command)
     Sync(SyncArgs),
     /// Resolve and compile staged outputs under .metactl/generated/ (use `--apply` to materialize)
@@ -193,7 +211,7 @@ struct HookArgs {
 #[derive(Debug, Args)]
 struct IgnoreArgs {
     #[command(subcommand)]
-    command: IgnoreCommand,
+    command: Option<IgnoreCommand>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -230,7 +248,7 @@ struct IgnoreInstallArgs {
 #[derive(Debug, Args)]
 struct AuditArgs {
     #[command(subcommand)]
-    command: AuditCommand,
+    command: Option<AuditCommand>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -263,13 +281,13 @@ struct HookInstallArgs {
 #[derive(Debug, Args)]
 struct SourceArgs {
     #[command(subcommand)]
-    command: SourceCommand,
+    command: Option<SourceCommand>,
 }
 
 #[derive(Debug, Args)]
 struct FleetArgs {
     #[command(subcommand)]
-    command: FleetCommand,
+    command: Option<FleetCommand>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -361,10 +379,12 @@ enum SourceCommand {
 
 #[derive(Debug, Args)]
 struct SourceAddArgs {
-    /// Name for this source
-    name: String,
+    /// Name for this source, or the location when LOCATION is omitted
+    #[arg(value_name = "NAME_OR_LOCATION")]
+    name: Option<String>,
     /// Path or Git URL to the source root
-    location: String,
+    #[arg(value_name = "LOCATION")]
+    location: Option<String>,
     /// Source type; inferred when omitted
     #[arg(long = "type", value_enum)]
     source_type: Option<SourceTypeArg>,
@@ -385,7 +405,7 @@ struct SourceAddArgs {
 #[derive(Debug, Args)]
 struct SourceSyncArgs {
     /// Source name to sync
-    name: String,
+    name: Option<String>,
     /// Replace an existing Git source cache
     #[arg(long)]
     force: bool,
@@ -437,7 +457,7 @@ struct InitArgs {
 #[derive(Debug, Args)]
 struct DemoArgs {
     #[command(subcommand)]
-    command: DemoCommand,
+    command: Option<DemoCommand>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -503,7 +523,7 @@ struct DemoDestroyArgs {
 #[derive(Debug, Args)]
 struct ProfileArgs {
     #[command(subcommand)]
-    command: ProfileCommand,
+    command: Option<ProfileCommand>,
 }
 
 #[derive(Debug, Args)]
@@ -619,6 +639,12 @@ struct ExportArtifactArgs {
 
 #[derive(Debug, Subcommand)]
 enum PackCommand {
+    /// Activate a project pack (alias for `metactl use`)
+    Use(UseArgs),
+    /// Add project packs (alias for `metactl add`)
+    Add(AddArgs),
+    /// Remove project packs (alias for `metactl remove`)
+    Remove(RemoveArgs),
     /// Import an Agent Skill folder into the local project as a candidate pack
     ImportSkill(PackImportSkillArgs),
     /// Export an imported Agent Skill folder for a target runtime
@@ -743,7 +769,7 @@ struct RemoveArgs {
 #[derive(Debug, Args)]
 struct TargetArgs {
     #[command(subcommand)]
-    command: TargetCommand,
+    command: Option<TargetCommand>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -886,7 +912,7 @@ struct CompileArgs {
     surface_mode: Option<SurfaceSelectionModeArg>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, Clone)]
 struct SyncArgs {
     /// Target runtimes to sync (default: all configured targets). Comma-separated aliases are accepted.
     #[arg(long, short = 't')]
@@ -1060,6 +1086,144 @@ impl CliError {
     }
 }
 
+fn agent_error_json(cli: &Cli, err: &CliError) -> Value {
+    let mut value = err.json.clone();
+    if !value.is_object() {
+        value = json!({});
+    }
+    let next_commands = next_commands_from_error(err);
+    let findings = findings_from_error_json(&err.json);
+    let obj = value.as_object_mut().expect("object json");
+    obj.insert("ok".to_string(), json!(false));
+    obj.insert("api_version".to_string(), json!(API_VERSION));
+    obj.insert(
+        "command".to_string(),
+        json!(command_contract_name(&cli.command)),
+    );
+    obj.insert("error_code".to_string(), json!(exit_code_label(err.code)));
+    obj.insert(
+        "requires_operator".to_string(),
+        json!(err.code == EXIT_INTERNAL),
+    );
+    obj.insert(
+        "risk_level".to_string(),
+        json!(if err.code == EXIT_INTERNAL {
+            "operator"
+        } else {
+            "recoverable"
+        }),
+    );
+    obj.insert("next_commands".to_string(), json!(next_commands));
+    obj.insert("findings".to_string(), findings);
+    value
+}
+
+fn next_commands_from_error(err: &CliError) -> Vec<String> {
+    let mut commands = Vec::new();
+    for key in ["next_commands", "next_steps"] {
+        if let Some(items) = err.json.get(key).and_then(Value::as_array) {
+            commands.extend(
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|item| item.trim_start_matches("Next: ").to_string()),
+            );
+        }
+    }
+    for detail in &err.details {
+        if let Some(command) = detail.strip_prefix("Next: ") {
+            commands.push(command.to_string());
+        }
+    }
+    commands.sort();
+    commands.dedup();
+    commands
+}
+
+fn findings_from_error_json(value: &Value) -> Value {
+    if let Some(findings) = value.get("findings") {
+        return findings.clone();
+    }
+    if let Some(findings) = value
+        .get("source_audit")
+        .and_then(|source_audit| source_audit.get("findings"))
+    {
+        return findings.clone();
+    }
+    json!([])
+}
+
+fn exit_code_label(code: u8) -> &'static str {
+    match code {
+        EXIT_INTERNAL => "internal",
+        EXIT_STATE => "state",
+        EXIT_STALE_LOCK => "stale_lock",
+        EXIT_CONFLICT => "conflict",
+        EXIT_VALIDATION => "validation",
+        EXIT_SUCCESS => "success",
+        _ => "unknown",
+    }
+}
+
+fn command_contract_name(command: &Commands) -> &'static str {
+    match command {
+        Commands::Init(_) => "init",
+        Commands::Library(_) => "library",
+        Commands::Pack(args) => match &args.command {
+            PackCommand::Use(_) => "use",
+            PackCommand::Add(_) => "add",
+            PackCommand::Remove(_) => "remove",
+            PackCommand::ImportSkill(_)
+            | PackCommand::ExportSkill(_)
+            | PackCommand::VerifySkill(_) => "pack",
+        },
+        Commands::Plugin(_) => "plugin",
+        Commands::Export(_) => "export",
+        Commands::Demo(args) => match &args.command {
+            Some(DemoCommand::List(_)) | None => "demo list",
+            _ => "demo",
+        },
+        Commands::CheckPublicBoundary => "check-public-boundary",
+        Commands::Project(_) => "project",
+        Commands::Use(_) => "use",
+        Commands::Add(_) => "add",
+        Commands::Remove(_) => "remove",
+        Commands::Target(_) => "target",
+        Commands::Fleet(_) => "fleet",
+        Commands::Status(_) => "status",
+        Commands::List(_) => "list",
+        Commands::Search(_) => "search",
+        Commands::Explain(_) => "explain",
+        Commands::Preview(_) | Commands::Sync(_) => "sync",
+        Commands::Compile(_) => "compile",
+        Commands::Apply(_) => "apply",
+        Commands::Revert(_) => "revert",
+        Commands::Validate(_) => "validate",
+        Commands::Check(_) => "check",
+        Commands::Doctor(_) => "doctor",
+        Commands::Audit(_) => "audit",
+        Commands::Ignore(_) => "ignore",
+        Commands::Hook(_) => "hook",
+        Commands::Source(_) => "source",
+        Commands::Profile(_) => "profile",
+        Commands::Version => "version",
+    }
+}
+
+fn builtin_profile_template_json() -> Vec<Value> {
+    builtin_profile_templates()
+        .into_iter()
+        .map(|template| {
+            json!({
+                "name": template.name,
+                "description": template.description,
+                "targets": template.profile.targets,
+                "starter_library": template.profile.starter_library,
+            })
+        })
+        .collect()
+}
+
 impl SharedSurfaceRule {
     fn to_json(&self) -> Value {
         json!({
@@ -1084,7 +1248,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match run(&cli) {
         Ok(output) => {
-            if cli.json {
+            if cli.machine_output() {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&output.json).unwrap_or_else(|_| "{}".to_string())
@@ -1095,10 +1259,15 @@ fn main() -> ExitCode {
             ExitCode::from(EXIT_SUCCESS)
         }
         Err(err) => {
-            if cli.json {
+            if cli.machine_output() {
+                let json = if cli.agent {
+                    agent_error_json(&cli, &err)
+                } else {
+                    err.json.clone()
+                };
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&err.json).unwrap_or_else(|_| "{}".to_string())
+                    serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
                 );
             } else {
                 eprintln!("Error: {}", err.message);
@@ -1142,6 +1311,12 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::List(args) => cmd_list(cli, args),
         Commands::Search(args) => cmd_search(cli, args),
         Commands::Explain(args) => cmd_explain(cli, args),
+        Commands::Preview(args) => {
+            let mut args = args.clone();
+            args.preview = true;
+            args.apply = false;
+            cmd_sync(cli, &args)
+        }
         Commands::Sync(args) => cmd_sync(cli, args),
         Commands::Compile(args) => cmd_compile(cli, args),
         Commands::Apply(args) => cmd_apply(cli, args),
@@ -1174,6 +1349,9 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             LibraryCommand::Init(_) => Some("library init"),
         },
         Commands::Pack(args) => match &args.command {
+            PackCommand::Use(_) => Some("pack use"),
+            PackCommand::Add(_) => Some("pack add"),
+            PackCommand::Remove(_) => Some("pack remove"),
             PackCommand::ImportSkill(_) => Some("pack import-skill"),
             PackCommand::ExportSkill(_) => Some("pack export-skill"),
             PackCommand::VerifySkill(_) => None,
@@ -1184,8 +1362,10 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         },
         Commands::Export(_) => Some("export"),
         Commands::Demo(args) => match &args.command {
-            DemoCommand::Create(_) | DemoCommand::Reset(_) | DemoCommand::Destroy(_) => None,
-            DemoCommand::List(_) | DemoCommand::Path(_) => None,
+            Some(DemoCommand::Create(_))
+            | Some(DemoCommand::Reset(_))
+            | Some(DemoCommand::Destroy(_)) => None,
+            Some(DemoCommand::List(_)) | Some(DemoCommand::Path(_)) | None => None,
         },
         Commands::CheckPublicBoundary => None,
         Commands::Project(args) => match &args.command {
@@ -1195,14 +1375,18 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         Commands::Add(_) => Some("add"),
         Commands::Remove(_) => Some("remove"),
         Commands::Target(args) => match &args.command {
-            TargetCommand::List(_) => None,
-            TargetCommand::Add(_) => Some("target add"),
-            TargetCommand::Remove(_) => Some("target remove"),
+            Some(TargetCommand::List(_)) | None => None,
+            Some(TargetCommand::Add(_)) => Some("target add"),
+            Some(TargetCommand::Remove(_)) => Some("target remove"),
         },
         Commands::Fleet(args) => match &args.command {
-            FleetCommand::List | FleetCommand::Status(_) | FleetCommand::Controller(_) => None,
-            FleetCommand::Sync(args) => args.apply.then_some("fleet sync"),
+            Some(FleetCommand::List)
+            | Some(FleetCommand::Status(_))
+            | Some(FleetCommand::Controller(_))
+            | None => None,
+            Some(FleetCommand::Sync(args)) => args.apply.then_some("fleet sync"),
         },
+        Commands::Preview(_) => Some("preview"),
         Commands::Sync(_) => Some("sync"),
         Commands::Compile(args) => {
             if args.apply {
@@ -1220,18 +1404,18 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         }
         Commands::Revert(_) => Some("revert"),
         Commands::Ignore(args) => match &args.command {
-            IgnoreCommand::Status(_) => None,
-            IgnoreCommand::Install(_) => Some("ignore install"),
+            Some(IgnoreCommand::Status(_)) | None => None,
+            Some(IgnoreCommand::Install(_)) => Some("ignore install"),
         },
         Commands::Hook(args) => match &args.command {
             HookCommand::Install(_) => Some("hook install"),
             HookCommand::Status => None,
         },
         Commands::Source(args) => match &args.command {
-            SourceCommand::List => None,
-            SourceCommand::Add(_) => Some("source add"),
-            SourceCommand::Sync(_) => Some("source sync"),
-            SourceCommand::Remove(_) => Some("source remove"),
+            Some(SourceCommand::List) | None => None,
+            Some(SourceCommand::Add(_)) => Some("source add"),
+            Some(SourceCommand::Sync(_)) => Some("source sync"),
+            Some(SourceCommand::Remove(_)) => Some("source remove"),
         },
         Commands::Status(_)
         | Commands::List(_)
@@ -1248,7 +1432,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
 
 fn operation_lock_project_root(cli: &Cli) -> std::result::Result<PathBuf, CliError> {
     if let Commands::Fleet(FleetArgs {
-        command: FleetCommand::Sync(args),
+        command: Some(FleetCommand::Sync(args)),
     }) = &cli.command
     {
         if args.apply {
@@ -1271,11 +1455,12 @@ const DEMO_SEED_VERSION: &str = "brownfield-basic-v1";
 
 fn cmd_demo(cli: &Cli, args: &DemoArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
-        DemoCommand::Create(create_args) => cmd_demo_create(cli, create_args, false),
-        DemoCommand::List(list_args) => cmd_demo_list(cli, list_args),
-        DemoCommand::Path(path_args) => cmd_demo_path(cli, path_args),
-        DemoCommand::Reset(create_args) => cmd_demo_create(cli, create_args, true),
-        DemoCommand::Destroy(destroy_args) => cmd_demo_destroy(cli, destroy_args),
+        Some(DemoCommand::Create(create_args)) => cmd_demo_create(cli, create_args, false),
+        Some(DemoCommand::List(list_args)) => cmd_demo_list(cli, list_args),
+        Some(DemoCommand::Path(path_args)) => cmd_demo_path(cli, path_args),
+        Some(DemoCommand::Reset(create_args)) => cmd_demo_create(cli, create_args, true),
+        Some(DemoCommand::Destroy(destroy_args)) => cmd_demo_destroy(cli, destroy_args),
+        None => cmd_demo_list(cli, &DemoListArgs { all: false }),
     }
 }
 
@@ -1319,6 +1504,7 @@ fn cmd_demo_create(
     let demo_cli = Cli {
         json: cli.json,
         no_input: cli.no_input,
+        agent: cli.agent,
         yes: cli.yes,
         project: Some(demo_root.clone()),
         profile: cli.profile.clone(),
@@ -1437,6 +1623,7 @@ fn cmd_demo_list(cli: &Cli, args: &DemoListArgs) -> std::result::Result<CommandO
             "demo list",
             cli.project.as_deref(),
             json!({
+                "action": "list",
                 "demo_home": demo_home,
                 "demos": demos,
             }),
@@ -2077,6 +2264,9 @@ fn public_boundary_markers(text: &str) -> Vec<&'static str> {
 
 fn cmd_pack(cli: &Cli, args: &PackArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
+        PackCommand::Use(use_args) => cmd_use(cli, use_args),
+        PackCommand::Add(add_args) => cmd_add(cli, add_args),
+        PackCommand::Remove(remove_args) => cmd_remove(cli, remove_args),
         PackCommand::ImportSkill(import_args) => cmd_pack_import_skill(cli, import_args),
         PackCommand::ExportSkill(export_args) => cmd_pack_export_skill(cli, export_args),
         PackCommand::VerifySkill(verify_args) => cmd_pack_verify_skill(cli, verify_args),
@@ -2582,20 +2772,21 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        let available_display = if available.is_empty() {
-            "(none discovered)".to_string()
+        if !cli.no_input_enabled() && io::stdin().is_terminal() {
+            run_init_target_wizard(&available)?
         } else {
-            available.join(", ")
-        };
-        return Err(CliError::new(
-            EXIT_STATE,
-            &format!(
-                "No target specified and none detected.\n\
-                 Available targets: {}\n\
-                 Hint: use `metactl init --target <id>` or `metactl init --target all`",
-                available_display
-            ),
-        ));
+            let available_display = available_targets_display(&available);
+            return Err(CliError::new(
+                EXIT_STATE,
+                &format!(
+                    "No target specified and none detected.\n\
+                     Available targets: {}\n\
+                     Hint: use `metactl init --target <id>` or `metactl init --target all`",
+                    available_display
+                ),
+            )
+            .with_details(init_target_next_steps(&available)));
+        }
     };
     if registry_has_targets(registry.as_ref()) {
         validate_target_ids(&default_targets, registry.as_ref()).map_err(state_error)?;
@@ -3421,9 +3612,10 @@ fn detect_existing_surfaces(project_root: &Path) -> Vec<(String, String)> {
 
 fn cmd_target(cli: &Cli, args: &TargetArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
-        TargetCommand::List(args) => cmd_target_list(cli, args),
-        TargetCommand::Add(args) => cmd_target_add(cli, args),
-        TargetCommand::Remove(args) => cmd_target_remove(cli, args),
+        Some(TargetCommand::List(args)) => cmd_target_list(cli, args),
+        Some(TargetCommand::Add(args)) => cmd_target_add(cli, args),
+        Some(TargetCommand::Remove(args)) => cmd_target_remove(cli, args),
+        None => cmd_target_list(cli, &TargetListArgs { installed: false }),
     }
 }
 
@@ -4083,10 +4275,17 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
 
 fn cmd_fleet(cli: &Cli, args: &FleetArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
-        FleetCommand::List => cmd_fleet_list(cli),
-        FleetCommand::Status(args) => cmd_fleet_status(cli, args),
-        FleetCommand::Sync(args) => cmd_fleet_sync(cli, args),
-        FleetCommand::Controller(args) => cmd_fleet_controller(cli, args),
+        Some(FleetCommand::List) => cmd_fleet_list(cli),
+        Some(FleetCommand::Status(args)) => cmd_fleet_status(cli, args),
+        Some(FleetCommand::Sync(args)) => cmd_fleet_sync(cli, args),
+        Some(FleetCommand::Controller(args)) => cmd_fleet_controller(cli, args),
+        None => cmd_fleet_status(
+            cli,
+            &FleetStatusArgs {
+                ids: Vec::new(),
+                include_disabled: false,
+            },
+        ),
     }
 }
 
@@ -4443,7 +4642,7 @@ fn cmd_fleet_status(
 fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<CommandOutput, CliError> {
     let controller = resolve_fleet_controller(cli)?;
     let apply = args.apply;
-    if apply && !(cli.yes && cli.no_input) {
+    if apply && !(cli.yes && cli.no_input_enabled()) {
         return Err(CliError::new(
             EXIT_STATE,
             "fleet sync --apply requires explicit --yes --no-input confirmation",
@@ -7721,6 +7920,150 @@ fn expand_target_ids(
     Ok(unique_strings(expanded))
 }
 
+fn run_init_target_wizard(available: &[String]) -> std::result::Result<Vec<String>, CliError> {
+    if available.is_empty() {
+        return Err(
+            CliError::new(EXIT_STATE, "No targets are available for interactive init.")
+                .with_details(init_target_next_steps(available)),
+        );
+    }
+
+    eprintln!("metactl init target setup");
+    eprintln!("Choose one or more instruction targets for this project.");
+    eprintln!("Generated files stay target-specific; preview before applying changes.");
+    eprintln!();
+    eprintln!("Available targets:");
+    for (index, target) in available.iter().enumerate() {
+        eprintln!("  {}. {}", index + 1, target);
+    }
+    eprintln!();
+    eprint!("Target ids, numbers, or 'all': ");
+    io::stderr().flush().map_err(internal_error)?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).map_err(internal_error)?;
+    parse_init_wizard_targets(&input, available)
+}
+
+fn parse_init_wizard_targets(
+    input: &str,
+    available: &[String],
+) -> std::result::Result<Vec<String>, CliError> {
+    let available_set = available.iter().cloned().collect::<BTreeSet<_>>();
+    let tokens = input
+        .split(|ch: char| ch == ',' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+
+    if tokens.is_empty() {
+        return Err(CliError::new(EXIT_STATE, "No init target was selected.")
+            .with_details(init_target_next_steps(available)));
+    }
+
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+    for token in tokens {
+        if token.eq_ignore_ascii_case("all") {
+            return Ok(available.to_vec());
+        }
+
+        let target_id = if let Ok(index) = token.parse::<usize>() {
+            if index == 0 || index > available.len() {
+                return Err(CliError::new(
+                    EXIT_STATE,
+                    format!("Init target selection '{}' is out of range.", token),
+                )
+                .with_details(init_target_next_steps(available)));
+            }
+            available[index - 1].clone()
+        } else {
+            let (canonical, _) = resolve_target_alias(token);
+            if !available_set.contains(&canonical) {
+                return Err(CliError::new(
+                    EXIT_STATE,
+                    format!("Init target '{}' is not available.", token),
+                )
+                .with_details(init_target_next_steps(available)));
+            }
+            canonical
+        };
+
+        if seen.insert(target_id.clone()) {
+            selected.push(target_id);
+        }
+    }
+
+    Ok(selected)
+}
+
+fn available_targets_display(available: &[String]) -> String {
+    if available.is_empty() {
+        "(none discovered)".to_string()
+    } else {
+        available.join(", ")
+    }
+}
+
+fn init_target_next_steps(available: &[String]) -> Vec<String> {
+    let target_hint = available
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "<id>".to_string());
+    vec![
+        format!(
+            "Available targets: {}",
+            available_targets_display(available)
+        ),
+        format!("Next: metactl init --target {target_hint}"),
+        "Next: metactl init --target all".to_string(),
+        "Next: metactl init --detect".to_string(),
+    ]
+}
+
+#[cfg(test)]
+mod cli_init_wizard_tests {
+    use super::*;
+
+    fn available_targets() -> Vec<String> {
+        vec![
+            "codex-cli".to_string(),
+            "claude-code".to_string(),
+            "gemini-cli".to_string(),
+        ]
+    }
+
+    #[test]
+    fn init_wizard_targets_accept_numbers_ids_aliases_and_deduplicate() {
+        let selected =
+            parse_init_wizard_targets("2 codex 1", &available_targets()).expect("selection");
+
+        assert_eq!(
+            selected,
+            vec!["claude-code".to_string(), "codex-cli".to_string()]
+        );
+    }
+
+    #[test]
+    fn init_wizard_targets_accept_all() {
+        let selected = parse_init_wizard_targets("all", &available_targets()).expect("selection");
+
+        assert_eq!(selected, available_targets());
+    }
+
+    #[test]
+    fn init_wizard_targets_report_recoverable_next_steps() {
+        let error = parse_init_wizard_targets("unknown", &available_targets()).unwrap_err();
+
+        assert_eq!(error.code, EXIT_STATE);
+        assert!(error.message.contains("not available"));
+        assert!(error
+            .details
+            .iter()
+            .any(|detail| detail == "Next: metactl init --target codex-cli"));
+    }
+}
+
 fn resolve_target_alias(target_id: &str) -> (String, bool) {
     // Returns (canonical_id, was_aliased)
     match target_id {
@@ -8432,8 +8775,8 @@ fn build_explanation_certificates(explain: &ExplainResult) -> Vec<Value> {
 // --- Source privacy audit ---
 
 fn cmd_audit(cli: &Cli, args: &AuditArgs) -> std::result::Result<CommandOutput, CliError> {
-    match args.command {
-        AuditCommand::Sources => cmd_audit_sources(cli),
+    match &args.command {
+        Some(AuditCommand::Sources) | None => cmd_audit_sources(cli),
     }
 }
 
@@ -8459,6 +8802,7 @@ fn cmd_audit_sources(cli: &Cli) -> std::result::Result<CommandOutput, CliError> 
         "command": "audit",
         "api_version": API_VERSION,
         "project_root": project_root.to_string_lossy(),
+        "action": "sources",
         "subject": "sources",
         "findings": findings,
     });
@@ -8712,8 +9056,9 @@ const AGENT_ALLOWLIST_END: &str = "# metactl:end agent-surface-allowlist";
 
 fn cmd_ignore(cli: &Cli, args: &IgnoreArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
-        IgnoreCommand::Status(status_args) => cmd_ignore_status(cli, status_args),
-        IgnoreCommand::Install(install_args) => cmd_ignore_install(cli, install_args),
+        Some(IgnoreCommand::Status(status_args)) => cmd_ignore_status(cli, status_args),
+        Some(IgnoreCommand::Install(install_args)) => cmd_ignore_install(cli, install_args),
+        None => cmd_ignore_status(cli, &IgnoreStatusArgs { target: Vec::new() }),
     }
 }
 
@@ -9425,8 +9770,9 @@ fn cmd_hook_status(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
 fn cmd_profile(cli: &Cli, args: &ProfileArgs) -> std::result::Result<CommandOutput, CliError> {
     let project_root = cli.project.as_deref();
     match &args.command {
-        ProfileCommand::List => {
+        Some(ProfileCommand::List) => {
             let items = list_user_profiles().map_err(internal_error)?;
+            let templates = builtin_profile_template_json();
             let profiles_dir = profiles_directory();
             let mut human = String::from("Profiles:\n");
             if items.is_empty() {
@@ -9443,6 +9789,14 @@ fn cmd_profile(cli: &Cli, args: &ProfileArgs) -> std::result::Result<CommandOutp
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|| "(unavailable — set HOME or XDG_CONFIG_HOME)".to_string())
             ));
+            human.push_str("Built-in templates:\n");
+            for template in &templates {
+                human.push_str(&format!(
+                    "  {} — {}\n",
+                    template["name"].as_str().unwrap_or("?"),
+                    template["description"].as_str().unwrap_or("")
+                ));
+            }
             let json_profiles: Vec<Value> = items
                 .iter()
                 .map(|(name, path)| {
@@ -9461,19 +9815,24 @@ fn cmd_profile(cli: &Cli, args: &ProfileArgs) -> std::result::Result<CommandOutp
                         "action": "list",
                         "profiles_directory": profiles_dir,
                         "profiles": json_profiles,
+                        "templates": templates,
                     }),
                 ),
             })
         }
-        ProfileCommand::Show => {
+        Some(ProfileCommand::Show) | None => {
             let settings = load_user_settings();
             let path = user_settings_path();
             let human = format!(
-                "User settings file: {}\nDefault profile: {}\n",
+                "User settings file: {}\nDefault profile: {}\nProfiles directory: {}\n",
                 path.as_ref()
                     .map(|item| item.display().to_string())
                     .unwrap_or_else(|| "(unavailable — set HOME or XDG_CONFIG_HOME)".to_string()),
                 settings.default_profile.as_deref().unwrap_or("(none)"),
+                profiles_directory()
+                    .as_ref()
+                    .map(|item| item.display().to_string())
+                    .unwrap_or_else(|| "(unavailable — set HOME or XDG_CONFIG_HOME)".to_string()),
             );
             Ok(CommandOutput {
                 human,
@@ -9484,18 +9843,23 @@ fn cmd_profile(cli: &Cli, args: &ProfileArgs) -> std::result::Result<CommandOutp
                         "action": "show",
                         "settings_path": path,
                         "default_profile": settings.default_profile,
+                        "profiles_directory": profiles_directory(),
+                        "templates": builtin_profile_template_json(),
                     }),
                 ),
             })
         }
-        ProfileCommand::SetDefault { name } => {
+        Some(ProfileCommand::SetDefault { name }) => {
             let Some(profile_file) = profile_path(name) else {
                 return Err(CliError::new(
                     EXIT_STATE,
                     "HOME (or XDG_CONFIG_HOME) is not set; cannot resolve profile path.",
                 ));
             };
-            if !profile_file.exists() {
+            let builtin = builtin_profile_templates()
+                .iter()
+                .any(|template| template.name == name.as_str());
+            if !profile_file.exists() && !builtin {
                 return Err(CliError::new(
                     EXIT_STATE,
                     format!(
@@ -9521,7 +9885,7 @@ fn cmd_profile(cli: &Cli, args: &ProfileArgs) -> std::result::Result<CommandOutp
                 ),
             })
         }
-        ProfileCommand::ClearDefault => {
+        Some(ProfileCommand::ClearDefault) => {
             let mut settings = load_user_settings();
             settings.default_profile = None;
             save_user_settings(&settings).map_err(internal_error)?;
@@ -9544,10 +9908,10 @@ fn cmd_profile(cli: &Cli, args: &ProfileArgs) -> std::result::Result<CommandOutp
 
 fn cmd_source(cli: &Cli, args: &SourceArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
-        SourceCommand::List => cmd_source_list(cli),
-        SourceCommand::Add(add_args) => cmd_source_add(cli, add_args),
-        SourceCommand::Sync(sync_args) => cmd_source_sync(cli, sync_args),
-        SourceCommand::Remove(remove_args) => cmd_source_remove(cli, remove_args),
+        Some(SourceCommand::List) | None => cmd_source_list(cli),
+        Some(SourceCommand::Add(add_args)) => cmd_source_add(cli, add_args),
+        Some(SourceCommand::Sync(sync_args)) => cmd_source_sync(cli, sync_args),
+        Some(SourceCommand::Remove(remove_args)) => cmd_source_remove(cli, remove_args),
     }
 }
 
@@ -9625,11 +9989,13 @@ fn cmd_source_add(cli: &Cli, args: &SourceAddArgs) -> std::result::Result<Comman
         return Err(missing_config_error(cli, &project_root));
     }
 
-    validate_source_id(&args.name)?;
+    let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
+    let (source_name, location, inferred_name) = source_add_name_and_location(args)?;
+    validate_source_id(&source_name)?;
     let inferred_type = args
         .source_type
         .map(Into::into)
-        .unwrap_or_else(|| infer_source_type(&args.location));
+        .unwrap_or_else(|| infer_source_type(&location));
     if inferred_type == SourceType::Git && args.ref_.is_none() && !args.allow_floating_ref {
         return Err(CliError::new(
             EXIT_STATE,
@@ -9637,42 +10003,42 @@ fn cmd_source_add(cli: &Cli, args: &SourceAddArgs) -> std::result::Result<Comman
         ));
     }
 
-    let path = PathBuf::from(&args.location);
+    let path = PathBuf::from(&location);
     if inferred_type == SourceType::Local && !path.exists() {
-        if cli.no_input {
+        if cli.no_input_enabled() {
             return Err(CliError::new(
                 EXIT_STATE,
-                format!("Source path does not exist: {}", args.location),
+                format!("Source path does not exist: {}", location),
             ));
         }
-        eprintln!("Warning: source path does not exist: {}", args.location);
+        eprintln!("Warning: source path does not exist: {}", location);
     }
 
-    let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
-    if raw.sources.iter().any(|source| source.id == args.name) {
+    if raw.sources.iter().any(|source| source.id == source_name) {
         return Ok(CommandOutput {
             human: project_human_output(
                 &project_root,
-                format!("Source '{}' already configured.", args.name),
+                format!("Source '{}' already configured.", source_name),
             ),
             json: success_json(
                 "source",
                 Some(&project_root),
                 json!({
                     "action": "add",
-                    "name": args.name,
-                    "source": raw.sources.iter().find(|source| source.id == args.name).map(|source| source_record_json(source, "config")),
+                    "name": source_name,
+                    "source": raw.sources.iter().find(|source| source.id == source_name).map(|source| source_record_json(source, "config")),
                     "already_configured": true,
+                    "inferred_name": inferred_name,
                 }),
             ),
         });
     }
 
     let source = SourceRecord {
-        id: args.name.clone(),
+        id: source_name.clone(),
         source_type: inferred_type.clone(),
-        path: (inferred_type == SourceType::Local).then(|| args.location.clone()),
-        url: (inferred_type == SourceType::Git).then(|| args.location.clone()),
+        path: (inferred_type == SourceType::Local).then(|| location.clone()),
+        url: (inferred_type == SourceType::Git).then(|| location.clone()),
         ref_: args.ref_.clone(),
         visibility: if args.private {
             SourceVisibility::Private
@@ -9687,16 +10053,17 @@ fn cmd_source_add(cli: &Cli, args: &SourceAddArgs) -> std::result::Result<Comman
     Ok(CommandOutput {
         human: project_human_output(
             &project_root,
-            format!("Added source '{}' at {}.", args.name, args.location),
+            format!("Added source '{}' at {}.", source_name, location),
         ),
         json: success_json(
             "source",
             Some(&project_root),
             json!({
                 "action": "add",
-                "name": args.name,
+                "name": source_name,
                 "source": source_record_json(&source, "config"),
                 "already_configured": false,
+                "inferred_name": inferred_name,
             }),
         ),
     })
@@ -9708,7 +10075,10 @@ fn cmd_source_sync(
 ) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
-    let source = find_source_record(&context.config_file, &args.name).ok_or_else(|| {
+    let Some(name) = args.name.as_deref() else {
+        return cmd_source_sync_all(&project_root, &context, args.force);
+    };
+    let source = find_source_record(&context.config_file, name).ok_or_else(|| {
         let configured = context
             .config_file
             .sources
@@ -9721,11 +10091,8 @@ fn cmd_source_sync(
         } else {
             details.push(format!("Configured sources: {}", configured.join(", ")));
         }
-        CliError::new(
-            EXIT_STATE,
-            format!("Source '{}' is not configured.", args.name),
-        )
-        .with_details(details)
+        CliError::new(EXIT_STATE, format!("Source '{}' is not configured.", name))
+            .with_details(details)
     })?;
     let synced = sync_source(&project_root, &source, args.force)?;
 
@@ -9747,6 +10114,61 @@ fn cmd_source_sync(
             json!({
                 "action": "sync",
                 "source": locked_source_json(&synced, false),
+                "sources": [locked_source_json(&synced, false)],
+            }),
+        ),
+    })
+}
+
+fn cmd_source_sync_all(
+    project_root: &Path,
+    context: &metactl::project::ProjectContext,
+    force: bool,
+) -> std::result::Result<CommandOutput, CliError> {
+    if context.config_file.sources.is_empty() {
+        return Err(
+            CliError::new(EXIT_STATE, "No configured sources to sync.").with_details(vec![
+                "Next: metactl source list".to_string(),
+                "Next: metactl source add <location> --private".to_string(),
+            ]),
+        );
+    }
+
+    let mut public_lock = context.lock.clone();
+    let mut private_sources = Vec::new();
+    for source in &context.config_file.sources {
+        let synced = sync_source(project_root, source, force)?;
+        upsert_locked_source(&mut public_lock.sources, redacted_locked_source(&synced));
+        private_sources.push(synced);
+    }
+    write_lock(&context.lock_path, &public_lock).map_err(internal_error)?;
+    write_private_source_lock(
+        &private_source_lock_path(project_root),
+        &PrivateSourceLock {
+            sources: private_sources.clone(),
+        },
+    )
+    .map_err(internal_error)?;
+
+    let names = private_sources
+        .iter()
+        .map(|source| source.id.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(CommandOutput {
+        human: project_human_output(
+            project_root,
+            format!("Synced {} source(s): {}.", private_sources.len(), names),
+        ),
+        json: success_json(
+            "source",
+            Some(project_root),
+            json!({
+                "action": "sync",
+                "sources": private_sources
+                    .iter()
+                    .map(|source| locked_source_json(source, false))
+                    .collect::<Vec<_>>(),
             }),
         ),
     })
@@ -9800,6 +10222,70 @@ impl From<SourceLockPublicityArg> for SourceLockPublicity {
             SourceLockPublicityArg::Private => SourceLockPublicity::Private,
         }
     }
+}
+
+fn source_add_name_and_location(
+    args: &SourceAddArgs,
+) -> std::result::Result<(String, String, bool), CliError> {
+    match (&args.name, &args.location) {
+        (Some(name), Some(location)) => Ok((name.clone(), location.clone(), false)),
+        (Some(location), None) => Ok((infer_source_id(location)?, location.clone(), true)),
+        _ => Err(CliError::new(
+            EXIT_STATE,
+            "Source add requires a location. Usage: metactl source add <location> or metactl source add <name> <location>",
+        )
+        .with_details(vec![
+            "Next: metactl source add ./path/to/library --private".to_string(),
+            "Next: metactl source add team-library ./path/to/library --private".to_string(),
+        ])),
+    }
+}
+
+fn infer_source_id(location: &str) -> std::result::Result<String, CliError> {
+    let path = PathBuf::from(location);
+    if path.exists() {
+        if let Some(id) = infer_source_id_from_library_manifest(&path)? {
+            validate_source_id(&id)?;
+            return Ok(id);
+        }
+    }
+    let trimmed = location.trim_end_matches(&['/', '\\'][..]);
+    let basename = trimmed
+        .rsplit(['/', '\\', ':'])
+        .next()
+        .unwrap_or(trimmed)
+        .trim_end_matches(".git")
+        .to_string();
+    if basename.is_empty() {
+        return Err(CliError::new(
+            EXIT_STATE,
+            format!("Could not infer a source id from location: {location}"),
+        )
+        .with_details(vec![
+            "Next: metactl source add <name> <location>".to_string(),
+            "Next: add an id field to library.json".to_string(),
+        ]));
+    }
+    validate_source_id(&basename)?;
+    Ok(basename)
+}
+
+fn infer_source_id_from_library_manifest(
+    path: &Path,
+) -> std::result::Result<Option<String>, CliError> {
+    let manifest = path.join("library.json");
+    if !manifest.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&manifest)
+        .map_err(|err| internal_error(anyhow!("read {}: {}", manifest.display(), err)))?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| state_error(anyhow!("decode {}: {}", manifest.display(), err)))?;
+    Ok(value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(|id| id.to_string()))
 }
 
 fn infer_source_type(location: &str) -> SourceType {

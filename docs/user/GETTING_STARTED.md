@@ -112,11 +112,21 @@ Common target aliases:
 | `gemini` | `gemini-cli` |
 | `openclaw` | `openclaw` |
 
+Public `init` is target-neutral unless a target is explicit, detected from existing repo surfaces, or selected by a profile:
+
+```bash
+metactl --project /path/to/project init --detect --no-input
+metactl --project /path/to/project profile list
+metactl --project /path/to/project profile set-default solo-codex
+```
+
+Built-in profile templates are public and do not require private library paths. Use `neutral` for explicit target selection, `multi-agent` for several runtimes, `agent-ci` for automation posture, and `solo-codex` only when Codex CLI is an intentional target choice.
+
 ## Find And Add Packs
 
 ```bash
 metactl --project /path/to/project search python
-metactl --project /path/to/project add python-refactor
+metactl --project /path/to/project pack add python-refactor
 metactl --project /path/to/project sync
 ```
 
@@ -131,6 +141,13 @@ metactl --project /path/to/project sync
 > ```
 
 Use `--json` for automation. Treat JSON output as forward-compatible: rely on documented top-level fields and ignore unknown additions.
+
+Use `--agent` when an automation runner needs JSON, no prompts, and stable recoverable-error fields:
+
+```bash
+metactl --project /path/to/project --agent status
+metactl --project /path/to/project --agent validate
+```
 
 ## Validate
 

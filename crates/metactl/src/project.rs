@@ -314,6 +314,13 @@ pub struct ProfileResolution {
     pub source: Option<ProfileActivationSource>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltinProfileTemplate {
+    pub name: &'static str,
+    pub description: &'static str,
+    pub profile: PartialProjectConfig,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ConfigOverrides {
     pub role: Option<String>,
@@ -653,6 +660,92 @@ pub fn list_user_profiles() -> Result<Vec<(String, PathBuf)>> {
     Ok(items)
 }
 
+pub fn builtin_profile_templates() -> Vec<BuiltinProfileTemplate> {
+    vec![
+        BuiltinProfileTemplate {
+            name: "neutral",
+            description: "No implicit runtime target; detect or choose targets explicitly.",
+            profile: PartialProjectConfig {
+                defaults: Some(ProjectConfigDefaults {
+                    brownfield_mode: Some(BrownfieldMode::RefuseDueToConflict),
+                    discovery_mode: Some(DiscoveryMode::CandidateSearch),
+                    ..ProjectConfigDefaults::default()
+                }),
+                ..PartialProjectConfig::default()
+            },
+        },
+        BuiltinProfileTemplate {
+            name: "multi-agent",
+            description: "Project posture for several configured agent runtimes.",
+            profile: PartialProjectConfig {
+                targets: vec![
+                    "codex-cli".to_string(),
+                    "claude-code".to_string(),
+                    "cursor".to_string(),
+                    "gemini-cli".to_string(),
+                    "openclaw".to_string(),
+                ],
+                defaults: Some(ProjectConfigDefaults {
+                    brownfield_mode: Some(BrownfieldMode::RefuseDueToConflict),
+                    discovery_mode: Some(DiscoveryMode::CandidateSearch),
+                    ..ProjectConfigDefaults::default()
+                }),
+                ..PartialProjectConfig::default()
+            },
+        },
+        BuiltinProfileTemplate {
+            name: "agent-ci",
+            description: "Automation posture for JSON/no-input validation and explicit apply.",
+            profile: PartialProjectConfig {
+                defaults: Some(ProjectConfigDefaults {
+                    brownfield_mode: Some(BrownfieldMode::RefuseDueToConflict),
+                    discovery_mode: Some(DiscoveryMode::CandidateSearch),
+                    ..ProjectConfigDefaults::default()
+                }),
+                metadata: BTreeMap::from([("profile.posture".to_string(), "agent-ci".to_string())]),
+                ..PartialProjectConfig::default()
+            },
+        },
+        BuiltinProfileTemplate {
+            name: "solo-codex",
+            description: "Explicit Codex CLI posture for users who choose that target.",
+            profile: PartialProjectConfig {
+                targets: vec!["codex-cli".to_string()],
+                defaults: Some(ProjectConfigDefaults {
+                    brownfield_mode: Some(BrownfieldMode::RefuseDueToConflict),
+                    discovery_mode: Some(DiscoveryMode::CandidateSearch),
+                    ..ProjectConfigDefaults::default()
+                }),
+                ..PartialProjectConfig::default()
+            },
+        },
+        BuiltinProfileTemplate {
+            name: "private-overlay",
+            description:
+                "Public skeleton for private-overlay workflows; add private sources locally.",
+            profile: PartialProjectConfig {
+                defaults: Some(ProjectConfigDefaults {
+                    brownfield_mode: Some(BrownfieldMode::RefuseDueToConflict),
+                    discovery_mode: Some(DiscoveryMode::CandidateSearch),
+                    ..ProjectConfigDefaults::default()
+                }),
+                metadata: BTreeMap::from([(
+                    "profile.posture".to_string(),
+                    "private-overlay".to_string(),
+                )]),
+                ..PartialProjectConfig::default()
+            },
+        },
+    ]
+}
+
+fn builtin_profile_template(name: &str) -> Option<PartialProjectConfig> {
+    builtin_profile_templates()
+        .into_iter()
+        .find(|template| template.name == name)
+        .map(|template| template.profile)
+}
+
 /// Resolve which profile applies: CLI/env > `extends_profile` > user `default_profile`.
 pub fn resolve_profile_cli_chain(
     profile_cli: Option<&str>,
@@ -727,10 +820,10 @@ pub fn load_profile_partial(profile: Option<&str>) -> Result<PartialProjectConfi
         return Ok(PartialProjectConfig::default());
     };
     let Some(path) = profile_path(profile_name) else {
-        return Ok(PartialProjectConfig::default());
+        return Ok(builtin_profile_template(profile_name).unwrap_or_default());
     };
     if !path.exists() {
-        return Ok(PartialProjectConfig::default());
+        return Ok(builtin_profile_template(profile_name).unwrap_or_default());
     }
     let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     serde_yaml::from_str(&raw).with_context(|| format!("decode {}", path.display()))

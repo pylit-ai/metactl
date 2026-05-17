@@ -121,7 +121,8 @@ Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/d
 Use the high-level commands for normal repo work:
 
 ```bash
-metactl init -t codex-cli --no-input
+metactl init --detect --no-input
+metactl preview
 metactl list packs
 metactl use python-refactor
 metactl status
@@ -177,10 +178,13 @@ metactl validate
 
 | Command | Purpose |
 | --- | --- |
-| `metactl init -t codex-cli --no-input` | Create `metactl.yaml`, `.metactl/`, and a Codex CLI target. |
 | `metactl init --detect` | Detect targets from existing repo surfaces. |
+| `metactl init -t codex-cli --no-input` | Explicitly create `metactl.yaml`, `.metactl/`, and a Codex CLI target. |
+| `metactl profile list` | Show user profiles and built-in templates such as `neutral`, `multi-agent`, `agent-ci`, and `solo-codex`. |
 | `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
+| `metactl preview` | Convenience alias for `metactl sync --preview`; stages output without applying runtime files. |
 | `metactl use <pack>` | Resolve, add, sync, and validate a pack-oriented workflow. |
+| `metactl pack use <pack>` | Object-oriented alias for project pack activation; Agent Skill import/export remains under `pack import-skill` and `pack export-skill`. |
 | `metactl add <pack> --sync` | Add a known pack and immediately materialize it. |
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
 | `metactl explain` | Show why packs and targets were selected. |
@@ -222,7 +226,7 @@ For existing repositories, prefer preview first:
 
 ```bash
 metactl init --detect --no-input
-metactl compile
+metactl preview
 metactl validate
 ```
 
@@ -231,8 +235,9 @@ metactl validate
 > ```text
 > Initialized /path/to/project.
 > Detected targets: codex-cli
-> Compiled:
->   codex-cli (...)
+> Sync complete.
+>   codex-cli [ready] (symlink, surface: full, ...)
+> Preview only; runtime files were not changed.
 > Validation:
 >   codex-cli [warn]
 >     warn No managed state found for target codex-cli.
@@ -406,8 +411,8 @@ See [docs/user/FLEET_SYNC.md](https://github.com/pylit-ai/metactl/blob/main/docs
 PROJECT="$(mktemp -d /tmp/metactl-json.XXXXXX)"
 metactl --project "$PROJECT" init -t codex-cli --no-input
 metactl --project "$PROJECT" use python-refactor
-metactl --project "$PROJECT" status --json
-metactl --project "$PROJECT" validate --json
+metactl --project "$PROJECT" --agent status
+metactl --project "$PROJECT" --agent validate
 ```
 
 > **Expected JSON shape**

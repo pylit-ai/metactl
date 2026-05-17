@@ -64,6 +64,34 @@ fn json_output(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).expect("json stdout")
 }
 
+fn project_file_snapshot(project: &Path) -> Vec<String> {
+    fn walk(root: &Path, path: &Path, out: &mut Vec<String>) {
+        for entry in fs::read_dir(path).expect("read snapshot dir") {
+            let entry = entry.expect("snapshot entry");
+            let entry_path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if matches!(name.as_ref(), ".git" | ".test-home" | "target") {
+                continue;
+            }
+            let rel = entry_path
+                .strip_prefix(root)
+                .expect("relative snapshot path")
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.push(rel);
+            if entry_path.is_dir() {
+                walk(root, &entry_path, out);
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(project, project, &mut out);
+    out.sort();
+    out
+}
+
 fn assert_json_contract(value: &Value, command: &str, project: Option<&Path>) {
     assert_eq!(value["ok"], true);
     assert_eq!(value["command"], command);
@@ -1040,7 +1068,7 @@ fn cli_help_surfaces_source_add_argument_shape() {
         .expect("main help");
     assert!(main_help.status.success(), "{}", stderr(&main_help));
     let main_text = stdout(&main_help);
-    assert!(main_text.contains("metactl source add <name> <path>"));
+    assert!(main_text.contains("metactl source add <path>"));
 
     let source_help = Command::new(cli_bin())
         .args(["help", "source", "add"])
@@ -1049,9 +1077,9 @@ fn cli_help_surfaces_source_add_argument_shape() {
     assert!(source_help.status.success(), "{}", stderr(&source_help));
     let source_text = stdout(&source_help);
     assert!(source_text.contains("Usage: metactl source add"));
-    assert!(source_text.contains("<NAME>"));
-    assert!(source_text.contains("<PATH>"));
-    assert!(source_text.contains("Name for this source"));
+    assert!(source_text.contains("[NAME_OR_LOCATION]"));
+    assert!(source_text.contains("[LOCATION]"));
+    assert!(source_text.contains("Name for this source, or the location"));
     assert!(source_text.contains("Path or Git URL to the source root"));
 }
 
@@ -1138,6 +1166,172 @@ fn cli_json_output_public_commands() {
     assert!(version.status.success(), "{}", stderr(&version));
     let version_json = json_output(&version);
     assert_json_contract(&version_json, "version", None);
+}
+
+#[test]
+fn cli_bare_group_defaults_are_read_only_and_json_compatible() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let commands: &[(&[&str], &str, &str)] = &[
+        (&["target"], "target", "list"),
+        (&["source"], "source", "list"),
+        (&["profile"], "profile", "show"),
+        (&["ignore"], "ignore", "status"),
+        (&["audit"], "audit", "sources"),
+        (&["fleet"], "fleet", "status"),
+        (&["demo"], "demo list", "list"),
+    ];
+
+    for (args, command, action) in commands {
+        let before = project_file_snapshot(project.path());
+        let mut cli_args = vec!["--json"];
+        cli_args.extend_from_slice(args);
+        let output = run_cli(project.path(), &cli_args);
+        assert!(
+            output.status.success(),
+            "{:?} failed\nstdout:\n{}\nstderr:\n{}",
+            args,
+            stdout(&output),
+            stderr(&output)
+        );
+        let json = json_output(&output);
+        assert_json_contract(&json, command, Some(project.path()));
+        assert_eq!(json["action"], *action, "{args:?} json: {json}");
+        assert_eq!(
+            project_file_snapshot(project.path()),
+            before,
+            "{args:?} wrote files"
+        );
+    }
+}
+
+#[test]
+fn cli_preview_alias_runs_sync_preview_without_materializing_runtime_files() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let preview = run_cli(project.path(), &["--json", "preview"]);
+    assert!(preview.status.success(), "{}", stderr(&preview));
+    let json = json_output(&preview);
+    assert_json_contract(&json, "sync", Some(project.path()));
+    assert_eq!(json["preview"], true);
+    assert!(
+        !project.path().join("AGENTS.md").exists(),
+        "preview alias must not apply runtime files"
+    );
+}
+
+#[test]
+fn cli_agent_mode_implies_json_no_input_and_error_contract() {
+    let project = TempDir::new().expect("tempdir");
+    let output = run_cli(project.path(), &["--agent", "init"]);
+    assert_eq!(output.status.code(), Some(10), "{}", stderr(&output));
+    assert!(
+        stderr(&output).is_empty(),
+        "--agent should not emit human stderr: {}",
+        stderr(&output)
+    );
+    let json = json_output(&output);
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["command"], "init");
+    assert_eq!(json["error_code"], "state");
+    assert_eq!(json["requires_operator"], false);
+    assert!(json["next_commands"]
+        .as_array()
+        .expect("next_commands")
+        .iter()
+        .any(|item| item
+            .as_str()
+            .unwrap_or_default()
+            .contains("metactl init --target")));
+}
+
+#[test]
+fn source_add_infers_name_and_source_sync_without_name_syncs_configured_sources() {
+    let project = TempDir::new().expect("tempdir");
+    let source = TempDir::new().expect("source");
+    seed_private_source_library(source.path(), "team-pack-core-quality");
+    init_project(project.path());
+
+    let add = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "source",
+            "add",
+            source.path().to_str().expect("source path"),
+            "--private",
+            "--lock-publicity",
+            "private",
+        ],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+    let add_json = json_output(&add);
+    assert_eq!(add_json["name"], "team-library");
+    assert_eq!(add_json["source"]["id"], "team-library");
+
+    let sync = run_cli(project.path(), &["--json", "source", "sync"]);
+    assert!(sync.status.success(), "{}", stderr(&sync));
+    let sync_json = json_output(&sync);
+    assert_json_contract(&sync_json, "source", Some(project.path()));
+    assert_eq!(sync_json["action"], "sync");
+    let sources = sync_json["sources"].as_array().expect("sources");
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["id"], "team-library");
+    assert!(project
+        .path()
+        .join(".metactl/private/source-lock.json")
+        .exists());
+}
+
+#[test]
+fn pack_activation_object_aliases_match_top_level_verbs() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let add = run_cli(project.path(), &["--json", "pack", "add", "unit-test-loop"]);
+    assert!(add.status.success(), "{}", stderr(&add));
+    let add_json = json_output(&add);
+    assert_json_contract(&add_json, "add", Some(project.path()));
+    assert_eq!(add_json["added"][0], "unit-test-loop");
+
+    let remove = run_cli(
+        project.path(),
+        &["--json", "pack", "remove", "unit-test-loop"],
+    );
+    assert!(remove.status.success(), "{}", stderr(&remove));
+    let remove_json = json_output(&remove);
+    assert_json_contract(&remove_json, "remove", Some(project.path()));
+    assert_eq!(remove_json["removed"][0], "unit-test-loop");
+}
+
+#[test]
+fn profile_list_exposes_public_builtin_templates() {
+    let project = TempDir::new().expect("tempdir");
+    let list = run_cli(project.path(), &["--json", "profile", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let json = json_output(&list);
+    assert_json_contract(&json, "profile", Some(project.path()));
+    let templates = json["templates"].as_array().expect("templates");
+    for expected in [
+        "neutral",
+        "multi-agent",
+        "agent-ci",
+        "solo-codex",
+        "private-overlay",
+    ] {
+        assert!(
+            templates.iter().any(|item| item["name"] == expected),
+            "missing template {expected}: {templates:?}"
+        );
+    }
+    assert!(templates.iter().all(|item| {
+        item["starter_library"]
+            .as_array()
+            .map(|paths| paths.is_empty())
+            .unwrap_or(true)
+    }));
 }
 
 #[test]
