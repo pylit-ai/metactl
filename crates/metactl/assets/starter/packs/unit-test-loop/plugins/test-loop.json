@@ -1,0 +1,5 @@
+{
+  "name": "unit-test-loop",
+  "entrypoint": "packs/unit-test-loop/scripts/run-targeted-tests.sh",
+  "description": "Run the pack's targeted test loop helper."
+}

@@ -1,0 +1,41 @@
+{
+  "kind": "pack",
+  "id": "local-only-example",
+  "version": "1.0.0",
+  "title": "Local-Only Example",
+  "description": "Example pack for testing local-only visibility with placeholder content.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "visibility",
+    "testing"
+  ],
+  "compatible_roles": [
+    "builder"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "gemini-cli",
+    "cursor"
+  ],
+  "resources": [
+    {
+      "path": "packs/local-only-example/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "visibility_scope": "private",
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

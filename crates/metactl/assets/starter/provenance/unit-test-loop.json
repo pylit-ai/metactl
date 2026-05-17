@@ -1,0 +1,20 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "unit-test-loop",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:c7b479cf6cf6054b5571a3cccf7935f4c073ddb706f423cce7e5021d35a8cc0f",
+  "origin": "library/starter/packs/unit-test-loop.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-03-26T18:05:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:starter-library",
+    "tests:openclaw"
+  ]
+}

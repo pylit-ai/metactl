@@ -1,0 +1,36 @@
+{
+  "kind": "role",
+  "id": "reviewer",
+  "version": "1.0.0",
+  "title": "Repository Reviewer",
+  "description": "Default review posture for code and PR review.",
+  "intent_tags": [
+    "review",
+    "code-quality",
+    "risk"
+  ],
+  "default_pack_refs": [
+    {
+      "kind": "pack",
+      "id": "repo-review-instructions",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "pack",
+      "id": "unit-test-loop",
+      "version": "1.0.0"
+    }
+  ],
+  "default_policy_ref": {
+    "kind": "policy",
+    "id": "safe-review",
+    "version": "1.0.0"
+  },
+  "compatible_targets": [
+    "claude-code",
+    "openclaw"
+  ],
+  "metadata": {
+    "starter_status": "stable"
+  }
+}

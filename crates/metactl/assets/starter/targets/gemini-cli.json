@@ -1,0 +1,68 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "gemini-cli",
+  "version": "2026.03.26",
+  "title": "Gemini CLI",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": false,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "compile_targets": [
+    {
+      "output_kind": "agents_md",
+      "path_template": "GEMINI.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "pack_extension_manifest",
+      "path_template": ".gemini/extensions/{pack_id}/gemini-extension.json"
+    },
+    {
+      "output_kind": "codex_skill",
+      "path_template": ".gemini/extensions/{pack_id}/skills/{surface_slug}/SKILL.md",
+      "surface_selection_mode": "minimal",
+      "supports_multi_surface_pack": true,
+      "supports_surface_assets": true,
+      "supports_surface_scripts": true,
+      "supports_surface_frontmatter": true,
+      "surface_merge_strategy": "optional"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".gemini/extensions/{pack_id}/commands/{resource_name}",
+      "resource_kinds": ["command"],
+      "command_adapter": {
+        "format": "markdown",
+        "inject_description": true
+      }
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".gemini/extensions/{pack_id}/GEMINI.md",
+      "resource_kinds": ["instruction"],
+      "primary_instruction_only": true
+    }
+  ],
+  "local_projection": {
+    "support": "exact",
+    "local_surface": "GEMINI.local.md",
+    "notes": "Gemini CLI supports local GEMINI.md files in subdirectories."
+  },
+  "metadata": {
+    "starter_status": "stable",
+    "docs": "https://geminicli.com/docs/extensions/reference/",
+    "standards_ref": "docs/agent-surfaces.md#gemini-cli",
+    "approval_surface": "GEMINI.md + Gemini CLI policy hooks",
+    "filesystem_surface": ".gemini/extensions/<pack>/skills bundles",
+    "advisory_surface": "GEMINI.md advisory guidance"
+  }
+}

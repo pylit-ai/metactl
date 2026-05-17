@@ -1,0 +1,71 @@
+{
+  "kind": "pack",
+  "id": "migration-guard",
+  "version": "1.0.0",
+  "title": "Migration Guard",
+  "description": "RULE: Do not edit database or schema migrations unless the user explicitly approves migration changes for the current task.",
+  "activation_class": "hook",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "migrations",
+    "db",
+    "safety"
+  ],
+  "compatible_roles": [
+    "builder"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli"
+  ],
+  "resources": [
+    {
+      "path": "packs/migration-guard/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/migration-guard/ESCALATION.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "suppressible"
+    },
+    {
+      "path": "packs/migration-guard/hook.sh",
+      "kind": "hook",
+      "required": true
+    },
+    {
+      "path": "packs/migration-guard/hooks/wiring.json",
+      "kind": "hook_wiring",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "gemini-cli"
+    ],
+    "last_verified_at": "2026-04-22T12:00:00Z",
+    "evidence_refs": [
+      "evals/search/starter-search-eval.json"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

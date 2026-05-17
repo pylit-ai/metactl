@@ -1,0 +1,43 @@
+{
+  "kind": "policy",
+  "id": "release-policy",
+  "version": "1.0.0",
+  "title": "Release Policy",
+  "description": "Release-time policy with explicit approvals and final validation expectations.",
+  "discovery_mode": "curated_only",
+  "rules": [
+    {
+      "id": "require-approval-publish",
+      "title": "Publishing requires approval",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "artifact",
+      "operator": "require_approval",
+      "parameters": {
+        "approval_prompt": "Allow this release publish or upload?"
+      }
+    },
+    {
+      "id": "require-approval-network",
+      "title": "Network release steps require approval",
+      "requested_enforcement_class": "enforceable_local",
+      "subject": "network",
+      "operator": "require_approval",
+      "parameters": {
+        "approval_prompt": "Allow network traffic during release verification?"
+      }
+    },
+    {
+      "id": "release-budget-cap",
+      "title": "Keep release task spend bounded",
+      "requested_enforcement_class": "explain_only_unverifiable",
+      "subject": "budget",
+      "operator": "budget_cap",
+      "parameters": {
+        "max_budget_usd": 20
+      }
+    }
+  ],
+  "metadata": {
+    "starter_status": "stable"
+  }
+}

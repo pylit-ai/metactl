@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
+use include_dir::{include_dir, Dir, DirEntry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -19,6 +20,7 @@ pub const METACTL_DIRS: &[&str] = &["generated", "state", "history", "private", 
 pub const METACTL_GITIGNORE_ENTRY: &str = "/.metactl/";
 pub const LOCAL_CONFIG_GITIGNORE_ENTRY: &str = "/metactl.local.yaml";
 const DEFAULT_OPERATION_LOCK_STALE_SECS: u64 = 6 * 60 * 60;
+static BUNDLED_STARTER_LIBRARY: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/starter");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ProjectConfigDefaults {
@@ -329,13 +331,121 @@ pub struct ConfigOverrides {
 }
 
 pub fn bundled_starter_library_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../library/starter")
-        .to_path_buf()
+    bundled_starter_cache_root().join(bundled_starter_library_digest())
+}
+
+pub fn ensure_bundled_starter_library_root() -> Result<PathBuf> {
+    let root = bundled_starter_library_root();
+    let marker = root.join(".metactl-bundled-starter.complete");
+    if marker.exists() {
+        return Ok(root);
+    }
+
+    fs::create_dir_all(&root).with_context(|| format!("create {}", root.display()))?;
+    materialize_bundled_starter_dir(&BUNDLED_STARTER_LIBRARY, &root)?;
+    atomic_write(&marker, bundled_starter_library_digest().as_bytes())
+        .with_context(|| format!("write {}", marker.display()))?;
+    Ok(root)
+}
+
+fn materialize_bundled_starter_dir(dir: &Dir<'_>, root: &Path) -> Result<()> {
+    for entry in dir.entries() {
+        match entry {
+            DirEntry::Dir(child) => materialize_bundled_starter_dir(child, root)?,
+            DirEntry::File(file) => {
+                let path = root.join(file.path());
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("create {}", parent.display()))?;
+                }
+                atomic_write(&path, file.contents())
+                    .with_context(|| format!("write {}", path.display()))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn bundled_starter_cache_root() -> PathBuf {
+    metactl_user_config_dir()
+        .unwrap_or_else(|| env::temp_dir().join("metactl"))
+        .join("cache")
+        .join("bundled-starter")
+}
+
+fn bundled_starter_library_digest() -> String {
+    let mut files = Vec::new();
+    collect_bundled_starter_files(&BUNDLED_STARTER_LIBRARY, &mut files);
+    digest_starter_files(files)
+}
+
+fn digest_starter_files<T: AsRef<[u8]>>(mut files: Vec<(String, T)>) -> String {
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut hasher = Sha256::new();
+    for (path, contents) in files {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+        hasher.update(contents.as_ref());
+        hasher.update([0]);
+    }
+    hex::encode(hasher.finalize())
+}
+
+fn filesystem_starter_library_digest(root: &Path) -> Result<String> {
+    let mut files = Vec::new();
+    collect_filesystem_starter_files(root, root, &mut files)?;
+    Ok(digest_starter_files(files))
+}
+
+fn collect_filesystem_starter_files(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> Result<()> {
+    let mut entries = fs::read_dir(dir)
+        .with_context(|| format!("read {}", dir.display()))?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .with_context(|| format!("read {}", dir.display()))?;
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        let path = entry.path();
+        if path
+            .file_name()
+            .is_some_and(|name| name == ".metactl-bundled-starter.complete")
+        {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .with_context(|| format!("stat {}", path.display()))?;
+        if metadata.is_dir() {
+            collect_filesystem_starter_files(root, &path, files)?;
+        } else if metadata.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let contents = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            files.push((relative, contents));
+        }
+    }
+    Ok(())
+}
+
+fn collect_bundled_starter_files<'a>(dir: &'a Dir<'a>, files: &mut Vec<(String, &'a [u8])>) {
+    for entry in dir.entries() {
+        match entry {
+            DirEntry::Dir(child) => collect_bundled_starter_files(child, files),
+            DirEntry::File(file) => files.push((
+                file.path().to_string_lossy().replace('\\', "/"),
+                file.contents(),
+            )),
+        }
+    }
 }
 
 pub fn default_project_config() -> ProjectConfigFile {
-    let bundled = bundled_starter_library_root();
     ProjectConfigFile {
         extends_profile: None,
         api_version: crate::types::API_VERSION.to_string(),
@@ -343,10 +453,7 @@ pub fn default_project_config() -> ProjectConfigFile {
         packs: Vec::new(),
         policy: "brownfield-safe-builder".to_string(),
         targets: vec!["codex-cli".to_string()],
-        starter_library: bundled
-            .exists()
-            .then(|| vec![bundled.to_string_lossy().to_string()])
-            .unwrap_or_default(),
+        starter_library: Vec::new(),
         sources: Vec::new(),
         linked_projects: Vec::new(),
         defaults: Some(ProjectConfigDefaults {
@@ -870,7 +977,7 @@ pub fn load_project_context(
     } else {
         None
     };
-    let library_roots = resolve_library_roots(project_root, &config_file);
+    let library_roots = resolve_library_roots(project_root, &config_file)?;
     let registry = load_registry(&library_roots)?;
     let lock_path = project_lock_path(project_root);
     let lock = load_lock(&lock_path)?;
@@ -922,18 +1029,64 @@ fn load_registry(library_roots: &[PathBuf]) -> Result<Option<LibraryRegistry>> {
     Ok(Some(LibraryRegistry::load_from_roots(&existing)?))
 }
 
-fn resolve_library_roots(project_root: &Path, config: &ProjectConfigFile) -> Vec<PathBuf> {
+pub fn resolve_starter_library_roots(
+    project_root: &Path,
+    starter_library: &[String],
+) -> Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    for item in &config.starter_library {
+    let bundled = ensure_bundled_starter_library_root()?;
+    let bundled_manifest_digest = digest_path(&bundled.join("library.json")).ok();
+    let bundled_library_digest = bundled_starter_library_digest();
+    push_unique_library_root(&mut roots, &mut seen, bundled);
+    for item in starter_library {
         let path = PathBuf::from(item);
         let root = if path.is_absolute() {
             path
         } else {
             project_root.join(path)
         };
+        if is_bundled_starter_equivalent(
+            &root,
+            bundled_manifest_digest.as_deref(),
+            &bundled_library_digest,
+        ) {
+            continue;
+        }
         push_unique_library_root(&mut roots, &mut seen, root);
     }
+    Ok(roots)
+}
+
+fn is_bundled_starter_equivalent(
+    root: &Path,
+    bundled_manifest_digest: Option<&str>,
+    bundled_library_digest: &str,
+) -> bool {
+    let Some(bundled_manifest_digest) = bundled_manifest_digest else {
+        return false;
+    };
+    let manifest = root.join("library.json");
+    let manifest_matches = manifest.exists()
+        && digest_path(&manifest)
+            .map(|digest| digest == bundled_manifest_digest)
+            .unwrap_or(false);
+    manifest_matches
+        && filesystem_starter_library_digest(root)
+            .map(|digest| digest == bundled_library_digest)
+            .unwrap_or(false)
+}
+
+fn resolve_library_roots(project_root: &Path, config: &ProjectConfigFile) -> Result<Vec<PathBuf>> {
+    let mut roots = resolve_starter_library_roots(project_root, &config.starter_library)?;
+    let mut seen = roots
+        .iter()
+        .map(|root| root.canonicalize().unwrap_or_else(|_| root.clone()))
+        .collect::<std::collections::BTreeSet<_>>();
+    let bundled_manifest_digest = roots
+        .first()
+        .and_then(|root| digest_path(&root.join("library.json")).ok());
+    let bundled_library_digest = bundled_starter_library_digest();
     for source in &config.sources {
         let root = match source.source_type {
             SourceType::Local => source.path.as_ref().map(PathBuf::from),
@@ -951,10 +1104,17 @@ fn resolve_library_roots(project_root: &Path, config: &ProjectConfigFile) -> Vec
             } else {
                 project_root.join(path)
             };
+            if is_bundled_starter_equivalent(
+                &root,
+                bundled_manifest_digest.as_deref(),
+                &bundled_library_digest,
+            ) {
+                continue;
+            }
             push_unique_library_root(&mut roots, &mut seen, root);
         }
     }
-    roots
+    Ok(roots)
 }
 
 fn push_unique_library_root(
@@ -1662,6 +1822,21 @@ pub fn strip_ansi_codes(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_config_keeps_bundled_starter_out_of_project_yaml() {
+        assert!(default_project_config().starter_library.is_empty());
+    }
+
+    #[test]
+    fn bundled_starter_resolves_without_project_config_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let roots = resolve_starter_library_roots(temp.path(), &[]).expect("starter roots");
+
+        assert_eq!(roots.len(), 1);
+        assert!(roots[0].join("library.json").exists());
+        assert!(roots[0].join("packs").join("python-refactor.json").exists());
+    }
 
     #[test]
     fn linked_projects_merge_profile_and_project_by_id() {

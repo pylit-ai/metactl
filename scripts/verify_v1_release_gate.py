@@ -25,10 +25,12 @@ REQUIRED_PATHS = [
     "fixtures/v1/sanitized-export.sample.json",
     "library/starter/targets/filesystem-agent.json",
     "library/starter/packs/release-manager.json",
+    "crates/metactl/assets/starter/library.json",
 ]
 
 COMMANDS = [
     ["cargo", "build", "-p", "metactl", "-p", "metactld"],
+    [sys.executable, "scripts/verify_packaged_starter_mirror.py"],
     [sys.executable, "scripts/verify_v1_charter.py"],
     ["bash", "scripts/check_public_boundary.sh"],
     [sys.executable, "scripts/verify_public_boundary.py"],
@@ -44,6 +46,7 @@ COMMANDS = [
         "--include-knowledge-fixtures",
         "--library-stack-fixtures",
     ],
+    ["bash", "scripts/smoke_packaged_metactl.sh"],
 ]
 
 

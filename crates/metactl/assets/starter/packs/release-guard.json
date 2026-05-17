@@ -1,0 +1,77 @@
+{
+  "kind": "pack",
+  "id": "release-guard",
+  "version": "1.1.0",
+  "title": "Release Guard",
+  "description": "RULE: Do not tag, publish, or call a release complete until version/tag state, deterministic tests, boundary checks, CI, and artifact or registry verification have passed or the remaining blocker is explicitly named.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "release",
+    "verification",
+    "handoff"
+  ],
+  "compatible_roles": [
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/release-guard/SKILL.md",
+      "kind": "instruction",
+      "required": true
+    },
+    {
+      "path": "packs/release-guard/references/checklist.md",
+      "kind": "example",
+      "required": false
+    },
+    {
+      "path": "packs/release-guard/references/rust-crate-release.md",
+      "kind": "example",
+      "required": false
+    },
+    {
+      "path": "packs/release-guard/scripts/check.sh",
+      "kind": "script",
+      "required": false
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "metadata": {
+    "pack_status": "starter-promoted"
+  },
+  "knowledge_refs": [
+    {
+      "source_id": "release-readiness-docs",
+      "uris": [
+        "file:packs/release-guard/references/checklist.md",
+        "file:packs/release-guard/references/rust-crate-release.md"
+      ],
+      "allowed_targets": [
+        "codex-cli",
+        "cursor",
+        "gemini-cli",
+        "openclaw"
+      ],
+      "required": false,
+      "purpose": "Bounded release checklist and Rust crate release reference material.",
+      "byte_budget": {
+        "max_read_bytes": 32768,
+        "max_search_bytes": 32768
+      }
+    }
+  ]
+}

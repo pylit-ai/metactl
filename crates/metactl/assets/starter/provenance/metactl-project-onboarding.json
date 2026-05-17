@@ -1,0 +1,20 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "metactl-project-onboarding",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:2a3c4373703a2f2028cc8ed84d1ec3fd975b963b9803cc84d6d9fec8b8d7b08f",
+  "origin": "library/starter/packs/metactl-project-onboarding.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-04-23T12:00:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:search_finds_project_onboarding_for_brownfield_install_queries",
+    "tests:starter-library"
+  ]
+}

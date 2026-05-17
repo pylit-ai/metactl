@@ -1,0 +1,21 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "release-manager",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:6b2db86365288101f549a81d563edd2232cf213e24028192b8fbbbe19aab2dfa",
+  "origin": "library/starter/packs/release-manager.json",
+  "imported_from_ecosystem": "first_party",
+  "imported_at": "2026-05-07T00:00:00Z",
+  "review": {
+    "reviewed_by": "metactl maintainers",
+    "reviewed_at": "2026-05-07T00:00:00Z",
+    "promotion_status": "promoted"
+  },
+  "attestation_refs": [],
+  "validation_refs": [
+    "make validate-contracts"
+  ]
+}

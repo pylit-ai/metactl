@@ -1,0 +1,67 @@
+{
+  "kind": "pack",
+  "id": "metactl-project-onboarding",
+  "version": "1.0.0",
+  "title": "metactl Project Onboarding",
+  "description": "Agent-facing installer workflow for adding metactl to greenfield or brownfield repositories, choosing profiles and packs, syncing safely, optionally installing the local MCP server, and verifying projected agent surfaces.",
+  "activation_class": "instruction",
+  "side_effect_class": "fs_write",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": true,
+  "task_tags": [
+    "metactl",
+    "onboarding",
+    "install",
+    "brownfield",
+    "greenfield",
+    "mcp",
+    "profiles",
+    "packs"
+  ],
+  "compatible_roles": [
+    "builder",
+    "reviewer",
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/metactl-project-onboarding/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "gemini-cli",
+      "openclaw"
+    ],
+    "last_verified_at": "2026-04-23T12:00:00Z",
+    "evidence_refs": [
+      "tests:search_finds_project_onboarding_for_brownfield_install_queries",
+      "docs:mcp/servers.md",
+      "script:install_metactl_mcp.py",
+      "tests:starter-library"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

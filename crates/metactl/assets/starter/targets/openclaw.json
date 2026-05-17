@@ -1,0 +1,48 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "openclaw",
+  "version": "2026.03.26",
+  "title": "OpenClaw",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": false,
+    "deterministic_hooks": false,
+    "subagents": false,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": true,
+    "local_scripts": false,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "runtime_template": {
+    "path": "targets/templates/openclaw-config.json.tmpl",
+    "format": "json",
+    "destination_path": ".openclaw/config.json",
+    "output_kind": "runtime_json"
+  },
+  "compile_targets": [
+    {
+      "output_kind": "openclaw_md",
+      "path_template": "OPENCLAW.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".openclaw/packs/{pack_id}/{resource_name}",
+      "resource_kinds": ["instruction"]
+    }
+  ],
+  "local_projection": {
+    "support": "degraded",
+    "local_surface": "OPENCLAW.local.md",
+    "notes": "Local overlay supported via OPENCLAW.local.md."
+  },
+  "metadata": {
+    "starter_status": "stable",
+    "approval_surface": ".openclaw/config.json approvals",
+    "filesystem_surface": ".openclaw/config.json approvals",
+    "advisory_surface": "OPENCLAW.md advisory guidance"
+  }
+}

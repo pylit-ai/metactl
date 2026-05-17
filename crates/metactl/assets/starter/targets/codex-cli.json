@@ -1,0 +1,66 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "codex-cli",
+  "version": "2026.03.26",
+  "title": "Codex CLI",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": false,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": false,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "compile_targets": [
+    {
+      "output_kind": "agents_md",
+      "path_template": "AGENTS.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "codex_skill",
+      "path_template": ".codex/skills/{pack_id}/{surface_slug}/SKILL.md",
+      "surface_selection_mode": "minimal",
+      "supports_multi_surface_pack": true,
+      "supports_surface_assets": true,
+      "supports_surface_scripts": true,
+      "supports_surface_frontmatter": true,
+      "surface_merge_strategy": "optional"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".codex/commands/{resource_name}",
+      "resource_kinds": [
+        "command"
+      ],
+      "command_adapter": {
+        "format": "markdown",
+        "inject_description": true
+      }
+    }
+  ],
+  "apply_modes": [
+    "copy",
+    "patch",
+    "symlink",
+    "takeover"
+  ],
+  "local_projection": {
+    "support": "degraded",
+    "notes": "Codex CLI does not natively support a local instruction overlay file; project slash commands are emitted under .codex/commands."
+  },
+  "metadata": {
+    "starter_status": "stable",
+    "shared_root_document_owner": "codex-cli",
+    "shared_root_document_path": "AGENTS.md",
+    "approval_surface": ".codex/config.toml approval policy",
+    "filesystem_surface": ".codex/config.toml approval policy",
+    "advisory_surface": "AGENTS.md advisory guidance",
+    "trust_notice": "Project-level .codex/config.toml only loads for trusted projects; runtime_template removed until trust-flow is specced."
+  }
+}

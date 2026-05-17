@@ -81,6 +81,33 @@ metactl pack add unit-test-loop
 metactl pack remove unit-test-loop
 ```
 
+## Improve A Skill
+
+Use the starter `metactl-skill-improvement` pack when feedback about a projected skill,
+slash command, rule, or agent surface should become a root library fix:
+
+```bash
+metactl use metactl-skill-improvement
+metactl sync --preview
+```
+
+The projected `/metactl-improve-skill` command should resolve generated output
+back to the canonical pack resource, patch the library source, then preview projection.
+Apply to one repo only after preview review:
+
+```bash
+metactl sync --apply --project /path/to/repo
+```
+
+For multiple linked projects, preview through the Fleet controller first:
+
+```bash
+metactl fleet sync --preview
+```
+
+Fleet apply is an explicit operator action, not the default path for skill
+feedback.
+
 ## Brownfield Safety
 
 If a destination file already exists and is not managed by metactl, apply refuses silent takeover. Use preview output to decide whether to copy, patch, symlink, or skip.

@@ -10,7 +10,7 @@ MCP_SCOPE ?= project
 MCP_LIBRARY_ROOT ?= $(CURDIR)/library/starter
 MCP_PROJECT_ROOT ?= $(CURDIR)
 
-.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval run-metactld smoke-stdio smoke-cli smoke-dogfood verify-v1-charter verify-public-boundary verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-v1-release-gate verify-v1-lightweight-control-plane verify
+.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval run-metactld smoke-stdio smoke-cli smoke-dogfood smoke-packaged-metactl verify-packaged-starter-mirror verify-v1-charter verify-public-boundary verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-v1-release-gate verify-v1-lightweight-control-plane verify
 validate-contracts: $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/validate_contracts.py --include-starter-library --include-targets --include-knowledge-fixtures --library-stack-fixtures
 
@@ -52,6 +52,12 @@ smoke-stdio:
 
 smoke-cli:
 	bash scripts/smoke_cli.sh
+
+smoke-packaged-metactl:
+	bash scripts/smoke_packaged_metactl.sh
+
+verify-packaged-starter-mirror:
+	$(PYTHON) scripts/verify_packaged_starter_mirror.py
 
 smoke-dogfood:
 	bash scripts/smoke_dogfood.sh

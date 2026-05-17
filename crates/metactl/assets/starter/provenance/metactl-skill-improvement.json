@@ -1,0 +1,19 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "metactl-skill-improvement",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:1032bb74cbdf372d824a79d6f7712e7134c52f611ae44f5f3f17044a90185b71",
+  "origin": "library/starter/packs/metactl-skill-improvement.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-05-17T00:00:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:starter-library"
+  ]
+}

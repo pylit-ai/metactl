@@ -1,0 +1,73 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "claude-code",
+  "version": "2026.03.26",
+  "title": "Claude Code",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": true,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": true,
+    "ui_surfaces": true
+  },
+  "runtime_template": {
+    "path": "targets/templates/claude-code-settings.json.tmpl",
+    "format": "json",
+    "destination_path": ".claude/settings.json",
+    "output_kind": "hook_config"
+  },
+  "compile_targets": [
+    {
+      "output_kind": "claude_md",
+      "path_template": "CLAUDE.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "codex_skill",
+      "path_template": ".claude/skills/{pack_id}/{surface_slug}/SKILL.md",
+      "surface_selection_mode": "minimal",
+      "supports_multi_surface_pack": true,
+      "supports_surface_assets": true,
+      "supports_surface_scripts": true,
+      "supports_surface_frontmatter": true,
+      "surface_merge_strategy": "optional"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".claude/commands/{pack_id}/{resource_name}",
+      "resource_kinds": ["command"],
+      "command_adapter": {
+        "format": "markdown",
+        "inject_description": true
+      }
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".claude/agents/{resource_name}",
+      "resource_kinds": ["subagent"]
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".claude/hooks/{pack_id}/{resource_name}",
+      "resource_kinds": ["hook"]
+    }
+  ],
+  "local_projection": {
+    "support": "exact",
+    "local_surface": "CLAUDE.local.md",
+    "notes": "Claude Code reads CLAUDE.local.md as a local overlay when present."
+  },
+  "metadata": {
+    "starter_status": "stable",
+    "standards_ref": "docs/agent-surfaces.md#claude-code",
+    "approval_surface": ".claude/settings.json permissions",
+    "filesystem_surface": "PostToolUse hook + permissions",
+    "advisory_surface": "CLAUDE.md advisory guidance"
+  }
+}

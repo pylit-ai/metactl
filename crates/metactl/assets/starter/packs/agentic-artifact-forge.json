@@ -1,0 +1,75 @@
+{
+  "kind": "pack",
+  "id": "agentic-artifact-forge",
+  "version": "1.0.0",
+  "title": "Agentic Artifact Forge",
+  "description": "Convert prompts, instruction files, skills, commands, rules, and workflows into preservation-first Metactl artifacts.",
+  "activation_class": "instruction",
+  "side_effect_class": "fs_write",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "metactl",
+    "library",
+    "authoring",
+    "prompts",
+    "skills",
+    "commands",
+    "rules"
+  ],
+  "compatible_roles": [
+    "builder",
+    "reviewer",
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/agentic-artifact-forge/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/agentic-artifact-forge/commands/agentic-artifact-forge.md",
+      "kind": "command",
+      "required": true
+    },
+    {
+      "path": "packs/agentic-artifact-forge/rules/artifact-preservation.md",
+      "kind": "rule",
+      "required": true
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "gemini-cli",
+      "openclaw"
+    ],
+    "last_verified_at": "2026-05-09T22:34:07Z",
+    "evidence_refs": [
+      "tests:starter-library"
+    ]
+  },
+  "metadata": {
+    "author": "pylit-ai",
+    "version": "1.0",
+    "visibility_scope": "public"
+  }
+}

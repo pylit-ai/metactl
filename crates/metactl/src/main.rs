@@ -12,19 +12,19 @@ use metactl::project::{
     append_history_entry, atomic_write, brownfield_adoption_hint, builtin_profile_templates,
     bundled_starter_library_root, compile_manifest_path, current_config_digest,
     current_local_config_digest, current_overlay_digest, default_project_config,
-    detect_brownfield_repo, digest_path, ensure_gitignore_entries, ensure_project_layout,
-    is_candidate_pack, list_user_profiles, load_compile_manifest, load_partial_project_config,
-    load_policy_report, load_profile_partial, load_project_context, load_user_settings,
-    metactl_user_config_dir, policy_report_path, preferred_apply_mode_for_target,
-    private_source_lock_path, profile_path, profiles_directory, project_config_path,
-    project_lock_path, resolve_profile_name_for_init, save_user_settings, strip_ansi_codes,
-    target_supports_takeover, update_managed_files_index, user_settings_path, write_lock,
-    write_partial_project_config, write_policy_report, write_private_source_lock,
-    write_project_config, ConfigOverrides, FleetSyncAdoptMode, HistoryEntry, LinkedProject,
-    LinkedProjectStatus, LockedSource, LockedTarget, OperationLock, PrivateSourceLock,
-    ProfileActivationSource, ProjectConfigDefaults, ProjectConfigFile, ProjectLock,
-    SourceLockPublicity, SourceRecord, SourceType, SourceVisibility, UserFleetController,
-    UserFleetSettings,
+    detect_brownfield_repo, digest_path, ensure_bundled_starter_library_root,
+    ensure_gitignore_entries, ensure_project_layout, is_candidate_pack, list_user_profiles,
+    load_compile_manifest, load_partial_project_config, load_policy_report, load_profile_partial,
+    load_project_context, load_user_settings, metactl_user_config_dir, policy_report_path,
+    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
+    project_config_path, project_lock_path, resolve_profile_name_for_init,
+    resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
+    update_managed_files_index, user_settings_path, write_lock, write_partial_project_config,
+    write_policy_report, write_private_source_lock, write_project_config, ConfigOverrides,
+    FleetSyncAdoptMode, HistoryEntry, LinkedProject, LinkedProjectStatus, LockedSource,
+    LockedTarget, OperationLock, PrivateSourceLock, ProfileActivationSource, ProjectConfigDefaults,
+    ProjectConfigFile, ProjectLock, SourceLockPublicity, SourceRecord, SourceType,
+    SourceVisibility, UserFleetController, UserFleetSettings,
 };
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
@@ -2049,7 +2049,7 @@ fn resolve_plugin_library_root(
     let project_root = project_root(cli).map_err(internal_error)?;
     match (tier, provided) {
         (_, Some(path)) => Ok(resolve_path_against_project(&project_root, path)),
-        (PluginTier::Public, None) => Ok(bundled_starter_library_root()),
+        (PluginTier::Public, None) => ensure_bundled_starter_library_root().map_err(internal_error),
         (PluginTier::Private, None) => Err(CliError::new(
             EXIT_VALIDATION,
             "Private plugin export requires --library-root.",
@@ -2723,11 +2723,10 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
     } else if !profile_partial.starter_library.is_empty() {
         profile_partial.starter_library.clone()
     } else {
-        default_project_config().starter_library
+        Vec::new()
     };
 
-    let registry =
-        load_registry_for_paths(&starter_library, &project_root).map_err(internal_error)?;
+    let registry = load_registry_for_paths(&starter_library, &project_root).map_err(state_error)?;
     let detected_brownfield = matches!(args.mode, InitMode::BrownfieldAutoDetect)
         && detect_brownfield_repo(&project_root);
 
@@ -3029,11 +3028,9 @@ fn cmd_library_init(
     if let Some(parent) = profile_file.parent() {
         fs::create_dir_all(parent).map_err(|err| internal_error(anyhow!(err)))?;
     }
-    let starter = bundled_starter_library_root();
+    let starter = ensure_bundled_starter_library_root().map_err(internal_error)?;
     let mut starter_library = Vec::new();
-    if starter.exists() {
-        starter_library.push(starter.to_string_lossy().to_string());
-    }
+    starter_library.push(starter.to_string_lossy().to_string());
     starter_library.push(library_root.to_string_lossy().to_string());
     let profile = metactl::project::PartialProjectConfig {
         api_version: Some(API_VERSION.to_string()),
@@ -3131,7 +3128,16 @@ fn cmd_use(cli: &Cli, args: &UseArgs) -> std::result::Result<CommandOutput, CliE
 
     let context = load_required_context(cli, &project_root)?;
     if !context.has_corpus() {
-        return Ok(no_corpus_output("use", &project_root));
+        return Err(CliError::new(
+            EXIT_STATE,
+            "No starter library is available. Next: add a starter library path to metactl.yaml or run metactl doctor.",
+        )
+        .with_details(
+            next_steps_for_search("no_corpus")
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+        ));
     }
 
     if let Some(pack_id) = namespaced_pack_id(&args.query) {
@@ -3626,12 +3632,9 @@ fn cmd_target_list(
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_optional_context(cli, &project_root).map_err(internal_error)?;
     let registry = context.registry.or_else(|| {
-        let default_root = bundled_starter_library_root();
-        if default_root.exists() {
-            LibraryRegistry::load_from_roots(&[default_root]).ok()
-        } else {
-            None
-        }
+        ensure_bundled_starter_library_root()
+            .ok()
+            .and_then(|default_root| LibraryRegistry::load_from_roots(&[default_root]).ok())
     });
     let configured = context
         .config_file
@@ -5557,12 +5560,9 @@ fn cmd_list(cli: &Cli, args: &ListArgs) -> std::result::Result<CommandOutput, Cl
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_optional_context(cli, &project_root).map_err(internal_error)?;
     let registry = context.registry.or_else(|| {
-        let default_root = bundled_starter_library_root();
-        if default_root.exists() {
-            LibraryRegistry::load_from_roots(&[default_root]).ok()
-        } else {
-            None
-        }
+        ensure_bundled_starter_library_root()
+            .ok()
+            .and_then(|default_root| LibraryRegistry::load_from_roots(&[default_root]).ok())
     });
     let Some(registry) = registry else {
         return Ok(CommandOutput {
@@ -7217,16 +7217,8 @@ fn load_registry_for_paths(
     paths: &[String],
     project_root: &Path,
 ) -> Result<Option<LibraryRegistry>> {
-    let roots = paths
-        .iter()
-        .map(|item| {
-            let path = PathBuf::from(item);
-            if path.is_absolute() {
-                path
-            } else {
-                project_root.join(path)
-            }
-        })
+    let roots = resolve_starter_library_roots(project_root, paths)?
+        .into_iter()
         .filter(|path| path.exists())
         .collect::<Vec<_>>();
     if roots.is_empty() {
@@ -8017,7 +8009,6 @@ fn init_target_next_steps(available: &[String]) -> Vec<String> {
         ),
         format!("Next: metactl init --target {target_hint}"),
         "Next: metactl init --target all".to_string(),
-        "Next: metactl init --detect".to_string(),
     ]
 }
 
@@ -8061,6 +8052,18 @@ mod cli_init_wizard_tests {
             .details
             .iter()
             .any(|detail| detail == "Next: metactl init --target codex-cli"));
+    }
+
+    #[test]
+    fn init_target_next_steps_do_not_repeat_detect_after_detect_fails() {
+        let details = init_target_next_steps(&available_targets());
+
+        assert!(details
+            .iter()
+            .any(|detail| detail == "Next: metactl init --target codex-cli"));
+        assert!(!details
+            .iter()
+            .any(|detail| detail == "Next: metactl init --detect"));
     }
 }
 
@@ -8148,11 +8151,7 @@ impl DiscoverabilityReport {
             "targets"
         };
         let bundled = bundled_starter_library_root();
-        let example = if bundled.exists() {
-            format!(" (for example {})", bundled.to_string_lossy())
-        } else {
-            String::new()
-        };
+        let example = format!(" (for example {})", bundled.to_string_lossy());
         let scope = self
             .profile_name
             .as_ref()

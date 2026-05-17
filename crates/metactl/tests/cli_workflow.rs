@@ -332,21 +332,6 @@ fn git_commit_all(repo: &Path, message: &str) -> String {
     stdout(&rev).trim().to_string()
 }
 
-fn seed_starter_subset_without_targets(root: &Path) {
-    for dir in ["roles", "policies", "packs"] {
-        fs::create_dir_all(root.join(dir)).expect("create library subset dir");
-    }
-    let starter_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../library/starter");
-    for rel in [
-        "roles/builder.json",
-        "policies/brownfield-safe-builder.json",
-        "packs/python-refactor.json",
-        "packs/migration-guard.json",
-    ] {
-        fs::copy(starter_root.join(rel), root.join(rel)).expect("copy starter subset file");
-    }
-}
-
 fn init_project(project: &Path) {
     let output = run_cli(project, &["init", "--target", "codex-cli"]);
     assert!(output.status.success(), "{}", stderr(&output));
@@ -1566,8 +1551,8 @@ fn cli_lock_and_doctor_weak_corpus() {
     let search = run_cli(project.path(), &["--json", "search", "python refactor"]);
     assert!(search.status.success(), "{}", stderr(&search));
     let json = json_output(&search);
-    assert_eq!(json["classification"], "no_corpus");
-    assert_eq!(json["result_count"], 0);
+    assert_eq!(json["classification"], "matches");
+    assert!(json["result_count"].as_u64().unwrap_or_default() > 0);
 
     let doctor = run_cli(project.path(), &["--json", "doctor"]);
     assert!(doctor.status.success(), "{}", stderr(&doctor));
@@ -1577,7 +1562,7 @@ fn cli_lock_and_doctor_weak_corpus() {
         .clone();
     assert!(checks
         .iter()
-        .any(|item| item["id"] == "starter-library" && item["status"] == "warn"));
+        .any(|item| item["id"] == "starter-library" && item["status"] == "pass"));
 }
 
 #[test]
@@ -3746,7 +3731,6 @@ fn cli_status_reports_discoverability_blockers_before_sync() {
     let project = TempDir::new().expect("tempdir");
     let home = TempDir::new().expect("home");
     let custom_library = TempDir::new().expect("custom library");
-    seed_starter_subset_without_targets(custom_library.path());
 
     let profiles = home.path().join(".config/metactl/profiles");
     fs::create_dir_all(&profiles).expect("profiles");
@@ -3760,7 +3744,7 @@ fn cli_status_reports_discoverability_blockers_before_sync() {
     .expect("write team-profile profile");
     fs::write(
         project.path().join("metactl.yaml"),
-        "extends_profile: team-profile\napi_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\n",
+        "extends_profile: team-profile\napi_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- made-up-target\n",
     )
     .expect("write metactl.yaml");
 
@@ -3780,7 +3764,7 @@ fn cli_status_reports_discoverability_blockers_before_sync() {
             item["id"] == "target-discovery"
                 && item["missing_targets"]
                     .as_array()
-                    .map(|targets| targets.iter().any(|target| target == "codex-cli"))
+                    .map(|targets| targets.iter().any(|target| target == "made-up-target"))
                     .unwrap_or(false)
         }));
 
@@ -3792,7 +3776,7 @@ fn cli_status_reports_discoverability_blockers_before_sync() {
     assert!(status_human.status.success(), "{}", stderr(&status_human));
     let text = stdout(&status_human);
     assert!(text.contains("Execution readiness: blocked"), "{text}");
-    assert!(text.contains("configured target codex-cli"), "{text}");
+    assert!(text.contains("configured target made-up-target"), "{text}");
     assert!(text.contains("Next: metactl doctor"), "{text}");
     assert!(!text.contains("Next: metactl sync"), "{text}");
 }
@@ -3802,7 +3786,6 @@ fn cli_doctor_reports_target_discoverability_failure_for_profile_bound_library()
     let project = TempDir::new().expect("tempdir");
     let home = TempDir::new().expect("home");
     let custom_library = TempDir::new().expect("custom library");
-    seed_starter_subset_without_targets(custom_library.path());
 
     let profiles = home.path().join(".config/metactl/profiles");
     fs::create_dir_all(&profiles).expect("profiles");
@@ -3816,7 +3799,7 @@ fn cli_doctor_reports_target_discoverability_failure_for_profile_bound_library()
     .expect("write team-profile profile");
     fs::write(
         project.path().join("metactl.yaml"),
-        "extends_profile: team-profile\napi_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\n",
+        "extends_profile: team-profile\napi_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- made-up-target\n",
     )
     .expect("write metactl.yaml");
 
@@ -3837,7 +3820,7 @@ fn cli_doctor_reports_target_discoverability_failure_for_profile_bound_library()
                 && item["message"]
                     .as_str()
                     .unwrap_or_default()
-                    .contains("codex-cli")
+                    .contains("made-up-target")
         }));
 }
 
@@ -3846,7 +3829,6 @@ fn cli_sync_failure_reports_effective_library_roots_and_fix_hint() {
     let project = TempDir::new().expect("tempdir");
     let home = TempDir::new().expect("home");
     let custom_library = TempDir::new().expect("custom library");
-    seed_starter_subset_without_targets(custom_library.path());
 
     let profiles = home.path().join(".config/metactl/profiles");
     fs::create_dir_all(&profiles).expect("profiles");
@@ -3860,7 +3842,7 @@ fn cli_sync_failure_reports_effective_library_roots_and_fix_hint() {
     .expect("write team-profile profile");
     fs::write(
         project.path().join("metactl.yaml"),
-        "extends_profile: team-profile\napi_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\n",
+        "extends_profile: team-profile\napi_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- made-up-target\n",
     )
     .expect("write metactl.yaml");
 
@@ -3889,7 +3871,7 @@ fn cli_sync_failure_reports_effective_library_roots_and_fix_hint() {
 
     let text = json["message"].as_str().unwrap_or_default();
     assert!(text.contains("effective library roots"), "{text}");
-    assert!(text.contains("codex-cli"), "{text}");
+    assert!(text.contains("made-up-target"), "{text}");
     assert!(text.contains("metactl doctor"), "{text}");
 }
 

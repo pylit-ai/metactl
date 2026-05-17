@@ -1,0 +1,90 @@
+{
+  "kind": "pack",
+  "id": "release-manager",
+  "version": "1.0.0",
+  "title": "Release Manager",
+  "description": "Portable release-manager Agent Skill for local verification, provenance review, and public/private boundary handoffs.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "release",
+    "verification",
+    "provenance",
+    "handoff"
+  ],
+  "compatible_roles": [
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "filesystem-agent",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "knowledge_refs": [
+    {
+      "source_id": "release-readiness-docs",
+      "uris": [
+        "file:packs/release-guard/references/checklist.md",
+        "file:packs/release-guard/references/rust-crate-release.md"
+      ],
+      "allowed_targets": [
+        "codex-cli",
+        "cursor",
+        "gemini-cli",
+        "openclaw"
+      ],
+      "required": false,
+      "purpose": "Release readiness references used during handoff review.",
+      "byte_budget": {
+        "max_read_bytes": 32768,
+        "max_search_bytes": 32768
+      }
+    }
+  ],
+  "resources": [
+    {
+      "path": "packs/release-manager/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/release-manager/references/release-handoff.md",
+      "kind": "example",
+      "required": false,
+      "surface_relevance": "suppressible"
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "filesystem-agent",
+      "gemini-cli",
+      "openclaw"
+    ],
+    "last_verified_at": "2026-05-07T00:00:00Z",
+    "evidence_refs": [
+      "tests:starter-library",
+      "docs:v1/knowledge-sources.md",
+      "docs:v1/library-stack.md"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted",
+    "agent_skill": "true"
+  }
+}
