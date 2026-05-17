@@ -46,8 +46,17 @@ COMMANDS = [
         "--include-knowledge-fixtures",
         "--library-stack-fixtures",
     ],
-    ["bash", "scripts/smoke_packaged_metactl.sh"],
 ]
+
+
+def docker_available() -> bool:
+    try:
+        return (
+            subprocess.run(["docker", "info"], cwd=ROOT, capture_output=True).returncode
+            == 0
+        )
+    except FileNotFoundError:
+        return False
 
 
 def main() -> None:
@@ -64,6 +73,21 @@ def main() -> None:
                 + "\n"
                 + output
             )
+    if docker_available():
+        result = subprocess.run(
+            ["bash", "scripts/smoke_packaged_metactl.sh"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+            raise SystemExit(
+                "verify-v1-release-gate: FAIL command bash scripts/smoke_packaged_metactl.sh\n"
+                + output
+            )
+    else:
+        print("verify-v1-release-gate: SKIP packaged Docker smoke; Docker unavailable")
     print("verify-v1-release-gate: OK")
 
 
