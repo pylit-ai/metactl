@@ -48,6 +48,8 @@ const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skill
 
 const WORKFLOW_HELP: &str = "\
 Quick start:
+  metactl setup --plan            # inspect guided setup and equivalent commands
+  metactl setup -t codex-cli -y   # create config for an explicit target, without sync
   metactl init -t claude-code        # scaffold a project for Claude Code
   metactl init -t all                # scaffold for every starter-supported target
   metactl init --detect              # detect targets from existing repo surfaces
@@ -143,6 +145,8 @@ impl Cli {
 enum Commands {
     /// Create metactl.yaml, .metactl/, and starter layout in the project
     Init(InitArgs),
+    /// Guided first-run setup with plan-first and agent-safe paths
+    Setup(SetupArgs),
     /// Manage the user-private library lifecycle
     Library(LibraryArgs),
     /// Import, export, and verify portable Agent Skill folders as metactl packs
@@ -225,6 +229,8 @@ enum IgnoreCommand {
     Status(IgnoreStatusArgs),
     /// Install managed ignore blocks
     Install(IgnoreInstallArgs),
+    /// Plan or apply generated-surface ignore repair
+    Fix(IgnoreFixArgs),
 }
 
 #[derive(Debug, Args)]
@@ -232,6 +238,9 @@ struct IgnoreStatusArgs {
     /// Targets to inspect (`all` expands to every starter-supported agent target)
     #[arg(long, short = 't')]
     target: Vec<String>,
+    /// Ignore scopes to inspect
+    #[arg(long, value_enum, default_value = "both")]
+    scope: IgnoreScopeArg,
 }
 
 #[derive(Debug, Args)]
@@ -251,6 +260,31 @@ struct IgnoreInstallArgs {
 }
 
 #[derive(Debug, Args)]
+struct IgnoreFixArgs {
+    /// Show the repair plan without writing files or changing the Git index
+    #[arg(long)]
+    plan: bool,
+    /// Scope to repair
+    #[arg(long, value_enum, default_value = "both")]
+    scope: IgnoreScopeArg,
+    /// Targets to protect (`all` expands to every starter-supported agent target)
+    #[arg(long, short = 't')]
+    target: Vec<String>,
+    /// Also ignore metactl.lock.json
+    #[arg(long)]
+    include_lock: bool,
+    /// Also include explicit private source cache and private source lock patterns
+    #[arg(long)]
+    include_private_sources: bool,
+    /// Remove generated roots from the Git index while leaving files on disk
+    #[arg(long)]
+    untrack_generated: bool,
+    /// Confirm mutating repair actions
+    #[arg(long, short = 'y')]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
 struct AuditArgs {
     #[command(subcommand)]
     command: Option<AuditCommand>,
@@ -266,6 +300,7 @@ enum AuditCommand {
 enum IgnoreScopeArg {
     Local,
     Repo,
+    Both,
 }
 
 #[derive(Debug, Subcommand)]
@@ -457,6 +492,37 @@ struct InitArgs {
     /// Record the active machine-default profile in `metactl.yaml` as `extends_profile` (use this when the repo should intentionally track that profile)
     #[arg(long)]
     bind_profile: bool,
+}
+
+#[derive(Debug, Args)]
+struct SetupArgs {
+    /// Show the setup plan without writing project state
+    #[arg(long)]
+    plan: bool,
+    /// Target runtimes to configure (e.g. codex-cli, claude-code, cursor, gemini-cli, all)
+    #[arg(long, short = 't')]
+    target: Vec<String>,
+    /// Named profile template to use in generated guidance
+    #[arg(long)]
+    profile_template: Option<String>,
+    /// Record the active machine-default profile in metactl.yaml as extends_profile
+    #[arg(long)]
+    bind_profile: bool,
+    /// Starter library or source roots to make explicit in the setup command
+    #[arg(long = "source", value_name = "PATH")]
+    source: Vec<PathBuf>,
+    /// Ignore scope to recommend after setup
+    #[arg(long, value_enum, default_value = "both")]
+    ignore_scope: IgnoreScopeArg,
+    /// Include private source ignore patterns in the recommended ignore repair command
+    #[arg(long)]
+    include_private_sources: bool,
+    /// Include metactl.lock.json in the recommended ignore repair command
+    #[arg(long)]
+    include_lock: bool,
+    /// Confirm non-interactive setup writes
+    #[arg(long, short = 'y')]
+    yes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -1251,6 +1317,7 @@ fn command_contract_name(command: &Commands) -> &'static str {
             Some(DemoCommand::List(_)) | None => "demo list",
             _ => "demo",
         },
+        Commands::Setup(_) => "setup",
         Commands::CheckPublicBoundary => "check-public-boundary",
         Commands::Project(_) => "project",
         Commands::Use(_) => "use",
@@ -1363,6 +1430,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
     };
     match &cli.command {
         Commands::Init(args) => cmd_init(cli, args),
+        Commands::Setup(args) => cmd_setup(cli, args),
         Commands::Library(args) => cmd_library(cli, args),
         Commands::Pack(args) => cmd_pack(cli, args),
         Commands::Skills(args) => cmd_skills(cli, args),
@@ -1414,6 +1482,13 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
 fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
     match &cli.command {
         Commands::Init(_) => Some("init"),
+        Commands::Setup(args) => {
+            if args.plan {
+                None
+            } else {
+                Some("setup")
+            }
+        }
         Commands::Library(args) => match &args.command {
             LibraryCommand::Init(_) => Some("library init"),
         },
@@ -1480,6 +1555,13 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         Commands::Ignore(args) => match &args.command {
             Some(IgnoreCommand::Status(_)) | None => None,
             Some(IgnoreCommand::Install(_)) => Some("ignore install"),
+            Some(IgnoreCommand::Fix(args)) => {
+                if args.plan {
+                    None
+                } else {
+                    Some("ignore fix")
+                }
+            }
         },
         Commands::Hook(args) => match &args.command {
             HookCommand::Install(_) => Some("hook install"),
@@ -3488,6 +3570,229 @@ Leave it this way for a portable repo, or run `metactl init --bind-profile` if t
             }),
         ),
     })
+}
+
+fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let config_path = project_config_path(&project_root, cli.config.as_deref());
+    let detected_surfaces = detect_existing_surfaces(&project_root);
+    let existing_config = if config_path.exists() {
+        Some(load_partial_project_config(&config_path).map_err(state_error)?)
+    } else {
+        None
+    };
+    let targets = setup_targets(&project_root, args, existing_config.as_ref())?;
+    let next_commands = setup_next_commands(args, &targets);
+    let actions = setup_actions(args, &config_path, &targets, existing_config.is_some());
+
+    if args.plan {
+        let mut lines = vec!["Setup plan:".to_string()];
+        for action in &actions {
+            let kind = action["kind"].as_str().unwrap_or("action");
+            let summary = action["summary"].as_str().unwrap_or("");
+            lines.push(format!("  - {kind}: {summary}"));
+        }
+        lines.push("Equivalent commands:".to_string());
+        for command in &next_commands {
+            lines.push(format!("  {command}"));
+        }
+        return Ok(CommandOutput {
+            human: project_human_output(&project_root, lines.join("\n")),
+            json: success_json(
+                "setup",
+                Some(&project_root),
+                json!({
+                    "plan": true,
+                    "ready": !targets.is_empty() || existing_config.is_some(),
+                    "config_path": config_path,
+                    "detected_surfaces": detected_surfaces.iter().map(|(target, surface)| json!({
+                        "target": target,
+                        "surface": surface,
+                    })).collect::<Vec<_>>(),
+                    "targets": targets,
+                    "profile_template": args.profile_template.clone(),
+                    "actions": actions,
+                    "next_commands": next_commands,
+                }),
+            ),
+        });
+    }
+
+    if let Some(existing) = existing_config {
+        let existing_targets = existing.targets.clone();
+        return Ok(CommandOutput {
+            human: project_human_output(
+                &project_root,
+                format!(
+                    "metactl is already configured at {}.\nExisting targets: {}\nNext: metactl status",
+                    config_path.display(),
+                    if existing_targets.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        existing_targets.join(", ")
+                    }
+                ),
+            ),
+            json: success_json(
+                "setup",
+                Some(&project_root),
+                json!({
+                    "applied": false,
+                    "already_configured": true,
+                    "config_path": config_path,
+                    "targets": existing_targets,
+                    "next_commands": ["metactl status", "metactl setup --plan"],
+                }),
+            ),
+        });
+    }
+
+    if targets.is_empty() {
+        let mut err = CliError::new(
+            EXIT_STATE,
+            "Setup needs an explicit target before it can write project state.",
+        )
+        .with_details(next_commands.clone());
+        if let Some(obj) = err.json.as_object_mut() {
+            obj.insert("code".to_string(), json!("setup_needs_target"));
+            obj.insert("category".to_string(), json!("project_state"));
+            obj.insert("next_commands".to_string(), json!(next_commands));
+        }
+        return Err(err);
+    }
+
+    if (cli.no_input_enabled() || !io::stdin().is_terminal()) && !args.yes {
+        let mut err = CliError::new(
+            EXIT_STATE,
+            "Non-interactive setup requires --yes with explicit target choices.",
+        )
+        .with_details(next_commands.clone());
+        if let Some(obj) = err.json.as_object_mut() {
+            obj.insert("code".to_string(), json!("setup_confirmation_required"));
+            obj.insert("category".to_string(), json!("project_state"));
+            obj.insert("next_commands".to_string(), json!(next_commands));
+        }
+        return Err(err);
+    }
+
+    let init_args = InitArgs {
+        target: targets.clone(),
+        role: None,
+        policy: None,
+        starter_library: args.source.clone(),
+        mode: InitMode::BrownfieldAutoDetect,
+        detect: false,
+        bind_profile: args.bind_profile,
+    };
+    let init_output = cmd_init(cli, &init_args)?;
+    let mut lines = vec!["Setup applied.".to_string(), init_output.human];
+    lines.push("Next: metactl ignore fix --plan".to_string());
+
+    Ok(CommandOutput {
+        human: lines.join("\n\n"),
+        json: success_json(
+            "setup",
+            Some(&project_root),
+            json!({
+                "applied": true,
+                "config_path": config_path,
+                "targets": targets,
+                "ran_sync": false,
+                "init": init_output.json,
+                "next_commands": next_commands,
+            }),
+        ),
+    })
+}
+
+fn setup_targets(
+    project_root: &Path,
+    args: &SetupArgs,
+    existing_config: Option<&metactl::project::PartialProjectConfig>,
+) -> std::result::Result<Vec<String>, CliError> {
+    if !args.target.is_empty() {
+        return expand_setup_targets(&args.target).map_err(state_error);
+    }
+    if let Some(config) = existing_config {
+        if !config.targets.is_empty() {
+            return Ok(config.targets.clone());
+        }
+    }
+    let detected = detect_existing_surfaces(project_root);
+    if !detected.is_empty() {
+        return Ok(unique_strings(
+            detected
+                .into_iter()
+                .map(|(target, _)| target)
+                .collect::<Vec<_>>(),
+        ));
+    }
+    Ok(Vec::new())
+}
+
+fn expand_setup_targets(requested: &[String]) -> Result<Vec<String>> {
+    let mut targets = Vec::new();
+    for target in requested {
+        if target == "all" {
+            targets.extend(IGNORE_TARGETS.iter().map(|item| item.to_string()));
+        } else {
+            targets.push(target.clone());
+        }
+    }
+    Ok(unique_strings(targets))
+}
+
+fn setup_next_commands(args: &SetupArgs, targets: &[String]) -> Vec<String> {
+    let default_targets;
+    let target_arg = if targets.is_empty() {
+        default_targets = vec!["codex-cli".to_string()];
+        repeated_target_args(&default_targets)
+    } else {
+        repeated_target_args(targets)
+    };
+    let mut ignore_fix = format!(
+        "metactl ignore fix --plan --scope {}",
+        ignore_scope_label(args.ignore_scope)
+    );
+    if args.include_private_sources {
+        ignore_fix.push_str(" --include-private-sources");
+    }
+    if args.include_lock {
+        ignore_fix.push_str(" --include-lock");
+    }
+    vec![
+        format!("metactl setup{target_arg} --yes"),
+        format!("metactl setup{target_arg} --plan"),
+        ignore_fix,
+        "metactl sync --preview".to_string(),
+    ]
+}
+
+fn setup_actions(
+    args: &SetupArgs,
+    config_path: &Path,
+    targets: &[String],
+    already_configured: bool,
+) -> Vec<Value> {
+    vec![
+        json!({
+            "kind": "config",
+            "path": config_path,
+            "summary": if already_configured {
+                "preserve existing metactl.yaml"
+            } else {
+                "create metactl.yaml and metactl.lock.json"
+            },
+            "targets": targets,
+        }),
+        json!({
+            "kind": "ignore-repair",
+            "summary": "recommend plan-first generated-surface ignore repair",
+            "scope": ignore_scope_label(args.ignore_scope),
+            "include_private_sources": args.include_private_sources,
+            "include_lock": args.include_lock,
+        }),
+    ]
 }
 
 fn cmd_library(cli: &Cli, args: &LibraryArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -7402,6 +7707,20 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
 
 fn cmd_doctor(cli: &Cli, args: &DoctorArgs) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
+    let config_path = project_config_path(&project_root, cli.config.as_deref());
+    if !config_path.exists() {
+        let next_commands = vec![
+            "metactl setup --plan".to_string(),
+            "metactl setup --target codex-cli --yes".to_string(),
+        ];
+        let checks = vec![json!({
+            "id": "setup-posture",
+            "status": "warn",
+            "message": "No metactl.yaml found. Run guided setup before sync.",
+            "next_commands": next_commands,
+        })];
+        return Ok(doctor_output(&project_root, checks));
+    }
     let context = load_required_context(cli, &project_root)?;
     let mut checks = Vec::new();
     let discoverability = discoverability_report(&context, &ConfigOverrides::default());
@@ -7685,6 +8004,50 @@ fn cmd_doctor(cli: &Cli, args: &DoctorArgs) -> std::result::Result<CommandOutput
         }));
     }
 
+    match resolve_ignore_targets(&project_root, &context.config_file.targets) {
+        Ok(ignore_resolution) => {
+            let ignore_targets = ignore_resolution.targets;
+            let tracked_generated_roots =
+                tracked_generated_roots_json(&project_root, &ignore_targets)
+                    .map_err(state_error)?;
+            let ignore_files = ignore_status_files(&project_root);
+            let missing_ignore = ignore_files
+                .iter()
+                .any(|item| !item["installed"].as_bool().unwrap_or(false));
+            let ignore_needs_repair = missing_ignore || !tracked_generated_roots.is_empty();
+            let ignore_next = ignore_next_commands(
+                IgnoreScopeArg::Both,
+                &ignore_targets,
+                true,
+                ignore_needs_repair,
+                !tracked_generated_roots.is_empty(),
+            );
+            checks.push(json!({
+                "id": "ignore-repair",
+                "status": if ignore_needs_repair { "warn" } else { "pass" },
+                "message": if ignore_needs_repair {
+                    "Generated-surface ignore posture needs repair. Run `metactl ignore fix --plan`."
+                } else {
+                    "Generated-surface ignore posture is repairable and has no tracked generated roots."
+                },
+                "fix_plan_ref": "metactl ignore fix --plan",
+                "target_source": ignore_resolution.source,
+                "targets": ignore_targets,
+                "tracked_generated_roots": tracked_generated_roots,
+                "next_commands": ignore_next,
+            }));
+        }
+        Err(error) => {
+            checks.push(json!({
+                "id": "ignore-repair",
+                "status": "warn",
+                "message": format!("Generated-surface ignore repair skipped: {error}"),
+                "fix_plan_ref": "metactl ignore fix --plan",
+                "next_commands": ["metactl target list", "metactl doctor"],
+            }));
+        }
+    }
+
     let mut doctor_lines = vec!["Doctor:".to_string()];
     for check in &checks {
         let id = check["id"].as_str().unwrap_or("?");
@@ -7697,6 +8060,11 @@ fn cmd_doctor(cli: &Cli, args: &DoctorArgs) -> std::result::Result<CommandOutput
             _ => "?",
         };
         doctor_lines.push(format!("  [{}] {}: {}", icon, id, message));
+        if let Some(commands) = check["next_commands"].as_array() {
+            for command in commands.iter().filter_map(|item| item.as_str()) {
+                doctor_lines.push(format!("    next: {command}"));
+            }
+        }
         if id == "source-audit" {
             if let Some(findings) = check["findings"].as_array() {
                 if !findings.is_empty() {
@@ -7718,6 +8086,37 @@ fn cmd_doctor(cli: &Cli, args: &DoctorArgs) -> std::result::Result<CommandOutput
             }),
         ),
     })
+}
+
+fn doctor_output(project_root: &Path, checks: Vec<Value>) -> CommandOutput {
+    let mut doctor_lines = vec!["Doctor:".to_string()];
+    for check in &checks {
+        let id = check["id"].as_str().unwrap_or("?");
+        let status = check["status"].as_str().unwrap_or("?");
+        let message = check["message"].as_str().unwrap_or("");
+        let icon = match status {
+            "pass" => "ok",
+            "warn" => "!",
+            "fail" => "FAIL",
+            _ => "?",
+        };
+        doctor_lines.push(format!("  [{}] {}: {}", icon, id, message));
+        if let Some(commands) = check["next_commands"].as_array() {
+            for command in commands.iter().filter_map(|item| item.as_str()) {
+                doctor_lines.push(format!("    next: {command}"));
+            }
+        }
+    }
+    CommandOutput {
+        human: project_human_output(project_root, doctor_lines.join("\n")),
+        json: success_json(
+            "doctor",
+            Some(project_root),
+            json!({
+                "checks": checks,
+            }),
+        ),
+    }
 }
 
 fn load_optional_context(cli: &Cli, project_root: &Path) -> Result<OptionalContext> {
@@ -9593,11 +9992,24 @@ const IGNORE_BLOCK_END: &str = "# metactl:end generated-agent-surfaces";
 const AGENT_ALLOWLIST_BEGIN: &str = "# metactl:begin agent-surface-allowlist";
 const AGENT_ALLOWLIST_END: &str = "# metactl:end agent-surface-allowlist";
 
+#[derive(Debug, Clone)]
+struct IgnoreTargetResolution {
+    targets: Vec<String>,
+    source: &'static str,
+}
+
 fn cmd_ignore(cli: &Cli, args: &IgnoreArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
         Some(IgnoreCommand::Status(status_args)) => cmd_ignore_status(cli, status_args),
         Some(IgnoreCommand::Install(install_args)) => cmd_ignore_install(cli, install_args),
-        None => cmd_ignore_status(cli, &IgnoreStatusArgs { target: Vec::new() }),
+        Some(IgnoreCommand::Fix(fix_args)) => cmd_ignore_fix(cli, fix_args),
+        None => cmd_ignore_status(
+            cli,
+            &IgnoreStatusArgs {
+                target: Vec::new(),
+                scope: IgnoreScopeArg::Both,
+            },
+        ),
     }
 }
 
@@ -9606,12 +10018,27 @@ fn cmd_ignore_status(
     args: &IgnoreStatusArgs,
 ) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
-    let targets = resolve_ignore_targets(&project_root, &args.target).map_err(state_error)?;
+    let resolution = resolve_ignore_targets(&project_root, &args.target).map_err(state_error)?;
+    let targets = resolution.targets;
     let files = ignore_status_files(&project_root);
     let repo_ignore_file = project_root.join(".gitignore");
     let private_sources = private_source_ignore_status(&project_root);
+    let tracked_generated_roots =
+        tracked_generated_roots_json(&project_root, &targets).map_err(state_error)?;
+    let fix_available = files
+        .iter()
+        .any(|item| !item["installed"].as_bool().unwrap_or(false))
+        || !tracked_generated_roots.is_empty();
+    let next_commands = ignore_next_commands(
+        args.scope,
+        &targets,
+        args.target.is_empty(),
+        fix_available,
+        !tracked_generated_roots.is_empty(),
+    );
 
     let mut lines = vec!["Ignore posture:".to_string()];
+    lines.push(format!("  target-source     {}", resolution.source));
     for item in &files {
         let label = item["label"].as_str().unwrap_or("?");
         let path = item["path"].as_str().unwrap_or("?");
@@ -9665,6 +10092,17 @@ fn cmd_ignore_status(
             private_source_ignore_install_command(&project_root)
         ));
     }
+    if !tracked_generated_roots.is_empty() {
+        lines.push("  tracked generated roots:".to_string());
+        for item in &tracked_generated_roots {
+            let root = item["root"].as_str().unwrap_or("?");
+            let count = item["file_count"].as_u64().unwrap_or(0);
+            lines.push(format!("    {root} ({count} tracked file(s))"));
+        }
+        lines.push("  next: metactl ignore fix --plan".to_string());
+    } else if fix_available {
+        lines.push("  next: metactl ignore fix --plan".to_string());
+    }
 
     Ok(CommandOutput {
         human: project_human_output(&project_root, lines.join("\n")),
@@ -9674,8 +10112,13 @@ fn cmd_ignore_status(
             json!({
                 "action": "status",
                 "targets": targets,
+                "target_source": resolution.source,
+                "scope": ignore_scope_label(args.scope),
                 "files": files,
                 "private_sources": private_sources,
+                "tracked_generated_roots": tracked_generated_roots,
+                "fix_available": fix_available,
+                "next_commands": next_commands,
             }),
         ),
     })
@@ -9686,58 +10129,15 @@ fn cmd_ignore_install(
     args: &IgnoreInstallArgs,
 ) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
-    let targets = resolve_ignore_targets(&project_root, &args.target).map_err(state_error)?;
-    let mut changes = Vec::new();
-
-    match args.scope {
-        IgnoreScopeArg::Local => {
-            let git_dir = project_root.join(".git");
-            if !git_dir.exists() {
-                return Err(CliError::new(
-                    EXIT_STATE,
-                    "No .git directory found. Local ignore scope writes .git/info/exclude.",
-                ));
-            }
-            let patterns =
-                git_ignore_patterns(&targets, args.include_lock, args.include_private_sources);
-            changes.push(write_marked_block(
-                &project_root,
-                &git_dir.join("info").join("exclude"),
-                IGNORE_BLOCK_BEGIN,
-                IGNORE_BLOCK_END,
-                &patterns,
-            )?);
-        }
-        IgnoreScopeArg::Repo => {
-            let patterns =
-                git_ignore_patterns(&targets, args.include_lock, args.include_private_sources);
-            changes.push(write_marked_block(
-                &project_root,
-                &project_root.join(".gitignore"),
-                IGNORE_BLOCK_BEGIN,
-                IGNORE_BLOCK_END,
-                &patterns,
-            )?);
-            if targets.iter().any(|target| target == "cursor") {
-                changes.push(write_marked_block(
-                    &project_root,
-                    &project_root.join(".cursorignore"),
-                    AGENT_ALLOWLIST_BEGIN,
-                    AGENT_ALLOWLIST_END,
-                    &cursor_allowlist_patterns(&targets),
-                )?);
-            }
-            if targets.iter().any(|target| target == "gemini-cli") {
-                changes.push(write_marked_block(
-                    &project_root,
-                    &project_root.join(".geminiignore"),
-                    AGENT_ALLOWLIST_BEGIN,
-                    AGENT_ALLOWLIST_END,
-                    &gemini_allowlist_patterns(),
-                )?);
-            }
-        }
-    }
+    let resolution = resolve_ignore_targets(&project_root, &args.target).map_err(state_error)?;
+    let targets = resolution.targets;
+    let changes = apply_ignore_scope(
+        &project_root,
+        &targets,
+        args.scope,
+        args.include_lock,
+        args.include_private_sources,
+    )?;
 
     let mut lines = vec![format!(
         "Installed ignore posture ({}) for target(s): {}",
@@ -9770,12 +10170,503 @@ fn cmd_ignore_install(
                 "action": "install",
                 "scope": ignore_scope_label(args.scope),
                 "targets": targets,
+                "target_source": resolution.source,
                 "include_lock": args.include_lock,
                 "include_private_sources": args.include_private_sources,
                 "changes": changes,
             }),
         ),
     })
+}
+
+fn cmd_ignore_fix(cli: &Cli, args: &IgnoreFixArgs) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let resolution = resolve_ignore_targets(&project_root, &args.target).map_err(state_error)?;
+    let targets = resolution.targets;
+    let tracked_generated_roots =
+        tracked_generated_roots_json(&project_root, &targets).map_err(state_error)?;
+    let root_paths = tracked_generated_roots
+        .iter()
+        .filter_map(|item| item["root"].as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    let actions = planned_ignore_actions(
+        &project_root,
+        &targets,
+        args.scope,
+        args.include_lock,
+        args.include_private_sources,
+        &root_paths,
+    )?;
+    let next_commands = ignore_fix_next_commands(args, &targets, !root_paths.is_empty());
+
+    if args.plan {
+        let mut lines = vec!["Ignore repair plan:".to_string()];
+        for action in &actions {
+            let kind = action["kind"].as_str().unwrap_or("action");
+            let summary = action["summary"].as_str().unwrap_or("");
+            lines.push(format!("  - {kind}: {summary}"));
+        }
+        if !root_paths.is_empty() {
+            lines.push(
+                "  untrack safety: Git index only; generated files remain on disk.".to_string(),
+            );
+        }
+        lines.push("Next commands:".to_string());
+        for command in &next_commands {
+            lines.push(format!("  {command}"));
+        }
+        return Ok(CommandOutput {
+            human: project_human_output(&project_root, lines.join("\n")),
+            json: success_json(
+                "ignore",
+                Some(&project_root),
+                json!({
+                    "action": "fix",
+                    "plan": true,
+                    "scope": ignore_scope_label(args.scope),
+                    "targets": targets,
+                    "target_source": resolution.source,
+                    "actions": actions,
+                    "tracked_generated_roots": tracked_generated_roots,
+                    "next_commands": next_commands,
+                }),
+            ),
+        });
+    }
+
+    if !root_paths.is_empty() && !args.untrack_generated {
+        let mut err = CliError::new(
+            EXIT_STATE,
+            "Generated roots are tracked; untracking requires explicit --untrack-generated.",
+        )
+        .with_details(next_commands.clone());
+        if let Some(obj) = err.json.as_object_mut() {
+            obj.insert("code".to_string(), json!("untrack_generated_required"));
+            obj.insert("category".to_string(), json!("project_state"));
+            obj.insert("next_commands".to_string(), json!(next_commands));
+            obj.insert(
+                "tracked_generated_roots".to_string(),
+                json!(tracked_generated_roots),
+            );
+        }
+        return Err(err);
+    }
+    if args.untrack_generated
+        && !root_paths.is_empty()
+        && !args.yes
+        && (cli.no_input_enabled() || !io::stdin().is_terminal())
+    {
+        let mut err = CliError::new(
+            EXIT_STATE,
+            "Non-interactive generated-root untracking requires --untrack-generated --yes.",
+        )
+        .with_details(next_commands.clone());
+        if let Some(obj) = err.json.as_object_mut() {
+            obj.insert("code".to_string(), json!("untrack_confirmation_required"));
+            obj.insert("category".to_string(), json!("project_state"));
+            obj.insert("next_commands".to_string(), json!(next_commands));
+        }
+        return Err(err);
+    }
+    if args.untrack_generated
+        && !root_paths.is_empty()
+        && !args.yes
+        && !confirm_untrack_generated_roots(&root_paths)?
+    {
+        return Err(
+            CliError::new(EXIT_STATE, "Generated-root untracking was not confirmed.")
+                .with_details(next_commands),
+        );
+    }
+
+    let mut changes = apply_ignore_scope(
+        &project_root,
+        &targets,
+        args.scope,
+        args.include_lock,
+        args.include_private_sources,
+    )?;
+    let untracked = if args.untrack_generated && !root_paths.is_empty() {
+        untrack_generated_roots(&project_root, &root_paths)?
+    } else {
+        Vec::new()
+    };
+    for item in &untracked {
+        changes.push(item.clone());
+    }
+
+    let mut lines = vec![format!(
+        "Applied ignore repair ({}) for target(s): {}",
+        ignore_scope_label(args.scope),
+        targets.join(", ")
+    )];
+    for change in &changes {
+        let status = change["status"].as_str().unwrap_or("unknown");
+        let path = change["path"].as_str().unwrap_or("?");
+        lines.push(format!("  {status} {path}"));
+    }
+    if !untracked.is_empty() {
+        lines.push(
+            "  Note: generated roots were removed from the Git index only; files remain on disk."
+                .to_string(),
+        );
+    }
+
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "ignore",
+            Some(&project_root),
+            json!({
+                "action": "fix",
+                "plan": false,
+                "scope": ignore_scope_label(args.scope),
+                "targets": targets,
+                "target_source": resolution.source,
+                "include_lock": args.include_lock,
+                "include_private_sources": args.include_private_sources,
+                "changes": changes,
+                "untracked_generated_roots": untracked,
+            }),
+        ),
+    })
+}
+
+fn apply_ignore_scope(
+    project_root: &Path,
+    targets: &[String],
+    scope: IgnoreScopeArg,
+    include_lock: bool,
+    include_private_sources: bool,
+) -> std::result::Result<Vec<Value>, CliError> {
+    let mut changes = Vec::new();
+    let patterns = git_ignore_patterns(targets, include_lock, include_private_sources);
+    if matches!(scope, IgnoreScopeArg::Local | IgnoreScopeArg::Both) {
+        let git_dir = project_root.join(".git");
+        if !git_dir.exists() {
+            return Err(CliError::new(
+                EXIT_STATE,
+                "No .git directory found. Local ignore scope writes .git/info/exclude.",
+            ));
+        }
+        changes.push(write_marked_block(
+            project_root,
+            &git_dir.join("info").join("exclude"),
+            IGNORE_BLOCK_BEGIN,
+            IGNORE_BLOCK_END,
+            &patterns,
+        )?);
+    }
+    if matches!(scope, IgnoreScopeArg::Repo | IgnoreScopeArg::Both) {
+        changes.push(write_marked_block(
+            project_root,
+            &project_root.join(".gitignore"),
+            IGNORE_BLOCK_BEGIN,
+            IGNORE_BLOCK_END,
+            &patterns,
+        )?);
+        if targets.iter().any(|target| target == "cursor") {
+            changes.push(write_marked_block(
+                project_root,
+                &project_root.join(".cursorignore"),
+                AGENT_ALLOWLIST_BEGIN,
+                AGENT_ALLOWLIST_END,
+                &cursor_allowlist_patterns(targets),
+            )?);
+        }
+        if targets.iter().any(|target| target == "gemini-cli") {
+            changes.push(write_marked_block(
+                project_root,
+                &project_root.join(".geminiignore"),
+                AGENT_ALLOWLIST_BEGIN,
+                AGENT_ALLOWLIST_END,
+                &gemini_allowlist_patterns(),
+            )?);
+        }
+    }
+    Ok(changes)
+}
+
+fn planned_ignore_actions(
+    project_root: &Path,
+    targets: &[String],
+    scope: IgnoreScopeArg,
+    include_lock: bool,
+    include_private_sources: bool,
+    root_paths: &[String],
+) -> std::result::Result<Vec<Value>, CliError> {
+    let mut actions = Vec::new();
+    let patterns = git_ignore_patterns(targets, include_lock, include_private_sources);
+    if matches!(scope, IgnoreScopeArg::Local | IgnoreScopeArg::Both) {
+        actions.push(plan_marked_block(
+            project_root,
+            &project_root.join(".git/info/exclude"),
+            IGNORE_BLOCK_BEGIN,
+            IGNORE_BLOCK_END,
+            &patterns,
+            "write local Git exclude ignore block",
+        )?);
+    }
+    if matches!(scope, IgnoreScopeArg::Repo | IgnoreScopeArg::Both) {
+        actions.push(plan_marked_block(
+            project_root,
+            &project_root.join(".gitignore"),
+            IGNORE_BLOCK_BEGIN,
+            IGNORE_BLOCK_END,
+            &patterns,
+            "write repo .gitignore ignore block",
+        )?);
+        if targets.iter().any(|target| target == "cursor") {
+            actions.push(plan_marked_block(
+                project_root,
+                &project_root.join(".cursorignore"),
+                AGENT_ALLOWLIST_BEGIN,
+                AGENT_ALLOWLIST_END,
+                &cursor_allowlist_patterns(targets),
+                "write Cursor allowlist for generated agent surfaces",
+            )?);
+        }
+        if targets.iter().any(|target| target == "gemini-cli") {
+            actions.push(plan_marked_block(
+                project_root,
+                &project_root.join(".geminiignore"),
+                AGENT_ALLOWLIST_BEGIN,
+                AGENT_ALLOWLIST_END,
+                &gemini_allowlist_patterns(),
+                "write Gemini allowlist for generated agent surfaces",
+            )?);
+        }
+    }
+    if !root_paths.is_empty() {
+        actions.push(json!({
+            "kind": "untrack-generated",
+            "status": "planned",
+            "roots": root_paths,
+            "summary": "remove generated roots from Git index only; files remain on disk",
+            "command": format!("git rm -r --cached --ignore-unmatch -- {}", root_paths.join(" ")),
+        }));
+    }
+    Ok(actions)
+}
+
+fn plan_marked_block(
+    project_root: &Path,
+    path: &Path,
+    begin_marker: &str,
+    end_marker: &str,
+    block_lines: &[String],
+    summary: &str,
+) -> std::result::Result<Value, CliError> {
+    let existing = fs::read_to_string(path).unwrap_or_default();
+    let updated = upsert_marked_block(&existing, begin_marker, end_marker, block_lines)
+        .map_err(|err| state_error(anyhow::anyhow!("{}: {}", path.display(), err)))?;
+    let status = if !path.exists() {
+        "would-create"
+    } else if existing == updated {
+        "unchanged"
+    } else {
+        "would-update"
+    };
+    Ok(json!({
+        "kind": "write-ignore",
+        "path": relative_to_project(project_root, path),
+        "status": status,
+        "summary": summary,
+    }))
+}
+
+fn tracked_generated_roots_json(project_root: &Path, targets: &[String]) -> Result<Vec<Value>> {
+    let roots = generated_roots_for_targets(targets);
+    if roots.is_empty() || !project_root.join(".git").exists() {
+        return Ok(Vec::new());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .arg("ls-files")
+        .arg("-z")
+        .arg("--")
+        .args(&roots)
+        .output()
+        .with_context(|| format!("run git ls-files in {}", project_root.display()))?;
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let files = raw
+        .split('\0')
+        .filter(|item| !item.is_empty())
+        .map(|item| item.replace('\\', "/"))
+        .collect::<Vec<_>>();
+    let mut by_root = BTreeMap::<String, Vec<String>>::new();
+    for file in files {
+        for root in &roots {
+            if file == *root || file.starts_with(&format!("{root}/")) {
+                by_root.entry(root.clone()).or_default().push(file.clone());
+            }
+        }
+    }
+    Ok(by_root
+        .into_iter()
+        .map(|(root, files)| {
+            json!({
+                "root": root,
+                "classification": "generated-root",
+                "file_count": files.len(),
+                "tracked_files": files,
+            })
+        })
+        .collect())
+}
+
+fn generated_roots_for_targets(targets: &[String]) -> Vec<String> {
+    let mut roots = BTreeSet::new();
+    for target in targets {
+        match target.as_str() {
+            "codex-cli" => {
+                roots.insert(".codex".to_string());
+            }
+            "claude-code" => {
+                roots.insert(".claude".to_string());
+            }
+            "cursor" => {
+                roots.insert(".cursor".to_string());
+            }
+            "gemini-cli" => {
+                roots.insert(".gemini".to_string());
+            }
+            _ => {}
+        }
+    }
+    roots.into_iter().collect()
+}
+
+fn untrack_generated_roots(
+    project_root: &Path,
+    root_paths: &[String],
+) -> std::result::Result<Vec<Value>, CliError> {
+    if root_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .arg("rm")
+        .arg("-r")
+        .arg("--cached")
+        .arg("--ignore-unmatch")
+        .arg("--")
+        .args(root_paths)
+        .output()
+        .with_context(|| format!("run git rm --cached in {}", project_root.display()))
+        .map_err(internal_error)?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(CliError::new(
+            EXIT_STATE,
+            format!("Failed to untrack generated roots: {stderr}"),
+        ));
+    }
+    Ok(root_paths
+        .iter()
+        .map(|root| {
+            json!({
+                "kind": "untrack-generated",
+                "path": root,
+                "status": "untracked-index",
+                "files_remain_on_disk": project_root.join(root).exists(),
+            })
+        })
+        .collect())
+}
+
+fn confirm_untrack_generated_roots(root_paths: &[String]) -> std::result::Result<bool, CliError> {
+    eprint!(
+        "Remove generated roots from the Git index only (files remain on disk): {}? [y/N] ",
+        root_paths.join(", ")
+    );
+    io::stderr().flush().map_err(internal_error)?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).map_err(internal_error)?;
+    Ok(matches!(input.trim(), "y" | "Y" | "yes" | "YES"))
+}
+
+fn ignore_next_commands(
+    scope: IgnoreScopeArg,
+    targets: &[String],
+    inferred_targets: bool,
+    fix_available: bool,
+    needs_untrack: bool,
+) -> Vec<String> {
+    if !fix_available {
+        return Vec::new();
+    }
+    let mut base = format!(
+        "metactl ignore fix --plan --scope {}",
+        ignore_scope_label(scope)
+    );
+    if !inferred_targets && !targets.is_empty() {
+        base.push_str(&repeated_target_args(targets));
+    }
+    let mut commands = vec![base];
+    if needs_untrack {
+        let mut apply = format!(
+            "metactl ignore fix --scope {} --untrack-generated --yes",
+            ignore_scope_label(scope)
+        );
+        if !inferred_targets && !targets.is_empty() {
+            apply.push_str(&repeated_target_args(targets));
+        }
+        commands.push(apply);
+    }
+    commands
+}
+
+fn ignore_fix_next_commands(
+    args: &IgnoreFixArgs,
+    targets: &[String],
+    needs_untrack: bool,
+) -> Vec<String> {
+    let target_arg = if targets.is_empty() {
+        String::new()
+    } else {
+        repeated_target_args(targets)
+    };
+    let mut plan = format!(
+        "metactl ignore fix --plan --scope {}{}",
+        ignore_scope_label(args.scope),
+        target_arg
+    );
+    if args.include_private_sources {
+        plan.push_str(" --include-private-sources");
+    }
+    if args.include_lock {
+        plan.push_str(" --include-lock");
+    }
+    let mut apply = format!(
+        "metactl ignore fix --scope {}{}",
+        ignore_scope_label(args.scope),
+        target_arg
+    );
+    if args.include_private_sources {
+        apply.push_str(" --include-private-sources");
+    }
+    if args.include_lock {
+        apply.push_str(" --include-lock");
+    }
+    if needs_untrack {
+        apply.push_str(" --untrack-generated");
+    }
+    apply.push_str(" --yes");
+    vec![plan, apply]
+}
+
+fn repeated_target_args(targets: &[String]) -> String {
+    targets
+        .iter()
+        .map(|target| format!(" --target {target}"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 fn ignore_status_files(project_root: &Path) -> Vec<Value> {
@@ -9864,21 +10755,27 @@ fn repo_gitignore_can_hide(path: &Path, patterns: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-fn resolve_ignore_targets(project_root: &Path, requested: &[String]) -> Result<Vec<String>> {
-    let raw_targets = if requested.is_empty() {
+fn resolve_ignore_targets(
+    project_root: &Path,
+    requested: &[String],
+) -> Result<IgnoreTargetResolution> {
+    let (raw_targets, source) = if requested.is_empty() {
         let config_path = project_root.join("metactl.yaml");
         if config_path.exists() {
             let config = load_partial_project_config(&config_path)?;
             if config.targets.is_empty() {
-                default_project_config().targets
+                (default_project_config().targets, "default")
             } else {
-                config.targets
+                (config.targets, "config")
             }
         } else {
-            IGNORE_TARGETS.iter().map(|item| item.to_string()).collect()
+            (
+                IGNORE_TARGETS.iter().map(|item| item.to_string()).collect(),
+                "detected-default",
+            )
         }
     } else {
-        requested.to_vec()
+        (requested.to_vec(), "explicit")
     };
 
     let mut targets = BTreeSet::new();
@@ -9895,7 +10792,10 @@ fn resolve_ignore_targets(project_root: &Path, requested: &[String]) -> Result<V
             ));
         }
     }
-    Ok(targets.into_iter().collect())
+    Ok(IgnoreTargetResolution {
+        targets: targets.into_iter().collect(),
+        source,
+    })
 }
 
 fn git_ignore_patterns(
@@ -10118,6 +11018,7 @@ fn ignore_scope_label(scope: IgnoreScopeArg) -> &'static str {
     match scope {
         IgnoreScopeArg::Local => "local",
         IgnoreScopeArg::Repo => "repo",
+        IgnoreScopeArg::Both => "both",
     }
 }
 

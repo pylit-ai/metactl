@@ -302,6 +302,43 @@ fn seed_tracked_private_source_state(project: &Path) {
     assert!(git_add.status.success(), "{}", stderr(&git_add));
 }
 
+fn git_init_project(project: &Path) {
+    let git_init = Command::new("git")
+        .args(["-C", project.to_str().expect("project"), "init", "--quiet"])
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "{}", stderr(&git_init));
+}
+
+fn git_add_forced(project: &Path, paths: &[&str]) {
+    let mut command = Command::new("git");
+    command
+        .arg("-C")
+        .arg(project)
+        .arg("add")
+        .arg("-f")
+        .args(paths);
+    let output = command.output().expect("git add");
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+fn git_ls_files(project: &Path) -> String {
+    let output = Command::new("git")
+        .args(["-C", project.to_str().expect("project"), "ls-files"])
+        .output()
+        .expect("git ls-files");
+    assert!(output.status.success(), "{}", stderr(&output));
+    stdout(&output)
+}
+
+fn seed_tracked_generated_root(project: &Path, file: &str) {
+    git_init_project(project);
+    let path = project.join(file);
+    fs::create_dir_all(path.parent().expect("generated parent")).expect("generated parent");
+    fs::write(&path, "generated\n").expect("generated file");
+    git_add_forced(project, &[file]);
+}
+
 fn git_commit_all(repo: &Path, message: &str) -> String {
     let add = Command::new("git")
         .args(["-C", repo.to_str().expect("repo"), "add", "."])
@@ -335,6 +372,270 @@ fn git_commit_all(repo: &Path, message: &str) -> String {
 fn init_project(project: &Path) {
     let output = run_cli(project, &["init", "--target", "codex-cli"]);
     assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn ignore_status_reports_tracked_generated_roots() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_generated_root(project.path(), ".codex/skills/example/SKILL.md");
+
+    let output = run_cli(
+        project.path(),
+        &["--json", "ignore", "status", "--target", "codex-cli"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "ignore", Some(project.path()));
+    assert_eq!(value["tracked_generated_roots"][0]["root"], ".codex");
+    assert!(value["next_commands"][0]
+        .as_str()
+        .expect("next command")
+        .contains("metactl ignore fix --plan"));
+}
+
+#[test]
+fn ignore_status_agent_json_has_next_commands() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let output = run_cli(
+        project.path(),
+        &["--agent", "ignore", "status", "--target", "codex-cli"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "ignore", Some(project.path()));
+    assert!(
+        value["next_commands"]
+            .as_array()
+            .expect("next commands")
+            .len()
+            >= 1
+    );
+}
+
+#[test]
+fn ignore_target_resolution_prefers_configured_then_detected() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(project.path(), &["init", "--target", "gemini-cli"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::create_dir_all(project.path().join(".codex/skills/example")).expect("codex dir");
+
+    let output = run_cli(project.path(), &["--json", "ignore", "status"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_eq!(value["target_source"], "config");
+    assert_eq!(value["targets"], json!(["gemini-cli"]));
+}
+
+#[test]
+fn ignore_fix_plan_reports_actions_without_writes() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_generated_root(project.path(), ".codex/skills/example/SKILL.md");
+    let before_files = project_file_snapshot(project.path());
+    let before_index = git_ls_files(project.path());
+
+    let output = run_cli(
+        project.path(),
+        &["--json", "ignore", "fix", "--plan", "--target", "codex-cli"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "ignore", Some(project.path()));
+    assert_eq!(value["plan"], json!(true));
+    assert!(value["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .any(|item| item["kind"] == "untrack-generated"));
+    assert_eq!(project_file_snapshot(project.path()), before_files);
+    assert_eq!(git_ls_files(project.path()), before_index);
+}
+
+#[test]
+fn ignore_fix_yes_untracks_generated_roots_without_deleting_files() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_generated_root(project.path(), ".codex/skills/example/SKILL.md");
+
+    let output = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "ignore",
+            "fix",
+            "--scope",
+            "both",
+            "--target",
+            "codex-cli",
+            "--untrack-generated",
+            "--yes",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_eq!(value["untracked_generated_roots"][0]["path"], ".codex");
+    assert!(project
+        .path()
+        .join(".codex/skills/example/SKILL.md")
+        .exists());
+    assert!(!git_ls_files(project.path()).contains(".codex/skills/example/SKILL.md"));
+}
+
+#[test]
+fn ignore_fix_no_input_requires_untrack_generated() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_generated_root(project.path(), ".codex/skills/example/SKILL.md");
+
+    let output = run_cli(
+        project.path(),
+        &[
+            "--no-input",
+            "--json",
+            "ignore",
+            "fix",
+            "--target",
+            "codex-cli",
+            "--yes",
+        ],
+    );
+    assert!(
+        !output.status.success(),
+        "ignore fix should require explicit untrack"
+    );
+    let value = json_output(&output);
+    assert_eq!(value["code"], "untrack_generated_required");
+    assert!(git_ls_files(project.path()).contains(".codex/skills/example/SKILL.md"));
+}
+
+#[test]
+fn ignore_fix_agent_plan_json_is_parseable() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let output = run_cli(project.path(), &["--agent", "ignore", "fix", "--plan"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "ignore", Some(project.path()));
+    assert_eq!(value["action"], "fix");
+    assert_eq!(value["plan"], json!(true));
+}
+
+#[test]
+fn setup_plan_json_has_replayable_commands() {
+    let project = TempDir::new().expect("tempdir");
+    let output = run_cli(
+        project.path(),
+        &["--json", "setup", "--plan", "--target", "codex-cli"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "setup", Some(project.path()));
+    assert_eq!(value["plan"], json!(true));
+    assert!(value["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .iter()
+        .any(|item| item
+            .as_str()
+            .unwrap_or("")
+            .contains("metactl setup --target codex-cli --yes")));
+    assert!(!project.path().join("metactl.yaml").exists());
+}
+
+#[test]
+fn setup_agent_mode_never_prompts() {
+    let project = TempDir::new().expect("tempdir");
+    let output = run_cli(project.path(), &["--agent", "setup", "--plan"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "setup", Some(project.path()));
+    assert_eq!(value["plan"], json!(true));
+    assert!(value["next_commands"].is_array());
+}
+
+#[test]
+fn setup_yes_with_explicit_target_creates_config_without_sync() {
+    let project = TempDir::new().expect("tempdir");
+    let output = run_cli(
+        project.path(),
+        &["--json", "setup", "--target", "codex-cli", "--yes"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "setup", Some(project.path()));
+    assert_eq!(value["ran_sync"], json!(false));
+    assert!(project.path().join("metactl.yaml").exists());
+    assert!(!project.path().join(".codex").exists());
+}
+
+#[test]
+fn setup_existing_config_preserves_targets() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let output = run_cli(
+        project.path(),
+        &["--json", "setup", "--target", "gemini-cli", "--yes"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_eq!(value["already_configured"], json!(true));
+    let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("config");
+    assert!(config.contains("codex-cli"));
+    assert!(!config.contains("gemini-cli"));
+}
+
+#[test]
+fn doctor_reports_ignore_repair_checks() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_generated_root(project.path(), ".codex/skills/example/SKILL.md");
+
+    let output = run_cli(project.path(), &["--json", "doctor"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "doctor", Some(project.path()));
+    let checks = value["checks"].as_array().expect("checks");
+    let ignore = checks
+        .iter()
+        .find(|item| item["id"] == "ignore-repair")
+        .expect("ignore check");
+    assert_eq!(ignore["status"], "warn");
+    assert_eq!(ignore["fix_plan_ref"], "metactl ignore fix --plan");
+}
+
+#[test]
+fn doctor_agent_json_has_recoverable_next_commands() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let output = run_cli(project.path(), &["--agent", "doctor"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "doctor", Some(project.path()));
+    let checks = value["checks"].as_array().expect("checks");
+    assert!(checks
+        .iter()
+        .any(|item| item["id"] == "ignore-repair" && item["next_commands"].as_array().is_some()));
+}
+
+#[test]
+fn doctor_does_not_mutate_ignore_or_git_index() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    seed_tracked_generated_root(project.path(), ".codex/skills/example/SKILL.md");
+    let before_files = project_file_snapshot(project.path());
+    let before_index = git_ls_files(project.path());
+
+    let output = run_cli(project.path(), &["--json", "doctor"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    assert_eq!(project_file_snapshot(project.path()), before_files);
+    assert_eq!(git_ls_files(project.path()), before_index);
 }
 
 #[test]

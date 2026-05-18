@@ -72,6 +72,37 @@ metactl --agent status
 metactl --agent validate
 ```
 
+## Guided Setup And Repair
+
+Use `setup --plan` when the repo is new to metactl or when an agent needs a
+machine-readable first step:
+
+```bash
+metactl setup --plan
+metactl setup --target codex-cli --yes
+metactl ignore fix --plan
+```
+
+The raw equivalent for `setup --target codex-cli --yes` is still `init`:
+
+```bash
+metactl init --target codex-cli --no-input
+```
+
+For generated adapter noise, repair in two steps. The plan reports ignore-file
+writes and any Git-index untracking before mutation:
+
+```bash
+metactl ignore status
+metactl ignore fix --plan --scope both
+metactl ignore fix --scope both --untrack-generated --yes
+```
+
+`--untrack-generated --yes` removes generated roots such as `.codex/` or
+`.claude/` from the Git index only. It does not delete files from disk. Root
+adapter docs such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are not treated
+as generated roots by this repair.
+
 Project pack activation has both top-level and object-oriented aliases:
 
 ```bash
@@ -138,7 +169,8 @@ checkout's private source cache and lock state:
 
 ```bash
 metactl ignore status
-metactl ignore install --scope local --include-private-sources
+metactl ignore fix --plan --scope local --include-private-sources
+metactl ignore fix --scope local --include-private-sources --yes
 ```
 
 Local scope writes `.git/info/exclude` and affects only the current checkout.

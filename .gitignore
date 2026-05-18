@@ -36,7 +36,9 @@ memory/
 /.opendream/
 
 # Local planning and generated library surfaces
-/specs/
+/specs/*
+!/specs/guided-human-cli-ux-ax/
+!/specs/guided-human-cli-ux-ax/spec.md
 /openspec/
 /skills/
 /docs/adr/

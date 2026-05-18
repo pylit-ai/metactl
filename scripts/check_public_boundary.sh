@@ -5,7 +5,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 blocked_paths='^(AGENTS\.md|CLAUDE\.md|GEMINI\.md|CLAUDE\.local\.md|GEMINI\.local\.md|PRD\.md|NORTHSTAR\.md|CONSTITUTION\.md|CURRENT_STATE\.md|APPLY\.md|MIGRATION_GUARDRAILS\.md|metactl\.yaml|metactl\.lock\.json|\.claudeignore|\.codexignore|\.cursorignore|\.geminiignore|\.mcp\.json|opencode\.json|\.metactl/|\.agents/|\.codex/|\.claude/|\.cursor/|\.gemini/|\.omc/|\.opendream/|\.ruler/|\.meta/|(.*/)?memory/|(.*/)?notepads/|(.*/)?scratch/|specs/|openspec/|skills/|docs/adr/|docs/spec/|docs/agents/|docs/governance/|docs/evidence/|docs/status/|docs/superpowers/|docs/repomix-bundles/|[^/]+-library/|.*\.code-workspace$|.*\.zip$)'
-allowed_public_paths='^specs/cli-ux-dx-defaults/(plan|spec|tasks)\.md$'
+allowed_public_paths='^specs/(cli-ux-dx-defaults/(plan|spec|tasks)|guided-human-cli-ux-ax/spec)\.md$'
 
 tracked_or_new="$(mktemp)"
 blocked_filtered="$(mktemp)"

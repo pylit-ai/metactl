@@ -25,6 +25,17 @@ Use the quickstart hero when the viewer needs the product thesis in one loop: na
 
 ![Search and activate](assets/demos/search-use-sync.gif)
 
+## Guided setup and repair script
+
+Use this command sequence for future setup/repair captures:
+
+```bash
+metactl setup --plan
+metactl setup --target codex-cli --yes
+metactl ignore status
+metactl ignore fix --plan
+```
+
 ## Explain and validate JSON
 
 ![Explain JSON](assets/demos/explain-json.gif)
