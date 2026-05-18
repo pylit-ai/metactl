@@ -1016,6 +1016,53 @@ fn compile_project_root(project_root: Option<&str>) -> Result<PathBuf> {
     }
 }
 
+fn validate_skill_frontmatter_text(text: &str) -> Vec<String> {
+    let mut failures = Vec::new();
+    let mut lines = text.lines();
+    if lines.next() != Some("---") {
+        failures.push("SKILL.md must start with YAML frontmatter.".to_string());
+        return failures;
+    }
+
+    let mut yaml_lines = Vec::new();
+    let mut closed = false;
+    for line in lines {
+        if line.trim_end() == "---" {
+            closed = true;
+            break;
+        }
+        yaml_lines.push(line);
+    }
+    if !closed {
+        failures.push("SKILL.md frontmatter is not closed.".to_string());
+        return failures;
+    }
+
+    let yaml = yaml_lines.join("\n");
+    let value: serde_yaml::Value = match serde_yaml::from_str(&yaml) {
+        Ok(value) => value,
+        Err(err) => {
+            failures.push(format!("SKILL.md frontmatter invalid YAML: {err}."));
+            return failures;
+        }
+    };
+
+    for field in ["name", "description"] {
+        match value.get(field).and_then(|item| item.as_str()) {
+            Some(value) if !value.trim().is_empty() => {}
+            _ => failures.push(format!("SKILL.md frontmatter.{field} is required.")),
+        }
+    }
+
+    failures
+}
+
+fn validate_generated_skill_frontmatter(path: &Path) -> Result<Vec<String>> {
+    let text = fs::read_to_string(path)
+        .with_context(|| format!("read generated skill {}", path.display()))?;
+    Ok(validate_skill_frontmatter_text(&text))
+}
+
 fn validate_staged_outputs(
     project_root: PathBuf,
     manifest: &CompileManifest,
@@ -1026,6 +1073,11 @@ fn validate_staged_outputs(
         if !staged_abs.exists() {
             failures.push(format!("{} is missing from the staging area.", output.path));
             continue;
+        }
+        if output.kind == GeneratedOutputKind::SkillFolder {
+            for failure in validate_generated_skill_frontmatter(&staged_abs)? {
+                failures.push(format!("{}: {}", output.path, failure));
+            }
         }
         if let Some(expected) = output.digest.as_deref() {
             let actual = sha256_digest(&staged_abs)?;
@@ -1040,24 +1092,36 @@ fn validate_staged_outputs(
     Ok(failures)
 }
 
-fn wrap_with_frontmatter(body: &[u8], frontmatter: &BTreeMap<String, String>) -> Vec<u8> {
-    if frontmatter.is_empty() {
-        return body.to_vec();
-    }
+fn render_frontmatter(frontmatter: &BTreeMap<String, String>) -> Result<String> {
+    let typed_frontmatter = frontmatter
+        .iter()
+        .map(|(key, value)| (key.clone(), yaml_frontmatter_value(value)))
+        .collect::<BTreeMap<_, _>>();
+    let yaml = serde_yaml::to_string(&typed_frontmatter).context("serialize YAML frontmatter")?;
     let mut out = String::from("---\n");
-    for (k, v) in frontmatter {
-        // Booleans and numbers pass through unquoted; strings get quoted with
-        // double quotes and backslash-escaping of embedded quotes.
-        let needs_quote = !matches!(v.as_str(), "true" | "false") && v.parse::<f64>().is_err();
-        if needs_quote {
-            out.push_str(&format!("{}: \"{}\"\n", k, v.replace('"', "\\\"")));
-        } else {
-            out.push_str(&format!("{}: {}\n", k, v));
-        }
+    out.push_str(&yaml);
+    if !yaml.ends_with('\n') {
+        out.push('\n');
     }
     out.push_str("---\n");
+    Ok(out)
+}
+
+fn yaml_frontmatter_value(value: &str) -> serde_yaml::Value {
+    match value {
+        "true" => serde_yaml::Value::Bool(true),
+        "false" => serde_yaml::Value::Bool(false),
+        _ => serde_yaml::Value::String(value.to_string()),
+    }
+}
+
+fn wrap_with_frontmatter(body: &[u8], frontmatter: &BTreeMap<String, String>) -> Result<Vec<u8>> {
+    if frontmatter.is_empty() {
+        return Ok(body.to_vec());
+    }
+    let mut out = render_frontmatter(frontmatter)?;
     out.push_str(std::str::from_utf8(body).unwrap_or(""));
-    out.into_bytes()
+    Ok(out.into_bytes())
 }
 
 fn synthesize_outputs(
@@ -1117,7 +1181,7 @@ fn synthesize_outputs(
                     contents: wrap_with_frontmatter(
                         document.content.as_bytes(),
                         &compile_target.instruction_frontmatter,
-                    ),
+                    )?,
                     instruction_mode: Some(plan.mode),
                     pack_ref: None,
                     surface_id: None,
@@ -1171,7 +1235,7 @@ fn synthesize_outputs(
                             contents: wrap_with_frontmatter(
                                 local_document.content.as_bytes(),
                                 &compile_target.instruction_frontmatter,
-                            ),
+                            )?,
                             instruction_mode: Some(local_plan.mode),
                             pack_ref: None,
                             surface_id: None,
@@ -1787,15 +1851,16 @@ fn merged_skill_document(pack: &DiscoveredPack) -> Result<Vec<u8>> {
     if let Some(bytes) = primary_instruction_bytes(pack)? {
         return Ok(bytes);
     }
-    Ok(format!(
-        "---\nname: {}\ndescription: {}\n---\n",
-        pack.manifest.id,
+    let mut frontmatter = BTreeMap::new();
+    frontmatter.insert("name".to_string(), pack.manifest.id.clone());
+    frontmatter.insert(
+        "description".to_string(),
         pack.manifest
             .description
             .clone()
-            .unwrap_or_else(|| pack.manifest.title.clone())
-    )
-    .into_bytes())
+            .unwrap_or_else(|| pack.manifest.title.clone()),
+    );
+    Ok(render_frontmatter(&frontmatter)?.into_bytes())
 }
 
 fn derive_skill_surfaces(pack: &DiscoveredPack) -> Result<Vec<DerivedSkillSurface>> {
@@ -1814,7 +1879,7 @@ fn derive_skill_surfaces(pack: &DiscoveredPack) -> Result<Vec<DerivedSkillSurfac
             attached_script_paths: pack_resource_paths(pack, ResourceKind::Script),
             attached_reference_paths: pack_resource_paths(pack, ResourceKind::Example),
             attached_asset_paths: pack_resource_paths(pack, ResourceKind::Asset),
-            contents: default_skill_surface_bytes(pack),
+            contents: default_skill_surface_bytes(pack)?,
         }]);
     }
 
@@ -2131,19 +2196,30 @@ fn skill_surface_document(
         return Ok(surface.contents.clone());
     }
     if markdown_has_frontmatter(&surface.contents) {
+        let contents = String::from_utf8_lossy(&surface.contents);
+        let failures = validate_skill_frontmatter_text(&contents);
+        if !failures.is_empty() {
+            return Err(anyhow!(
+                "instruction surface {} has invalid skill frontmatter: {}",
+                surface.surface_id,
+                failures.join(" ")
+            ));
+        }
         return Ok(surface.contents.clone());
     }
-    let mut document = format!(
-        "---\nname: {}\ndescription: {}\npack_id: {}\nsurface_slug: {}\n---\n\n",
-        surface.title,
+    let mut frontmatter = BTreeMap::new();
+    frontmatter.insert("name".to_string(), surface.title.clone());
+    frontmatter.insert(
+        "description".to_string(),
         pack.manifest
             .description
             .clone()
             .unwrap_or_else(|| pack.manifest.title.clone()),
-        pack.manifest.id,
-        surface.surface_slug
-    )
-    .into_bytes();
+    );
+    frontmatter.insert("pack_id".to_string(), pack.manifest.id.clone());
+    frontmatter.insert("surface_slug".to_string(), surface.surface_slug.clone());
+    let mut document = render_frontmatter(&frontmatter)?.into_bytes();
+    document.push(b'\n');
     document.extend_from_slice(&surface.contents);
     Ok(document)
 }
@@ -2334,16 +2410,19 @@ fn primary_instruction_bytes(pack: &DiscoveredPack) -> Result<Option<Vec<u8>>> {
     Ok(Some(combined))
 }
 
-fn default_skill_surface_bytes(pack: &DiscoveredPack) -> Vec<u8> {
-    format!(
-        "# {}\n\n{}\n",
-        pack.manifest.title,
-        pack.manifest
-            .description
-            .clone()
-            .unwrap_or_else(|| "No bundled instruction resource was available.".to_string())
-    )
-    .into_bytes()
+fn default_skill_surface_bytes(pack: &DiscoveredPack) -> Result<Vec<u8>> {
+    let description = pack
+        .manifest
+        .description
+        .clone()
+        .unwrap_or_else(|| "No bundled instruction resource was available.".to_string());
+    let mut frontmatter = BTreeMap::new();
+    frontmatter.insert("name".to_string(), pack.manifest.title.clone());
+    frontmatter.insert("description".to_string(), description.clone());
+    let mut document = render_frontmatter(&frontmatter)?.into_bytes();
+    document
+        .extend_from_slice(format!("\n# {}\n\n{}\n", pack.manifest.title, description).as_bytes());
+    Ok(document)
 }
 
 fn pack_resource_paths(pack: &DiscoveredPack, kind: ResourceKind) -> Vec<String> {
@@ -3402,8 +3481,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        budget_instruction_document, derive_skill_surfaces, resource_surface_slug, DiscoveredPack,
-        LibraryRegistry, INSTRUCTION_INDEX_MAX_BYTES, INSTRUCTION_INDEX_POINTER,
+        budget_instruction_document, derive_skill_surfaces, resource_surface_slug,
+        skill_surface_document, validate_generated_skill_frontmatter, DerivedSkillSurface,
+        DiscoveredPack, LibraryRegistry, INSTRUCTION_INDEX_MAX_BYTES, INSTRUCTION_INDEX_POINTER,
         INSTRUCTION_INDEX_WARN_BYTES,
     };
     use crate::kernel::MetactlKernel;
@@ -4079,6 +4159,90 @@ mod tests {
                 "demo-pack:guided-review-2".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn skill_surface_frontmatter_serializes_yaml_scalars_with_colons() {
+        let root = TempDir::new().expect("tempdir");
+        let pack = DiscoveredPack {
+            manifest: PackManifest {
+                kind: "pack".to_string(),
+                id: "demo-pack".to_string(),
+                version: "1.0.0".to_string(),
+                title: "Demo Pack".to_string(),
+                description: Some(
+                    "Copy/paste prompt bodies for repository artifact normalization: primary prompt, rubric, and index."
+                        .to_string(),
+                ),
+                activation_class: ActivationClass::Instruction,
+                side_effect_class: SideEffectClass::None,
+                trust_tier: TrustTier::FirstPartyValidated,
+                requires_confirmation: false,
+                task_tags: Vec::new(),
+                compatible_roles: Vec::new(),
+                compatible_targets: vec!["codex-cli".to_string()],
+                knowledge_refs: Vec::new(),
+                resources: Vec::new(),
+                imports: vec![PackImport {
+                    ecosystem: ImportEcosystem::FirstParty,
+                    origin: "test".to_string(),
+                    digest: None,
+                }],
+                visibility_scope: VisibilityScope::default(),
+                lifecycle: None,
+                metadata: BTreeMap::new(),
+            },
+            provenance: None,
+            provenance_ref: None,
+            source_path: root.path().join("packs/demo-pack.json"),
+            library_root: root.path().to_path_buf(),
+            promotion_status: crate::types::PromotionStatus::Promoted,
+        };
+        let surface = DerivedSkillSurface {
+            surface_id: "demo-pack:rubric".to_string(),
+            surface_slug: "rubric".to_string(),
+            title: "Scoring rubric: repository artifact normalization prompts".to_string(),
+            instruction_resource_paths: vec!["prompts/rubric.md".to_string()],
+            attached_script_paths: Vec::new(),
+            attached_reference_paths: Vec::new(),
+            attached_asset_paths: Vec::new(),
+            contents: b"# Scoring rubric\n".to_vec(),
+        };
+
+        let document =
+            skill_surface_document(&pack, &surface, true).expect("skill surface document");
+        let skill_path = root.path().join("SKILL.md");
+        fs::write(&skill_path, document).expect("skill document");
+
+        assert_eq!(
+            validate_generated_skill_frontmatter(&skill_path).expect("validation"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn generated_skill_frontmatter_validation_reports_yaml_and_required_fields() {
+        let root = TempDir::new().expect("tempdir");
+        let skill_path = root.path().join("SKILL.md");
+
+        fs::write(
+            &skill_path,
+            "---\nname: Scoring rubric: repository artifact normalization prompts\ndescription: ok\n---\n",
+        )
+        .expect("invalid yaml skill");
+        assert!(validate_generated_skill_frontmatter(&skill_path)
+            .expect("validation")
+            .iter()
+            .any(|failure| failure.contains("invalid YAML")));
+
+        fs::write(&skill_path, "---\nid: prompt\n---\n").expect("missing fields skill");
+        let failures = validate_generated_skill_frontmatter(&skill_path).expect("validation");
+        assert!(failures
+            .iter()
+            .any(|failure| failure.contains("frontmatter.name is required")));
+        assert!(failures
+            .iter()
+            .any(|failure| failure.contains("frontmatter.description is required")));
     }
 
     #[test]
