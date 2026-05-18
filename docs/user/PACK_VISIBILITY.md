@@ -27,3 +27,34 @@ Expected behavior:
 - Targets without native local-only surfaces report a degradation instead of leaking local-only pack content into shared surfaces.
 
 The public starter library includes `local-only-example` as a generic visibility fixture.
+
+## Codex Skill Visibility
+
+Codex has two practical skill surfaces:
+
+| Scope | Path | Updated by |
+| --- | --- | --- |
+| Repo-local | `<repo>/.codex/skills/...` | `metactl sync` and `metactl fleet sync` |
+| User-global Personal | `~/.codex/skills/...` | `metactl skills add <skill-path> --scope user` |
+
+Repo-local skills are visible to Codex sessions opened in that repository. A Fleet Sync success means linked repos were updated; it does not mean the active Codex thread's Personal picker source was updated.
+
+Check both surfaces:
+
+```bash
+metactl status
+metactl skills list --scope repo
+metactl skills list --scope user
+```
+
+Install an operator-facing repo skill into the user-global Personal source:
+
+```bash
+metactl skills add <repo-skill-path> --scope user
+```
+
+Replace an existing user-global copy after review:
+
+```bash
+metactl skills add <repo-skill-path> --scope user --force
+```

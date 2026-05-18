@@ -43,6 +43,9 @@ const EXIT_STALE_LOCK: u8 = 11;
 const EXIT_CONFLICT: u8 = 12;
 const EXIT_VALIDATION: u8 = 13;
 
+const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills under .codex/skills are visible to Codex sessions opened in that repository. User-global Personal skills live under ~/.codex/skills.";
+const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills.";
+
 const WORKFLOW_HELP: &str = "\
 Quick start:
   metactl init -t claude-code        # scaffold a project for Claude Code
@@ -144,6 +147,8 @@ enum Commands {
     Library(LibraryArgs),
     /// Import, export, and verify portable Agent Skill folders as metactl packs
     Pack(PackArgs),
+    /// Manage repo-local and user-global Codex Agent Skill visibility
+    Skills(SkillsArgs),
     /// Project packs into local runtime plugin marketplace bundles
     Plugin(PluginArgs),
     /// Create explicit public example or sanitized export records
@@ -651,6 +656,68 @@ enum PackCommand {
     ExportSkill(PackExportSkillArgs),
     /// Verify an imported Agent Skill folder against a portability profile
     VerifySkill(PackVerifySkillArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: SkillsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsCommand {
+    /// Install a repo-local Agent Skill folder into the user-global Codex skill root
+    Add(SkillsAddArgs),
+    /// List repo-local or user-global Codex Agent Skill folders
+    List(SkillsListArgs),
+    /// Remove a user-global Codex Agent Skill folder
+    Remove(SkillsRemoveArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsAddArgs {
+    /// Skill folder containing SKILL.md, SKILL.md path, or repo-local skill name
+    path: PathBuf,
+    /// Skill visibility scope to update
+    #[arg(long, value_enum, default_value = "user")]
+    scope: SkillScopeArg,
+    /// Target runtime skill root to manage
+    #[arg(long, default_value = "codex-cli")]
+    target: String,
+    /// Replace an existing user-global skill folder with the same frontmatter.name
+    #[arg(long)]
+    force: bool,
+    /// Permit executable files under scripts/ while still classifying them
+    #[arg(long)]
+    allow_executable_scripts: bool,
+}
+
+#[derive(Debug, Args)]
+struct SkillsListArgs {
+    /// Skill visibility scope to inspect
+    #[arg(long, value_enum, default_value = "repo")]
+    scope: SkillScopeArg,
+    /// Target runtime skill root to inspect
+    #[arg(long, default_value = "codex-cli")]
+    target: String,
+}
+
+#[derive(Debug, Args)]
+struct SkillsRemoveArgs {
+    /// User-global skill frontmatter.name or folder name
+    name: String,
+    /// Skill visibility scope to update
+    #[arg(long, value_enum, default_value = "user")]
+    scope: SkillScopeArg,
+    /// Target runtime skill root to manage
+    #[arg(long, default_value = "codex-cli")]
+    target: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum SkillScopeArg {
+    Repo,
+    User,
 }
 
 #[derive(Debug, Args)]
@@ -1177,6 +1244,7 @@ fn command_contract_name(command: &Commands) -> &'static str {
             | PackCommand::ExportSkill(_)
             | PackCommand::VerifySkill(_) => "pack",
         },
+        Commands::Skills(_) => "skills",
         Commands::Plugin(_) => "plugin",
         Commands::Export(_) => "export",
         Commands::Demo(args) => match &args.command {
@@ -1297,6 +1365,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Init(args) => cmd_init(cli, args),
         Commands::Library(args) => cmd_library(cli, args),
         Commands::Pack(args) => cmd_pack(cli, args),
+        Commands::Skills(args) => cmd_skills(cli, args),
         Commands::Plugin(args) => cmd_plugin(cli, args),
         Commands::Export(args) => cmd_export(cli, args),
         Commands::Demo(args) => cmd_demo(cli, args),
@@ -1355,6 +1424,11 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             PackCommand::ImportSkill(_) => Some("pack import-skill"),
             PackCommand::ExportSkill(_) => Some("pack export-skill"),
             PackCommand::VerifySkill(_) => None,
+        },
+        Commands::Skills(args) => match &args.command {
+            SkillsCommand::Add(_) => Some("skills add"),
+            SkillsCommand::List(_) => None,
+            SkillsCommand::Remove(_) => Some("skills remove"),
         },
         Commands::Plugin(args) => match &args.command {
             PluginCommand::List(_) | PluginCommand::Verify(_) => None,
@@ -2262,6 +2336,159 @@ fn public_boundary_markers(text: &str) -> Vec<&'static str> {
     markers
 }
 
+fn cmd_skills(cli: &Cli, args: &SkillsArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        SkillsCommand::Add(add_args) => cmd_skills_add(cli, add_args),
+        SkillsCommand::List(list_args) => cmd_skills_list(cli, list_args),
+        SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
+    }
+}
+
+fn cmd_skills_add(cli: &Cli, args: &SkillsAddArgs) -> std::result::Result<CommandOutput, CliError> {
+    ensure_codex_skill_target(&args.target)?;
+    if args.scope != SkillScopeArg::User {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "skills add --scope repo is not supported; repo-local skills are generated by metactl sync",
+        ));
+    }
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let user_root = codex_user_skill_root_for_command()?;
+    let skill_dir = resolve_skill_source_dir(&project_root, &args.path).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Codex skill source was not found.")
+            .with_details(error_details(&err))
+    })?;
+    let skill_md = skill_dir.join("SKILL.md");
+    let frontmatter = read_skill_frontmatter(&skill_md).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill frontmatter is invalid.")
+            .with_details(error_details(&err))
+    })?;
+    let files = collect_skill_files(&skill_dir).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Agent Skill install safety check failed.")
+            .with_details(error_details(&err))
+    })?;
+    let safety_findings = skill_import_safety_findings(&files, args.allow_executable_scripts);
+    if !safety_findings.is_empty() {
+        return Err(
+            CliError::new(EXIT_VALIDATION, "Agent Skill install was refused.")
+                .with_details(safety_findings),
+        );
+    }
+
+    let install_dir = user_root.join(&frontmatter.name);
+    replace_existing_user_skill_dir(&install_dir, args.force)?;
+    copy_skill_files(&files, &install_dir).map_err(internal_error)?;
+    let digest = skill_tree_digest(&files).map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Installed Codex skill '{}' to {}.\nScope: user-global Personal skill root.\nSource: {}",
+                frontmatter.name,
+                install_dir.display(),
+                skill_dir.display()
+            ),
+        ),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({
+                "action": "add",
+                "target": args.target,
+                "scope": "user",
+                "skill": {
+                    "name": frontmatter.name,
+                    "description": frontmatter.description,
+                    "source_path": skill_dir.to_string_lossy(),
+                    "installed_path": install_dir.to_string_lossy(),
+                    "digest": digest,
+                },
+                "scope_note": CODEX_SKILL_SCOPE_NOTE,
+            }),
+        ),
+    })
+}
+
+fn cmd_skills_list(
+    cli: &Cli,
+    args: &SkillsListArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    ensure_codex_skill_target(&args.target)?;
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let (scope, root) = match args.scope {
+        SkillScopeArg::Repo => ("repo", project_root.join(".codex").join("skills")),
+        SkillScopeArg::User => ("user", codex_user_skill_root_for_command()?),
+    };
+    let skills = discover_codex_skill_entries(&root).map_err(internal_error)?;
+    let mut lines = vec![format!("Codex skills ({scope} scope): {}", root.display())];
+    if skills.is_empty() {
+        lines.push("  (none)".to_string());
+    } else {
+        for skill in &skills {
+            lines.push(format!("  {:<24} {}", skill.name, skill.dir.display()));
+        }
+    }
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({
+                "action": "list",
+                "target": args.target,
+                "scope": scope,
+                "root": root.to_string_lossy(),
+                "count": skills.len(),
+                "skills": skills.iter().map(codex_skill_entry_json).collect::<Vec<_>>(),
+                "scope_note": CODEX_SKILL_SCOPE_NOTE,
+            }),
+        ),
+    })
+}
+
+fn cmd_skills_remove(
+    cli: &Cli,
+    args: &SkillsRemoveArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    ensure_codex_skill_target(&args.target)?;
+    if args.scope != SkillScopeArg::User {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "skills remove --scope repo is not supported; remove repo-local generated skills with metactl revert or metactl sync",
+        ));
+    }
+    validate_skill_name(&args.name).map_err(|err| {
+        CliError::new(EXIT_VALIDATION, "Codex skill name is invalid.")
+            .with_details(error_details(&err))
+    })?;
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let user_root = codex_user_skill_root_for_command()?;
+    let skill_dir = user_root.join(&args.name);
+    ensure_removable_user_skill_dir(&skill_dir)?;
+    fs::remove_dir_all(&skill_dir).map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Removed Codex skill '{}' from {}.",
+                args.name,
+                skill_dir.display()
+            ),
+        ),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({
+                "action": "remove",
+                "target": args.target,
+                "scope": "user",
+                "name": args.name,
+                "removed_path": skill_dir.to_string_lossy(),
+            }),
+        ),
+    })
+}
+
 fn cmd_pack(cli: &Cli, args: &PackArgs) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
         PackCommand::Use(use_args) => cmd_use(cli, use_args),
@@ -2286,6 +2513,13 @@ struct SkillFileEntry {
     executable: bool,
     is_script: bool,
     byte_len: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CodexSkillEntry {
+    name: String,
+    dir: PathBuf,
+    skill_md: PathBuf,
 }
 
 fn cmd_pack_import_skill(
@@ -2477,6 +2711,287 @@ fn canonical_skill_dir(path: &Path) -> Result<PathBuf> {
         return Err(anyhow!("{} must contain SKILL.md", dir.display()));
     }
     Ok(dir)
+}
+
+fn canonical_skill_source_dir(path: &Path) -> Result<PathBuf> {
+    if path.file_name().and_then(|name| name.to_str()) == Some("SKILL.md") {
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow!("SKILL.md path has no parent directory"))?;
+        canonical_skill_dir(parent)
+    } else {
+        canonical_skill_dir(path)
+    }
+}
+
+fn resolve_skill_source_dir(project_root: &Path, input: &Path) -> Result<PathBuf> {
+    let mut candidates = vec![input.to_path_buf()];
+    if input.is_relative() {
+        candidates.push(project_root.join(input));
+    }
+    for candidate in candidates {
+        if candidate.exists() {
+            return canonical_skill_source_dir(&candidate);
+        }
+    }
+
+    let name = input.to_string_lossy();
+    validate_skill_name(&name)?;
+    let repo_root = project_root.join(".codex").join("skills");
+    let matches = discover_codex_skill_entries(&repo_root)?
+        .into_iter()
+        .filter(|entry| entry.name == name)
+        .collect::<Vec<_>>();
+    match matches.len() {
+        0 => Err(anyhow!(
+            "repo-local Codex skill '{name}' was not found under {}",
+            repo_root.display()
+        )),
+        1 => Ok(matches[0].dir.clone()),
+        _ => Err(anyhow!(
+            "repo-local Codex skill '{name}' is ambiguous; pass a concrete skill path"
+        )),
+    }
+}
+
+fn ensure_codex_skill_target(target: &str) -> std::result::Result<(), CliError> {
+    if target == "codex-cli" {
+        Ok(())
+    } else {
+        Err(CliError::new(
+            EXIT_STATE,
+            format!(
+                "skills currently manages only codex-cli skill roots; unsupported target: {target}"
+            ),
+        ))
+    }
+}
+
+fn codex_user_skill_root_for_command() -> std::result::Result<PathBuf, CliError> {
+    codex_user_skill_root().ok_or_else(|| {
+        CliError::new(
+            EXIT_STATE,
+            "HOME is not set; cannot resolve user-global Codex skill root ~/.codex/skills",
+        )
+    })
+}
+
+fn codex_user_skill_root() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(|home| PathBuf::from(home).join(".codex").join("skills"))
+}
+
+fn replace_existing_user_skill_dir(
+    skill_dir: &Path,
+    force: bool,
+) -> std::result::Result<(), CliError> {
+    let Ok(metadata) = fs::symlink_metadata(skill_dir) else {
+        return Ok(());
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(CliError::new(
+            EXIT_CONFLICT,
+            format!(
+                "Refusing to replace symlinked user-global skill path: {}",
+                skill_dir.display()
+            ),
+        ));
+    }
+    if !metadata.is_dir() {
+        return Err(CliError::new(
+            EXIT_CONFLICT,
+            format!(
+                "User-global skill path exists but is not a directory: {}",
+                skill_dir.display()
+            ),
+        ));
+    }
+    if !force {
+        return Err(CliError::new(
+            EXIT_CONFLICT,
+            format!(
+                "User-global skill already exists at {}. Rerun with --force to replace it.",
+                skill_dir.display()
+            ),
+        ));
+    }
+    fs::remove_dir_all(skill_dir).map_err(internal_error)
+}
+
+fn ensure_removable_user_skill_dir(skill_dir: &Path) -> std::result::Result<(), CliError> {
+    let metadata = fs::symlink_metadata(skill_dir).map_err(|_| {
+        CliError::new(
+            EXIT_STATE,
+            format!("User-global skill does not exist: {}", skill_dir.display()),
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(CliError::new(
+            EXIT_CONFLICT,
+            format!(
+                "Refusing to remove symlinked user-global skill path: {}",
+                skill_dir.display()
+            ),
+        ));
+    }
+    if !metadata.is_dir() || !skill_dir.join("SKILL.md").is_file() {
+        return Err(CliError::new(
+            EXIT_CONFLICT,
+            format!(
+                "Refusing to remove non-skill directory: {}",
+                skill_dir.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn discover_codex_skill_entries(root: &Path) -> Result<Vec<CodexSkillEntry>> {
+    let mut entries = Vec::new();
+    if !root.exists() {
+        return Ok(entries);
+    }
+    discover_codex_skill_entries_inner(root, &mut entries)?;
+    entries.sort_by(|left, right| left.name.cmp(&right.name).then(left.dir.cmp(&right.dir)));
+    Ok(entries)
+}
+
+fn discover_codex_skill_entries_inner(
+    dir: &Path,
+    entries: &mut Vec<CodexSkillEntry>,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if !metadata.is_dir() {
+            continue;
+        }
+        let skill_md = path.join("SKILL.md");
+        if skill_md.is_file() {
+            let name = read_skill_frontmatter(&skill_md)
+                .map(|frontmatter| frontmatter.name)
+                .unwrap_or_else(|_| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("unknown")
+                        .to_string()
+                });
+            entries.push(CodexSkillEntry {
+                name,
+                dir: path,
+                skill_md,
+            });
+        } else {
+            discover_codex_skill_entries_inner(&path, entries)?;
+        }
+    }
+    Ok(())
+}
+
+fn codex_skill_entry_json(entry: &CodexSkillEntry) -> Value {
+    json!({
+        "name": entry.name,
+        "path": entry.dir.to_string_lossy(),
+        "skill_md": entry.skill_md.to_string_lossy(),
+    })
+}
+
+fn codex_skill_visibility_json(project_root: &Path) -> Result<Value> {
+    let repo_root = project_root.join(".codex").join("skills");
+    let repo_entries = discover_codex_skill_entries(&repo_root)?;
+    let user_root = codex_user_skill_root();
+    let user_entries = match user_root.as_ref() {
+        Some(root) => discover_codex_skill_entries(root)?,
+        None => Vec::new(),
+    };
+    let user_names = user_entries
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let missing_user_global = repo_entries
+        .iter()
+        .filter(|entry| !user_names.contains(entry.name.as_str()))
+        .collect::<Vec<_>>();
+    let repo_skills = repo_entries
+        .iter()
+        .map(|entry| {
+            let user_path = user_root
+                .as_ref()
+                .map(|root| root.join(&entry.name).to_string_lossy().to_string());
+            json!({
+                "name": entry.name,
+                "repo_path": entry.dir.to_string_lossy(),
+                "skill_md": entry.skill_md.to_string_lossy(),
+                "user_global_path": user_path,
+                "user_global_installed": user_names.contains(entry.name.as_str()),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(json!({
+        "target": "codex-cli",
+        "repo_scope": "repo",
+        "repo_root": repo_root.to_string_lossy(),
+        "user_scope": "user",
+        "user_root": user_root.as_ref().map(|root| root.to_string_lossy().to_string()),
+        "repo_local_count": repo_entries.len(),
+        "user_global_count": user_entries.len(),
+        "missing_user_global_count": missing_user_global.len(),
+        "missing_user_global": missing_user_global.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>(),
+        "repo_local_skills": repo_skills,
+        "user_global_skills": user_entries.iter().map(codex_skill_entry_json).collect::<Vec<_>>(),
+        "install_command": "metactl skills add <skill-path> --scope user",
+        "scope_note": CODEX_SKILL_SCOPE_NOTE,
+    }))
+}
+
+fn append_codex_skill_visibility_lines(lines: &mut Vec<String>, visibility: &Value) {
+    let repo_count = visibility["repo_local_count"].as_u64().unwrap_or(0);
+    let user_count = visibility["user_global_count"].as_u64().unwrap_or(0);
+    let missing_count = visibility["missing_user_global_count"]
+        .as_u64()
+        .unwrap_or(0);
+    lines.push("  Codex skill visibility:".to_string());
+    lines.push(format!(
+        "    repo-local: {repo_count} skill(s) under {}",
+        visibility["repo_root"].as_str().unwrap_or(".codex/skills")
+    ));
+    lines.push(format!(
+        "    user-global: {user_count} skill(s) under {}",
+        visibility["user_root"].as_str().unwrap_or("HOME not set")
+    ));
+    if missing_count > 0 {
+        let missing = visibility["missing_user_global"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .unwrap_or_default();
+        lines.push(format!("    missing user-global: {missing}"));
+        lines.push("    next: metactl skills add <repo-skill-path> --scope user".to_string());
+    }
+    lines.push(format!("    note: {CODEX_SKILL_SCOPE_NOTE}"));
+}
+
+fn should_show_codex_skill_visibility(
+    context: &metactl::project::ProjectContext,
+    visibility: &Value,
+) -> bool {
+    context
+        .config_file
+        .targets
+        .iter()
+        .any(|target| target == "codex-cli")
+        || visibility["repo_local_count"].as_u64().unwrap_or(0) > 0
+        || visibility["user_global_count"].as_u64().unwrap_or(0) > 0
 }
 
 fn read_skill_frontmatter(path: &Path) -> Result<SkillFrontmatter> {
@@ -4628,6 +5143,7 @@ fn cmd_fleet_status(
             status["path"].as_str().unwrap_or("?")
         ));
     }
+    append_fleet_codex_skill_scope_note(&mut lines);
     Ok(CommandOutput {
         human: project_human_output(&controller.project_root, lines.join("\n")),
         json: success_json(
@@ -4637,6 +5153,7 @@ fn cmd_fleet_status(
                 "action": "status",
                 "controller": fleet_controller_json(&controller),
                 "projects": statuses,
+                "scope_note": CODEX_FLEET_SCOPE_NOTE,
             }),
         ),
     })
@@ -4680,6 +5197,7 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             result["status"] = json!("planned");
             result["result"] = json!("preview");
             result["planned_command"] = json!(fleet_sync_command_label(fleet_sync_adopt));
+            attach_codex_skill_visibility(&mut result, &project.path);
             results.push(result);
             continue;
         }
@@ -4704,6 +5222,7 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
                 result["message"] = json!(message);
             }
         }
+        attach_codex_skill_visibility(&mut result, &project.path);
         results.push(result);
     }
     if apply {
@@ -4724,6 +5243,7 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             item["path"].as_str().unwrap_or("?")
         ));
     }
+    append_fleet_codex_skill_scope_note(&mut lines);
     let mut json_payload = success_json(
         "fleet",
         Some(&controller.project_root),
@@ -4732,6 +5252,7 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             "controller": fleet_controller_json(&controller),
             "preview": !apply,
             "projects": results,
+            "scope_note": CODEX_FLEET_SCOPE_NOTE,
         }),
     );
     if failed {
@@ -5082,6 +5603,7 @@ fn fleet_project_status_json(project: &LinkedProject) -> Value {
                 value["fleet_sync_adopt"] = json!(fleet_sync_adopt_label(fleet_sync_adopt));
                 value["needs_sync"] =
                     json!(context.lock.targets.is_empty() || value["lock_stale"] == true);
+                attach_codex_skill_visibility(&mut value, &project.path);
             }
             Err(err) => {
                 value["status"] = json!("invalid_config");
@@ -5095,6 +5617,17 @@ fn fleet_project_status_json(project: &LinkedProject) -> Value {
         }
     }
     value
+}
+
+fn attach_codex_skill_visibility(value: &mut Value, project_root: &Path) {
+    if let Ok(visibility) = codex_skill_visibility_json(project_root) {
+        value["skill_visibility"] = visibility;
+    }
+}
+
+fn append_fleet_codex_skill_scope_note(lines: &mut Vec<String>) {
+    lines.push(format!("  Codex skill scope: {CODEX_FLEET_SCOPE_NOTE}"));
+    lines.push("  next: metactl skills add <repo-skill-path> --scope user".to_string());
 }
 
 fn linked_project_status_label(status: LinkedProjectStatus) -> &'static str {
@@ -5256,6 +5789,8 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         source_state["state"] = json!("private_source_leak_risk");
         source_state["findings"] = json!(source_audit_findings);
     }
+    let codex_skill_visibility =
+        codex_skill_visibility_json(&project_root).map_err(internal_error)?;
 
     let targets = if let Some(target_id) = args.target.as_ref() {
         select_locked_targets(&context.lock, Some(target_id.clone())).unwrap_or_default()
@@ -5485,6 +6020,10 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         }
     }
 
+    if should_show_codex_skill_visibility(&context, &codex_skill_visibility) {
+        append_codex_skill_visibility_lines(&mut lines, &codex_skill_visibility);
+    }
+
     if targets.is_empty() {
         lines.push("  Applied: (none — run `metactl sync` to compile and apply)".to_string());
     } else {
@@ -5546,6 +6085,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                     "auto_discovered": import_roots.len(),
                 },
                 "source_state": source_state,
+                "skill_visibility": codex_skill_visibility,
                 "applied_targets": applied_targets,
                 "surface_mode_mismatches": surface_mode_mismatches,
                 "needs_sync": needs_sync,

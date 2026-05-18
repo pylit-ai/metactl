@@ -430,6 +430,124 @@ Run release verification and produce a handoff.
 }
 
 #[test]
+fn cli_skills_add_list_remove_user_global_codex_skill() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let skill_root = project.path().join("release-manager");
+    fs::create_dir_all(&skill_root).expect("skill dir");
+    fs::write(
+        skill_root.join("SKILL.md"),
+        r#"---
+name: release-manager
+description: Portable release manager skill for verification handoffs.
+---
+
+# Release Manager
+
+Run release verification and produce a handoff.
+"#,
+    )
+    .expect("write skill");
+
+    let add = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+            "--scope",
+            "user",
+        ],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+    let add_json = json_output(&add);
+    assert_json_contract(&add_json, "skills", Some(project.path()));
+    assert_eq!(add_json["action"], json!("add"));
+    assert_eq!(add_json["scope"], json!("user"));
+    assert_eq!(add_json["skill"]["name"], json!("release-manager"));
+    assert!(project
+        .path()
+        .join(".test-home/.codex/skills/release-manager/SKILL.md")
+        .exists());
+
+    let list = run_cli(
+        project.path(),
+        &["--json", "skills", "list", "--scope", "user"],
+    );
+    assert!(list.status.success(), "{}", stderr(&list));
+    let list_json = json_output(&list);
+    assert_json_contract(&list_json, "skills", Some(project.path()));
+    assert_eq!(list_json["action"], json!("list"));
+    assert_eq!(list_json["count"], json!(1));
+    assert_eq!(list_json["skills"][0]["name"], json!("release-manager"));
+
+    let remove = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "remove",
+            "release-manager",
+            "--scope",
+            "user",
+        ],
+    );
+    assert!(remove.status.success(), "{}", stderr(&remove));
+    let remove_json = json_output(&remove);
+    assert_json_contract(&remove_json, "skills", Some(project.path()));
+    assert_eq!(remove_json["action"], json!("remove"));
+    assert!(!project
+        .path()
+        .join(".test-home/.codex/skills/release-manager")
+        .exists());
+}
+
+#[test]
+fn status_reports_codex_skill_visibility_scopes() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let repo_skill_root = project
+        .path()
+        .join(".codex/skills/team-pack/release-manager");
+    fs::create_dir_all(&repo_skill_root).expect("repo skill dir");
+    fs::write(
+        repo_skill_root.join("SKILL.md"),
+        r#"---
+name: release-manager
+description: Portable release manager skill for verification handoffs.
+---
+
+# Release Manager
+"#,
+    )
+    .expect("write repo skill");
+
+    let status = run_cli(project.path(), &["--json", "status"]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    let json = json_output(&status);
+    assert_json_contract(&json, "status", Some(project.path()));
+    assert_eq!(json["skill_visibility"]["target"], json!("codex-cli"));
+    assert_eq!(json["skill_visibility"]["repo_local_count"], json!(1));
+    assert_eq!(
+        json["skill_visibility"]["missing_user_global_count"],
+        json!(1)
+    );
+    assert_eq!(
+        json["skill_visibility"]["repo_local_skills"][0]["user_global_installed"],
+        json!(false)
+    );
+
+    let human = run_cli(project.path(), &["status"]);
+    assert!(human.status.success(), "{}", stderr(&human));
+    let text = stdout(&human);
+    assert!(text.contains("Codex skill visibility:"));
+    assert!(text.contains("repo-local: 1 skill(s)"));
+    assert!(text.contains("user-global: 0 skill(s)"));
+    assert!(text.contains("metactl skills add <repo-skill-path> --scope user"));
+}
+
+#[test]
 fn cli_pack_import_skill_rejects_unsafe_agent_skill_fixtures() {
     let project = TempDir::new().expect("tempdir");
 
@@ -2075,11 +2193,23 @@ fn fleet_sync_preview_does_not_mutate_linked_project() {
     assert_eq!(json["preview"], true);
     assert_eq!(json["projects"][0]["id"], "ready");
     assert_eq!(json["projects"][0]["status"], "planned");
+    assert_eq!(
+        json["scope_note"],
+        "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills."
+    );
+    assert_eq!(
+        json["projects"][0]["skill_visibility"]["target"],
+        "codex-cli"
+    );
     assert!(!ready.path().join("AGENTS.md").exists());
     assert!(!ready
         .path()
         .join(".metactl/generated/codex-cli/AGENTS.md")
         .exists());
+
+    let human = run_cli(project.path(), &["fleet", "sync", "--preview"]);
+    assert!(human.status.success(), "{}", stderr(&human));
+    assert!(stdout(&human).contains("Fleet sync updates repo-local .codex/skills"));
 }
 
 #[test]

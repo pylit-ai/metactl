@@ -124,6 +124,22 @@ metactl --yes --no-input fleet sync --apply
 
 Fleet apply refuses dirty Git worktrees by default. Use `--allow-dirty` only after review.
 
+Fleet apply updates repo-local generated surfaces in linked projects, including `.codex/skills/...` for Codex CLI targets. It does not install those skills into the user-global Personal picker source under `~/.codex/skills`.
+
+After a Fleet apply, inspect skill scope explicitly:
+
+```bash
+metactl fleet status
+metactl skills list --scope repo
+metactl skills list --scope user
+```
+
+Install an operator-facing repo skill globally only when that is intended:
+
+```bash
+metactl skills add <repo-skill-path> --scope user
+```
+
 ## Machine Output
 
 `--json` includes the resolved controller:
