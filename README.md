@@ -6,13 +6,13 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current crate version: `0.1.12`
+Current crate version: `0.1.13`
 
 `metactl` is a local control plane for agent instructions. It compiles reusable roles, packs, policies, and targets into reviewable tool-specific files for Codex CLI, Claude Code, Cursor, Gemini CLI, OpenClaw, filesystem agents, and local MCP/JSON-RPC clients.
 
 ![metactl quickstart terminal demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/quickstart-hero.gif)
 
-More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md). Codex and Claude plugin marketplace export is covered in [docs/user/PLUGIN_MARKETPLACES.md](docs/user/PLUGIN_MARKETPLACES.md).
+[MP4](docs/assets/demos/quickstart-hero.mp4) / [WebM](docs/assets/demos/quickstart-hero.webm). More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md). Codex and Claude plugin marketplace export is covered in [docs/user/PLUGIN_MARKETPLACES.md](docs/user/PLUGIN_MARKETPLACES.md).
 
 <!-- TODO: Add public architecture diagram for CLI -> reference kernel -> target adapters once the API surface stabilizes. -->
 
@@ -56,9 +56,9 @@ Modern coding agents read different files, directories, skill formats, and rule 
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.12 --locked
+cargo install metactl --version 0.1.13 --locked
 metactl version
-# metactl 0.1.12 (metactl/v2alpha1)
+# metactl 0.1.13 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -106,7 +106,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.12 (metactl/v2alpha1)
+# metactl 0.1.13 (metactl/v2alpha1)
 ```
 
 </details>
@@ -117,9 +117,9 @@ metactl version
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.12 --locked
+cargo install metactld --version 0.1.13 --locked
 metactld --version
-# metactld 0.1.12
+# metactld 0.1.13
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -157,9 +157,11 @@ Success signal: `status` reports `Execution readiness: ready`, `sync` compiles a
 > ```
 
 <details>
-<summary>Watch search and activation</summary>
+<summary>Watch native agent surfaces after sync</summary>
 
-![metactl search and activate demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/search-use-sync.gif)
+![metactl native agent surfaces demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/agent-native-surfaces.gif)
+
+[MP4](docs/assets/demos/agent-native-surfaces.mp4) / [WebM](docs/assets/demos/agent-native-surfaces.webm)
 
 </details>
 
@@ -393,13 +395,6 @@ Fleet Sync updates repo-local generated surfaces in linked projects. It does not
 > ```
 
 <details>
-<summary>Watch Fleet Sync preview</summary>
-
-![metactl fleet preview demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/fleet-preview.gif)
-
-</details>
-
-<details>
 <summary>Controller setup</summary>
 
 Create a controller, select it, and link projects deliberately:
@@ -559,7 +554,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.12` for both `metactl` and `metactld`.
+Current public crate version: `0.1.13` for both `metactl` and `metactld`.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 
