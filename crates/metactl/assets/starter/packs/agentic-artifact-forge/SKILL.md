@@ -9,6 +9,10 @@ Use this skill to convert source instructions into the smallest useful set of Me
 
 The core job is preservation first, projection second. Treat the source as evidence, not raw material to paraphrase away.
 
+If the requested artifact is not explicitly repo-only and meant to be versioned
+only in the current repository, use metactl as the canonical authoring and sync
+path before editing target-native agent folders.
+
 ## Inputs
 
 Accept any of these:

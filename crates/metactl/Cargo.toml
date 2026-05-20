@@ -1,6 +1,6 @@
 [package]
 name = "metactl"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 authors = ["metactl contributors"]
 description = "metactl v2 reference kernel and JSON-RPC service"

@@ -535,6 +535,7 @@ fn setup_plan_json_has_replayable_commands() {
     let value = json_output(&output);
     assert_json_contract(&value, "setup", Some(project.path()));
     assert_eq!(value["plan"], json!(true));
+    assert_eq!(value["artifact_policy"], json!("portable-first"));
     assert!(value["next_commands"]
         .as_array()
         .expect("next commands")
@@ -543,6 +544,13 @@ fn setup_plan_json_has_replayable_commands() {
             .as_str()
             .unwrap_or("")
             .contains("metactl setup --target codex-cli --yes")));
+    assert!(value["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .any(|item| item["kind"] == "agent-artifacts"
+            && item["policy"] == "portable-first"
+            && item["pack"] == "agentic-artifact-forge"));
     assert!(!project.path().join("metactl.yaml").exists());
 }
 
@@ -568,7 +576,12 @@ fn setup_yes_with_explicit_target_creates_config_without_sync() {
     let value = json_output(&output);
     assert_json_contract(&value, "setup", Some(project.path()));
     assert_eq!(value["ran_sync"], json!(false));
+    assert_eq!(value["artifact_policy"], json!("portable-first"));
     assert!(project.path().join("metactl.yaml").exists());
+    let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("config");
+    assert!(config.contains("agent_artifact_policy"));
+    assert!(config.contains("portable-first"));
+    assert!(config.contains("agentic-artifact-forge"));
     assert!(!project.path().join(".codex").exists());
 }
 
@@ -587,6 +600,30 @@ fn setup_existing_config_preserves_targets() {
     let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("config");
     assert!(config.contains("codex-cli"));
     assert!(!config.contains("gemini-cli"));
+}
+
+#[test]
+fn setup_existing_config_explicit_artifact_policy_updates_config() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let output = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "setup",
+            "--artifact-policy",
+            "portable-first",
+            "--yes",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_eq!(value["already_configured"], json!(true));
+    assert_eq!(value["artifact_policy"], json!("portable-first"));
+    let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("config");
+    assert!(config.contains("agent_artifact_policy"));
+    assert!(config.contains("agentic-artifact-forge"));
 }
 
 #[test]
@@ -807,7 +844,11 @@ Run release verification and produce a handoff.
 #[test]
 fn status_reports_codex_skill_visibility_scopes() {
     let project = TempDir::new().expect("tempdir");
-    init_project(project.path());
+    let setup = run_cli(
+        project.path(),
+        &["--json", "setup", "--target", "codex-cli", "--yes"],
+    );
+    assert!(setup.status.success(), "{}", stderr(&setup));
     let repo_skill_root = project
         .path()
         .join(".codex/skills/team-pack/release-manager");
@@ -829,6 +870,14 @@ description: Portable release manager skill for verification handoffs.
     let json = json_output(&status);
     assert_json_contract(&json, "status", Some(project.path()));
     assert_eq!(json["skill_visibility"]["target"], json!("codex-cli"));
+    assert_eq!(
+        json["agent_artifact_policy"]["policy"],
+        json!("portable-first")
+    );
+    assert_eq!(
+        json["agent_artifact_policy"]["stewardship_pack_configured"],
+        json!(true)
+    );
     assert_eq!(json["skill_visibility"]["repo_local_count"], json!(1));
     assert_eq!(
         json["skill_visibility"]["missing_user_global_count"],
@@ -843,6 +892,8 @@ description: Portable release manager skill for verification handoffs.
     assert!(human.status.success(), "{}", stderr(&human));
     let text = stdout(&human);
     assert!(text.contains("Codex skill visibility:"));
+    assert!(text.contains("Agent artifact stewardship:"));
+    assert!(text.contains("policy: portable-first"));
     assert!(text.contains("repo-local: 1 skill(s)"));
     assert!(text.contains("user-global: 0 skill(s)"));
     assert!(text.contains("metactl skills add <repo-skill-path> --scope user"));

@@ -74,12 +74,20 @@ metactl --agent validate
 
 ## Guided Setup And Repair
 
-Use `setup --plan` when the repo is new to metactl or when an agent needs a
-machine-readable first step:
+Humans can start with the simple setup front door:
+
+```bash
+metactl setup
+```
+
+For new projects, setup records portable agent artifact stewardship so reusable
+skills, rules, commands, prompts, and workflows route through metactl.
+
+Use `setup --plan` when an agent needs a machine-readable first step:
 
 ```bash
 metactl setup --plan
-metactl setup --target codex-cli --yes
+metactl setup --target codex-cli --artifact-policy portable-first --yes
 metactl ignore fix --plan
 ```
 

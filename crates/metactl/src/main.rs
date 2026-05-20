@@ -14,10 +14,10 @@ use metactl::project::{
     current_local_config_digest, current_overlay_digest, default_project_config,
     detect_brownfield_repo, digest_path, ensure_bundled_starter_library_root,
     ensure_gitignore_entries, ensure_project_layout, is_candidate_pack, list_user_profiles,
-    load_compile_manifest, load_partial_project_config, load_policy_report, load_profile_partial,
-    load_project_context, load_user_settings, metactl_user_config_dir, policy_report_path,
-    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
-    project_config_path, project_lock_path, resolve_profile_name_for_init,
+    load_compile_manifest, load_lock, load_partial_project_config, load_policy_report,
+    load_profile_partial, load_project_context, load_user_settings, metactl_user_config_dir,
+    policy_report_path, preferred_apply_mode_for_target, private_source_lock_path, profile_path,
+    profiles_directory, project_config_path, project_lock_path, resolve_profile_name_for_init,
     resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
     update_managed_files_index, user_settings_path, write_lock, write_partial_project_config,
     write_policy_report, write_private_source_lock, write_project_config, ConfigOverrides,
@@ -45,11 +45,14 @@ const EXIT_VALIDATION: u8 = 13;
 
 const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills under .codex/skills are visible to Codex sessions opened in that repository. User-global Personal skills live under ~/.codex/skills.";
 const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills.";
+const AGENT_ARTIFACT_POLICY_METADATA_KEY: &str = "agent_artifact_policy";
+const AGENT_ARTIFACT_STEWARDSHIP_PACK: &str = "agentic-artifact-forge";
 
 const WORKFLOW_HELP: &str = "\
 Quick start:
-  metactl setup --plan            # inspect guided setup and equivalent commands
-  metactl setup -t codex-cli -y   # create config for an explicit target, without sync
+  metactl setup                  # human-friendly setup
+  metactl setup --plan            # inspect equivalent commands without writing
+  metactl setup -t codex-cli --artifact-policy portable-first -y
   metactl init -t claude-code        # scaffold a project for Claude Code
   metactl init -t all                # scaffold for every starter-supported target
   metactl init --detect              # detect targets from existing repo surfaces
@@ -303,6 +306,33 @@ enum IgnoreScopeArg {
     Both,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ArtifactPolicyArg {
+    Off,
+    RepoOnly,
+    PortableFirst,
+}
+
+impl ArtifactPolicyArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            ArtifactPolicyArg::Off => "off",
+            ArtifactPolicyArg::RepoOnly => "repo-only",
+            ArtifactPolicyArg::PortableFirst => "portable-first",
+        }
+    }
+
+    fn summary(self) -> &'static str {
+        match self {
+            ArtifactPolicyArg::Off => "do not add agent artifact stewardship",
+            ArtifactPolicyArg::RepoOnly => "record repo-only agent artifact stewardship",
+            ArtifactPolicyArg::PortableFirst => {
+                "add portable agent artifact stewardship with the agentic-artifact-forge pack"
+            }
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 enum HookCommand {
     /// Install git hooks for automatic sync
@@ -508,6 +538,9 @@ struct SetupArgs {
     /// Record the active machine-default profile in metactl.yaml as extends_profile
     #[arg(long)]
     bind_profile: bool,
+    /// Agent artifact stewardship policy for skills, rules, commands, prompts, and workflows
+    #[arg(long, value_enum)]
+    artifact_policy: Option<ArtifactPolicyArg>,
     /// Starter library or source roots to make explicit in the setup command
     #[arg(long = "source", value_name = "PATH")]
     source: Vec<PathBuf>,
@@ -3076,6 +3109,52 @@ fn should_show_codex_skill_visibility(
         || visibility["user_global_count"].as_u64().unwrap_or(0) > 0
 }
 
+fn agent_artifact_policy_json(config: &ProjectConfigFile) -> Value {
+    let policy = config
+        .metadata
+        .get(AGENT_ARTIFACT_POLICY_METADATA_KEY)
+        .map(String::as_str)
+        .unwrap_or("not-configured");
+    let stewardship_pack_configured = config
+        .packs
+        .iter()
+        .any(|pack| pack == AGENT_ARTIFACT_STEWARDSHIP_PACK);
+    json!({
+        "policy": policy,
+        "metadata_key": AGENT_ARTIFACT_POLICY_METADATA_KEY,
+        "stewardship_pack": AGENT_ARTIFACT_STEWARDSHIP_PACK,
+        "stewardship_pack_configured": stewardship_pack_configured,
+    })
+}
+
+fn append_agent_artifact_policy_lines(lines: &mut Vec<String>, policy: &Value) {
+    let policy_name = policy["policy"].as_str().unwrap_or("not-configured");
+    let pack_configured = policy["stewardship_pack_configured"]
+        .as_bool()
+        .unwrap_or(false);
+    if policy_name == "not-configured" && !pack_configured {
+        return;
+    }
+    lines.push("  Agent artifact stewardship:".to_string());
+    lines.push(format!("    policy: {policy_name}"));
+    lines.push(format!(
+        "    portable pack: {}{}",
+        policy["stewardship_pack"]
+            .as_str()
+            .unwrap_or(AGENT_ARTIFACT_STEWARDSHIP_PACK),
+        if pack_configured {
+            " (configured)"
+        } else {
+            " (not configured)"
+        }
+    ));
+    if policy_name == "portable-first" && !pack_configured {
+        lines.push(format!(
+            "    next: metactl add {AGENT_ARTIFACT_STEWARDSHIP_PACK} --sync"
+        ));
+    }
+}
+
 fn read_skill_frontmatter(path: &Path) -> Result<SkillFrontmatter> {
     let body = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
     let mut lines = body.lines();
@@ -3581,9 +3660,19 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
     } else {
         None
     };
-    let targets = setup_targets(&project_root, args, existing_config.as_ref())?;
+    let mut targets = setup_targets(&project_root, args, existing_config.as_ref())?;
+    if targets.is_empty() && !cli.no_input_enabled() && io::stdin().is_terminal() {
+        targets.push("codex-cli".to_string());
+    }
+    let artifact_policy = setup_artifact_policy(args, existing_config.is_some());
     let next_commands = setup_next_commands(args, &targets);
-    let actions = setup_actions(args, &config_path, &targets, existing_config.is_some());
+    let actions = setup_actions(
+        args,
+        &config_path,
+        &targets,
+        existing_config.is_some(),
+        artifact_policy,
+    );
 
     if args.plan {
         let mut lines = vec!["Setup plan:".to_string()];
@@ -3611,6 +3700,7 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
                     })).collect::<Vec<_>>(),
                     "targets": targets,
                     "profile_template": args.profile_template.clone(),
+                    "artifact_policy": artifact_policy.as_str(),
                     "actions": actions,
                     "next_commands": next_commands,
                 }),
@@ -3620,6 +3710,45 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
 
     if let Some(existing) = existing_config {
         let existing_targets = existing.targets.clone();
+        if args.artifact_policy.is_some() {
+            if (cli.no_input_enabled() || !io::stdin().is_terminal()) && !args.yes {
+                let mut err = CliError::new(
+                    EXIT_STATE,
+                    "Non-interactive setup requires --yes before updating agent artifact policy.",
+                )
+                .with_details(next_commands.clone());
+                if let Some(obj) = err.json.as_object_mut() {
+                    obj.insert("code".to_string(), json!("setup_confirmation_required"));
+                    obj.insert("category".to_string(), json!("project_state"));
+                    obj.insert("next_commands".to_string(), json!(next_commands));
+                }
+                return Err(err);
+            }
+            let artifact_report =
+                apply_setup_artifact_policy(&project_root, &config_path, artifact_policy)?;
+            return Ok(CommandOutput {
+                human: project_human_output(
+                    &project_root,
+                    format!(
+                        "Setup updated.\nArtifact policy: {}\nNext: metactl sync --preview",
+                        artifact_policy.as_str()
+                    ),
+                ),
+                json: success_json(
+                    "setup",
+                    Some(&project_root),
+                    json!({
+                        "applied": true,
+                        "already_configured": true,
+                        "config_path": config_path,
+                        "targets": existing_targets,
+                        "artifact_policy": artifact_policy.as_str(),
+                        "artifact_policy_update": artifact_report,
+                        "next_commands": ["metactl sync --preview", "metactl status"],
+                    }),
+                ),
+            });
+        }
         return Ok(CommandOutput {
             human: project_human_output(
                 &project_root,
@@ -3641,6 +3770,7 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
                     "already_configured": true,
                     "config_path": config_path,
                     "targets": existing_targets,
+                    "artifact_policy": existing.metadata.get(AGENT_ARTIFACT_POLICY_METADATA_KEY).cloned().unwrap_or_else(|| "not-configured".to_string()),
                     "next_commands": ["metactl status", "metactl setup --plan"],
                 }),
             ),
@@ -3685,7 +3815,15 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
         bind_profile: args.bind_profile,
     };
     let init_output = cmd_init(cli, &init_args)?;
+    let artifact_report =
+        apply_setup_artifact_policy(&project_root, &config_path, artifact_policy)?;
     let mut lines = vec!["Setup applied.".to_string(), init_output.human];
+    if artifact_policy != ArtifactPolicyArg::Off {
+        lines.push(format!(
+            "Portable agent artifacts: {}.",
+            artifact_policy.as_str()
+        ));
+    }
     lines.push("Next: metactl ignore fix --plan".to_string());
 
     Ok(CommandOutput {
@@ -3699,6 +3837,8 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
                 "targets": targets,
                 "ran_sync": false,
                 "init": init_output.json,
+                "artifact_policy": artifact_policy.as_str(),
+                "artifact_policy_update": artifact_report,
                 "next_commands": next_commands,
             }),
         ),
@@ -3760,12 +3900,24 @@ fn setup_next_commands(args: &SetupArgs, targets: &[String]) -> Vec<String> {
     if args.include_lock {
         ignore_fix.push_str(" --include-lock");
     }
+    let artifact_arg = args
+        .artifact_policy
+        .map(|policy| format!(" --artifact-policy {}", policy.as_str()))
+        .unwrap_or_default();
     vec![
-        format!("metactl setup{target_arg} --yes"),
-        format!("metactl setup{target_arg} --plan"),
+        format!("metactl setup{target_arg}{artifact_arg} --yes"),
+        format!("metactl setup{target_arg}{artifact_arg} --plan"),
         ignore_fix,
         "metactl sync --preview".to_string(),
     ]
+}
+
+fn setup_artifact_policy(args: &SetupArgs, already_configured: bool) -> ArtifactPolicyArg {
+    args.artifact_policy.unwrap_or(if already_configured {
+        ArtifactPolicyArg::Off
+    } else {
+        ArtifactPolicyArg::PortableFirst
+    })
 }
 
 fn setup_actions(
@@ -3773,8 +3925,9 @@ fn setup_actions(
     config_path: &Path,
     targets: &[String],
     already_configured: bool,
+    artifact_policy: ArtifactPolicyArg,
 ) -> Vec<Value> {
-    vec![
+    let mut actions = vec![
         json!({
             "kind": "config",
             "path": config_path,
@@ -3792,7 +3945,63 @@ fn setup_actions(
             "include_private_sources": args.include_private_sources,
             "include_lock": args.include_lock,
         }),
-    ]
+    ];
+    actions.push(json!({
+        "kind": "agent-artifacts",
+        "summary": artifact_policy.summary(),
+        "policy": artifact_policy.as_str(),
+        "pack": if artifact_policy == ArtifactPolicyArg::PortableFirst {
+            Value::String(AGENT_ARTIFACT_STEWARDSHIP_PACK.to_string())
+        } else {
+            Value::Null
+        },
+    }));
+    actions
+}
+
+fn apply_setup_artifact_policy(
+    project_root: &Path,
+    config_path: &Path,
+    artifact_policy: ArtifactPolicyArg,
+) -> std::result::Result<Value, CliError> {
+    let mut config = load_partial_project_config(config_path).map_err(state_error)?;
+    let mut packs_changed = false;
+
+    config.metadata.insert(
+        AGENT_ARTIFACT_POLICY_METADATA_KEY.to_string(),
+        artifact_policy.as_str().to_string(),
+    );
+
+    if artifact_policy == ArtifactPolicyArg::PortableFirst
+        && !config
+            .packs
+            .iter()
+            .any(|pack| pack == AGENT_ARTIFACT_STEWARDSHIP_PACK)
+    {
+        config
+            .packs
+            .push(AGENT_ARTIFACT_STEWARDSHIP_PACK.to_string());
+        packs_changed = true;
+    }
+
+    write_partial_project_config(config_path, &config).map_err(internal_error)?;
+    let lock_path = project_lock_path(project_root);
+    if lock_path.exists() {
+        let mut lock = load_lock(&lock_path).map_err(internal_error)?;
+        lock.config_digest = Some(digest_path(config_path).map_err(internal_error)?);
+        lock.updated_at = Some(now_string());
+        write_lock(&lock_path, &lock).map_err(internal_error)?;
+    }
+
+    Ok(json!({
+        "policy": artifact_policy.as_str(),
+        "metadata_key": AGENT_ARTIFACT_POLICY_METADATA_KEY,
+        "added_pack": if packs_changed {
+            Value::String(AGENT_ARTIFACT_STEWARDSHIP_PACK.to_string())
+        } else {
+            Value::Null
+        },
+    }))
 }
 
 fn cmd_library(cli: &Cli, args: &LibraryArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -6096,6 +6305,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     }
     let codex_skill_visibility =
         codex_skill_visibility_json(&project_root).map_err(internal_error)?;
+    let agent_artifact_policy = agent_artifact_policy_json(&context.config_file);
 
     let targets = if let Some(target_id) = args.target.as_ref() {
         select_locked_targets(&context.lock, Some(target_id.clone())).unwrap_or_default()
@@ -6329,6 +6539,8 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         append_codex_skill_visibility_lines(&mut lines, &codex_skill_visibility);
     }
 
+    append_agent_artifact_policy_lines(&mut lines, &agent_artifact_policy);
+
     if targets.is_empty() {
         lines.push("  Applied: (none — run `metactl sync` to compile and apply)".to_string());
     } else {
@@ -6391,6 +6603,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 },
                 "source_state": source_state,
                 "skill_visibility": codex_skill_visibility,
+                "agent_artifact_policy": agent_artifact_policy,
                 "applied_targets": applied_targets,
                 "surface_mode_mismatches": surface_mode_mismatches,
                 "needs_sync": needs_sync,
