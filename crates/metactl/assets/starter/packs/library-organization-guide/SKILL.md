@@ -1,6 +1,6 @@
 ---
 name: library-organization-guide
-description: Use when curating a metactl library, starter pack set, or profile stack and deciding how to cluster artifacts without bloating default context.
+description: Use when curating a metactl library, starter pack set, profile stack, project profile binding, or local override path without bloating default context.
 ---
 
 # metactl Library Steward

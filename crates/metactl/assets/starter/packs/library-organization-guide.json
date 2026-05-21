@@ -3,7 +3,7 @@
   "id": "library-organization-guide",
   "version": "1.0.0",
   "title": "metactl Library Steward",
-  "description": "Guide for organizing metactl artifacts into packs and profiles and managing the right config layer for each change.",
+  "description": "Guide for organizing metactl artifacts into packs and profiles, binding project profiles, managing local overrides, and choosing the right config layer for each change.",
   "activation_class": "instruction",
   "side_effect_class": "none",
   "trust_tier": "first_party_validated",
@@ -13,6 +13,8 @@
     "library",
     "organization",
     "profiles",
+    "profile-binding",
+    "local-overrides",
     "authoring"
   ],
   "compatible_roles": [
