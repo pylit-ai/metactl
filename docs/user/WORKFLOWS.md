@@ -91,6 +91,24 @@ metactl setup --target codex-cli --artifact-policy portable-first --yes
 metactl ignore fix --plan
 ```
 
+Setup recommends report-only background surface refreshes by default. Install
+the OS scheduler explicitly when that machine should keep recommendations warm:
+
+```bash
+metactl background plan --scope project
+metactl background install --scope project --yes
+metactl background status --scope project
+```
+
+For one confirmed setup flow:
+
+```bash
+metactl setup --target codex-cli --artifact-policy portable-first --install-background --yes
+```
+
+Use `metactl setup --no-background` to omit that recommendation from setup
+plans.
+
 The raw equivalent for `setup --target codex-cli --yes` is still `init`:
 
 ```bash

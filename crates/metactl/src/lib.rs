@@ -9,6 +9,7 @@ pub mod plugin_projection;
 pub mod project;
 pub mod reference_kernel;
 pub mod suite_registry;
+pub mod surface_usage;
 pub mod types;
 
 pub use fixture_kernel::{FixtureKernel, FixtureSuite};

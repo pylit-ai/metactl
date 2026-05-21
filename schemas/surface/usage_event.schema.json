@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pylit.ai/metactl/schemas/surface/usage_event.schema.json",
+  "title": "metactl surface usage event",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["event_kind"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "event_id": { "type": "string" },
+    "recorded_at": { "type": "string" },
+    "event_kind": {
+      "type": "string",
+      "enum": [
+        "command_invoked",
+        "skill_body_read",
+        "pack_resolved",
+        "search_result_selected",
+        "task_verified",
+        "correction_or_retry",
+        "dismissed_or_abandoned",
+        "blocked_or_rejected"
+      ]
+    },
+    "pack_id": { "type": "string" },
+    "pack_ref": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "kind": { "type": "string" },
+            "id": { "type": "string" },
+            "version": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "resource_ref": { "type": "object" },
+    "target_id": { "type": "string" },
+    "client_kind": { "type": "string" },
+    "activation_cause": { "type": "string" },
+    "trust_tier": { "type": "string" },
+    "confirmation_status": { "type": "string" },
+    "trace_id": { "type": "string" },
+    "resource_digest": { "type": "string" },
+    "outcome_kind": {
+      "type": "string",
+      "enum": ["unknown", "succeeded", "failed", "abandoned", "dismissed", "corrected", "verified"]
+    },
+    "reason_code": { "type": "string" },
+    "next_action": { "type": "string" }
+  },
+  "not": {
+    "anyOf": [
+      { "required": ["raw_prompt"] },
+      { "required": ["secret"] },
+      { "required": ["file_contents"] }
+    ]
+  }
+}

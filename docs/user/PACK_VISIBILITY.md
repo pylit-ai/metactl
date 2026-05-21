@@ -58,3 +58,67 @@ Replace an existing user-global copy after review:
 ```bash
 metactl skills add <repo-skill-path> --scope user --force
 ```
+
+## Automatic Surface Recommendations
+
+`surface_selection_mode: auto` separates recommendation from mutation.
+
+Recommended lifecycle:
+
+1. Usage events append to `.metactl/usage/events.jsonl`.
+2. `metactl stats rebuild` creates `.metactl/usage/stats.json`.
+3. `metactl surface report` writes:
+   - `reports/surfaces/latest.json`
+   - `docs/status/surfaces/dashboard.md`
+4. `metactl sync --surface-mode auto --preview` shows adapter changes.
+5. `metactl sync --surface-mode auto --apply` applies reviewed changes.
+
+Scheduled runs should use `metactl surface report --scheduled`. That command is report-only by default: it rebuilds recommendations and writes status artifacts, but it does not rewrite agent adapters.
+
+### Background Installation
+
+Use `metactl background` for unattended report refreshes. It generates and
+installs the native user-level scheduler for the current OS:
+
+| OS | Scheduler |
+| --- | --- |
+| macOS | LaunchAgent |
+| Linux | systemd user timer |
+| Windows | Scheduled Task |
+
+The installed job runs `metactl background run`, which remains report-only. It
+does not run `sync --apply`, rewrite adapters, or install user-global skills.
+
+```bash
+metactl background plan --scope project
+metactl background install --scope project --yes
+metactl background status --scope project
+metactl background uninstall --scope project --yes
+```
+
+`setup --plan` recommends the background refresh by default because fresh
+recommendations improve UX without mutating adapters. The persistent scheduler
+still requires explicit confirmation:
+
+```bash
+metactl setup --target codex-cli --install-background --yes
+metactl setup --target codex-cli --no-background --yes
+```
+
+For a Fleet, install the same scheduler against the Fleet controller:
+
+```bash
+metactl --project /path/to/fleet-controller background plan --scope fleet
+metactl --project /path/to/fleet-controller background install --scope fleet --yes
+```
+
+Manual overrides:
+
+```bash
+metactl surface pin python-refactor
+metactl surface pin python-refactor --command
+metactl surface block risky-pack
+metactl surface reset python-refactor
+```
+
+Use `pin` when operator judgment is stronger than local usage evidence. Use `block` when a pack should not be surfaced even if it has recent events.

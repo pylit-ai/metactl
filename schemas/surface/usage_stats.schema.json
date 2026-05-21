@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pylit.ai/metactl/schemas/surface/usage_stats.schema.json",
+  "title": "metactl surface usage stats",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "generated_at", "source_path", "event_count", "packs"],
+  "properties": {
+    "api_version": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "source_path": { "type": "string" },
+    "event_count": { "type": "integer", "minimum": 0 },
+    "packs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "pack_id",
+          "command_invoked",
+          "skill_body_read",
+          "pack_resolved",
+          "search_result_selected",
+          "task_verified",
+          "correction_or_retry",
+          "dismissed_or_abandoned",
+          "blocked_or_rejected",
+          "event_count",
+          "score"
+        ],
+        "properties": {
+          "pack_id": { "type": "string" },
+          "command_invoked": { "type": "integer", "minimum": 0 },
+          "skill_body_read": { "type": "integer", "minimum": 0 },
+          "pack_resolved": { "type": "integer", "minimum": 0 },
+          "search_result_selected": { "type": "integer", "minimum": 0 },
+          "task_verified": { "type": "integer", "minimum": 0 },
+          "correction_or_retry": { "type": "integer", "minimum": 0 },
+          "dismissed_or_abandoned": { "type": "integer", "minimum": 0 },
+          "blocked_or_rejected": { "type": "integer", "minimum": 0 },
+          "event_count": { "type": "integer", "minimum": 0 },
+          "score": { "type": "integer" },
+          "last_event_at": { "type": "string" }
+        }
+      }
+    }
+  }
+}

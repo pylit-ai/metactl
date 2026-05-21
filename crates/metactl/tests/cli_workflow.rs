@@ -375,6 +375,224 @@ fn init_project(project: &Path) {
 }
 
 #[test]
+fn surface_usage_stats_and_report_are_rebuildable_and_report_only() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let usage_dir = project.path().join(".metactl/usage");
+    fs::create_dir_all(&usage_dir).expect("usage dir");
+    fs::write(
+        usage_dir.join("events.jsonl"),
+        r#"{"event_kind":"command_invoked","pack_id":"python-refactor","recorded_at":"2026-05-21T10:00:00Z"}
+{"event_kind":"task_verified","pack_id":"unit-test-loop","recorded_at":"2026-05-21T10:01:00Z"}
+"#,
+    )
+    .expect("events");
+
+    let rebuild = run_cli(project.path(), &["--json", "stats", "rebuild"]);
+    assert!(rebuild.status.success(), "{}", stderr(&rebuild));
+    let rebuild_json = json_output(&rebuild);
+    assert_json_contract(&rebuild_json, "stats", Some(project.path()));
+    assert_eq!(rebuild_json["stats"]["event_count"], 2);
+    assert!(project.path().join(".metactl/usage/stats.json").exists());
+
+    let report = run_cli(
+        project.path(),
+        &["--json", "surface", "report", "--scheduled"],
+    );
+    assert!(report.status.success(), "{}", stderr(&report));
+    let report_json = json_output(&report);
+    assert_json_contract(&report_json, "surface", Some(project.path()));
+    assert_eq!(report_json["report"]["rebuild_trigger"], "scheduled");
+    assert_eq!(report_json["report"]["adapter_mutation_allowed"], false);
+    let recommendations = report_json["report"]["recommendations"]
+        .as_array()
+        .expect("recommendations");
+    assert!(recommendations.iter().any(|item| {
+        item["pack_id"] == "python-refactor"
+            && item["tier"] == "warm"
+            && item["reason_code"] == "usage_observed_without_verified_outcome"
+    }));
+    assert!(recommendations
+        .iter()
+        .any(|item| item["pack_id"] == "unit-test-loop" && item["tier"] == "hot"));
+    assert!(project.path().join("reports/surfaces/latest.json").exists());
+    assert!(project
+        .path()
+        .join("docs/status/surfaces/dashboard.md")
+        .exists());
+}
+
+#[test]
+fn surface_overrides_and_auto_explain_are_machine_readable() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let usage_dir = project.path().join(".metactl/usage");
+    fs::create_dir_all(&usage_dir).expect("usage dir");
+    fs::write(
+        usage_dir.join("events.jsonl"),
+        r#"{"event_kind":"command_invoked","pack_id":"python-refactor","recorded_at":"2026-05-21T10:00:00Z"}
+"#,
+    )
+    .expect("events");
+
+    let pin = run_cli(
+        project.path(),
+        &["--json", "surface", "pin", "python-refactor"],
+    );
+    assert!(pin.status.success(), "{}", stderr(&pin));
+    let pin_json = json_output(&pin);
+    assert_eq!(
+        pin_json["overrides"]["overrides"]["python-refactor"]["action"],
+        "pin_hot"
+    );
+
+    let report = run_cli(project.path(), &["--json", "surface", "report"]);
+    assert!(report.status.success(), "{}", stderr(&report));
+    let report_json = json_output(&report);
+    let recommendations = report_json["report"]["recommendations"]
+        .as_array()
+        .expect("recommendations");
+    assert!(recommendations.iter().any(|item| {
+        item["pack_id"] == "python-refactor"
+            && item["tier"] == "hot"
+            && item["reason_code"] == "operator_pin_hot"
+    }));
+
+    let explain = run_cli(
+        project.path(),
+        &["--json", "explain", "--surface-mode", "auto"],
+    );
+    assert!(explain.status.success(), "{}", stderr(&explain));
+    let explain_json = json_output(&explain);
+    assert_eq!(
+        explain_json["target_projection"]["surface_selection_mode"],
+        "auto"
+    );
+    assert_eq!(
+        explain_json["surface_usage"]["next_reversible_action"],
+        "metactl surface report"
+    );
+}
+
+#[test]
+fn background_plan_is_report_only_and_replayable() {
+    let project = TempDir::new().expect("tempdir");
+
+    let output = run_cli(
+        project.path(),
+        &["--json", "background", "plan", "--scope", "project"],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}\nstdout: {}",
+        stderr(&output),
+        stdout(&output)
+    );
+    let value = json_output(&output);
+    assert_json_contract(&value, "background", Some(project.path()));
+    assert_eq!(value["action"], "plan");
+    assert_eq!(value["plan"]["scope"], "project");
+    assert_eq!(value["plan"]["report_only"], true);
+    assert_eq!(value["plan"]["mutates_adapters"], false);
+    assert!(value["plan"]["run_command"]
+        .as_str()
+        .expect("run command")
+        .contains("background run"));
+}
+
+#[test]
+fn background_install_requires_explicit_confirmation() {
+    let project = TempDir::new().expect("tempdir");
+
+    let output = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "--no-input",
+            "background",
+            "install",
+            "--scope",
+            "project",
+        ],
+    );
+    assert!(!output.status.success());
+    let value = json_output(&output);
+    assert_eq!(value["code"], "background_confirmation_required");
+    assert_eq!(value["category"], "machine_state");
+    assert_eq!(value["plan"]["report_only"], true);
+}
+
+#[test]
+fn setup_plan_recommends_background_refresh_by_default() {
+    let project = TempDir::new().expect("tempdir");
+
+    let output = run_cli(
+        project.path(),
+        &["--json", "setup", "--plan", "--target", "codex-cli"],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}\nstdout: {}",
+        stderr(&output),
+        stdout(&output)
+    );
+    let value = json_output(&output);
+    assert_json_contract(&value, "setup", Some(project.path()));
+    assert!(value["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .any(|action| action["kind"] == "background-refresh"
+            && action["report_only"] == true
+            && action["mutates_adapters"] == false));
+    assert!(value["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .unwrap_or_default()
+            .contains("background install --scope project --yes")));
+}
+
+#[test]
+fn setup_plan_can_opt_out_of_background_refresh_guidance() {
+    let project = TempDir::new().expect("tempdir");
+
+    let output = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "setup",
+            "--plan",
+            "--target",
+            "codex-cli",
+            "--no-background",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}\nstdout: {}",
+        stderr(&output),
+        stdout(&output)
+    );
+    let value = json_output(&output);
+    assert!(!value["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .any(|action| action["kind"] == "background-refresh"));
+    assert!(!value["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .iter()
+        .any(|command| command
+            .as_str()
+            .unwrap_or_default()
+            .contains("background install")));
+}
+
+#[test]
 fn ignore_status_reports_tracked_generated_roots() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());

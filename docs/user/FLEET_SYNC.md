@@ -140,6 +140,23 @@ Install an operator-facing repo skill globally only when that is intended:
 metactl skills add <repo-skill-path> --scope user
 ```
 
+## Background Recommendations
+
+Fleet background jobs should refresh recommendation reports, not apply adapter changes. Use the first-class scheduler command:
+
+```bash
+metactl --project /path/to/fleet-controller background plan --scope fleet
+metactl --project /path/to/fleet-controller background install --scope fleet --yes
+metactl --project /path/to/fleet-controller background status --scope fleet
+```
+
+On macOS this installs a LaunchAgent. On Linux it installs a systemd user
+timer. On Windows it installs a Scheduled Task. The scheduled job writes a
+report-only run log, skips disabled Fleet entries, and exits nonzero on any
+failed project so monitoring can see drift. Do not put `fleet sync --apply` in
+the scheduled job unless a separate operator policy explicitly allows
+background mutation.
+
 ## Machine Output
 
 `--json` includes the resolved controller:

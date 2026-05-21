@@ -2010,7 +2010,9 @@ fn surface_selection_decisions(
             let relevance_tier = surface_relevance_tier(pack, surface);
             let emitted = match mode {
                 SurfaceSelectionMode::Full => true,
-                SurfaceSelectionMode::Minimal => relevance_tier == SurfaceRelevanceTier::AlwaysOn,
+                SurfaceSelectionMode::Minimal | SurfaceSelectionMode::Auto => {
+                    relevance_tier == SurfaceRelevanceTier::AlwaysOn
+                }
             };
             let reason_code = if emitted {
                 None

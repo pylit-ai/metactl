@@ -271,6 +271,7 @@ pub enum SurfaceSelectionMode {
     #[default]
     Minimal,
     Full,
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

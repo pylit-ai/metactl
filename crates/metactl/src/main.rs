@@ -26,6 +26,9 @@ use metactl::project::{
     ProjectConfigFile, ProjectLock, SourceLockPublicity, SourceRecord, SourceType,
     SourceVisibility, UserFleetController, UserFleetSettings,
 };
+use metactl::surface_usage::{
+    self, SurfaceLifecycleMode, SurfaceOverrideAction, SurfaceRebuildTrigger, SurfaceReport,
+};
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
     ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, PluginExportOptions, PluginTier,
@@ -182,6 +185,12 @@ enum Commands {
     List(ListArgs),
     /// Search the pack corpus for a natural-language or keyword query
     Search(SearchArgs),
+    /// Rebuild and inspect local surface usage stats
+    Stats(StatsArgs),
+    /// Report and override automatic command/skill surface recommendations
+    Surface(SurfaceArgs),
+    /// Install, inspect, and run report-only background surface refreshes
+    Background(BackgroundArgs),
     /// Show why packs and targets were selected for the current config
     Explain(ExplainArgs),
     /// Alias for `metactl sync --preview`
@@ -553,6 +562,12 @@ struct SetupArgs {
     /// Include metactl.lock.json in the recommended ignore repair command
     #[arg(long)]
     include_lock: bool,
+    /// Install the report-only background surface refresh after setup writes project state
+    #[arg(long)]
+    install_background: bool,
+    /// Omit background refresh recommendations from setup plan output
+    #[arg(long)]
+    no_background: bool,
     /// Confirm non-interactive setup writes
     #[arg(long, short = 'y')]
     yes: bool,
@@ -1029,6 +1044,213 @@ struct SearchArgs {
 }
 
 #[derive(Debug, Args)]
+struct StatsArgs {
+    #[command(subcommand)]
+    command: StatsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum StatsCommand {
+    /// Rebuild local surface usage stats from JSONL events
+    Rebuild(StatsRebuildArgs),
+    /// Show usage stats for all packs or one pack
+    Show(StatsShowArgs),
+}
+
+#[derive(Debug, Args)]
+struct StatsRebuildArgs {
+    /// Override usage event JSONL path
+    #[arg(long)]
+    events: Option<PathBuf>,
+    /// Override stats JSON output path
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct StatsShowArgs {
+    /// Show one pack only
+    #[arg(long)]
+    pack: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct SurfaceArgs {
+    #[command(subcommand)]
+    command: SurfaceCommand,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundArgs {
+    #[command(subcommand)]
+    command: Option<BackgroundCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum BackgroundCommand {
+    /// Show the OS scheduler install plan without writing machine state
+    Plan(BackgroundPlanArgs),
+    /// Install the OS scheduler entry
+    Install(BackgroundInstallArgs),
+    /// Show scheduler status using the native OS service manager
+    Status(BackgroundStatusArgs),
+    /// Remove the OS scheduler entry
+    Uninstall(BackgroundUninstallArgs),
+    /// Run one report-only refresh cycle; intended as the scheduler entrypoint
+    Run(BackgroundRunArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum BackgroundScopeArg {
+    Project,
+    Fleet,
+}
+
+impl BackgroundScopeArg {
+    fn as_str(self) -> &'static str {
+        match self {
+            BackgroundScopeArg::Project => "project",
+            BackgroundScopeArg::Fleet => "fleet",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct BackgroundPlanArgs {
+    /// Refresh one project or every non-disabled project in the Fleet controller
+    #[arg(long, value_enum, default_value = "project")]
+    scope: BackgroundScopeArg,
+    /// Fleet controller path; defaults to the resolved machine Fleet controller
+    #[arg(long)]
+    controller: Option<PathBuf>,
+    /// Scheduler interval in minutes
+    #[arg(long, default_value_t = 60)]
+    interval_minutes: u32,
+    /// Override state/log directory
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+    /// Override generated scheduler label or task name
+    #[arg(long)]
+    label: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundInstallArgs {
+    /// Refresh one project or every non-disabled project in the Fleet controller
+    #[arg(long, value_enum, default_value = "project")]
+    scope: BackgroundScopeArg,
+    /// Fleet controller path; defaults to the resolved machine Fleet controller
+    #[arg(long)]
+    controller: Option<PathBuf>,
+    /// Scheduler interval in minutes
+    #[arg(long, default_value_t = 60)]
+    interval_minutes: u32,
+    /// Override state/log directory
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+    /// Override generated scheduler label or task name
+    #[arg(long)]
+    label: Option<String>,
+    /// Confirm persistent OS scheduler writes
+    #[arg(long, short = 'y')]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundStatusArgs {
+    /// Refresh one project or every non-disabled project in the Fleet controller
+    #[arg(long, value_enum, default_value = "project")]
+    scope: BackgroundScopeArg,
+    /// Fleet controller path; defaults to the resolved machine Fleet controller
+    #[arg(long)]
+    controller: Option<PathBuf>,
+    /// Override state/log directory
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+    /// Override generated scheduler label or task name
+    #[arg(long)]
+    label: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundUninstallArgs {
+    /// Refresh one project or every non-disabled project in the Fleet controller
+    #[arg(long, value_enum, default_value = "project")]
+    scope: BackgroundScopeArg,
+    /// Fleet controller path; defaults to the resolved machine Fleet controller
+    #[arg(long)]
+    controller: Option<PathBuf>,
+    /// Override state/log directory
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+    /// Override generated scheduler label or task name
+    #[arg(long)]
+    label: Option<String>,
+    /// Confirm persistent OS scheduler removal
+    #[arg(long, short = 'y')]
+    yes: bool,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundRunArgs {
+    /// Refresh one project or every non-disabled project in the Fleet controller
+    #[arg(long, value_enum, default_value = "project")]
+    scope: BackgroundScopeArg,
+    /// Fleet controller path; defaults to the resolved machine Fleet controller
+    #[arg(long)]
+    controller: Option<PathBuf>,
+    /// Override state/log directory
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Subcommand)]
+enum SurfaceCommand {
+    /// Rebuild stats if needed and write recommendation reports
+    Report(SurfaceReportArgs),
+    /// Pin a pack as hot or command-visible
+    Pin(SurfacePinArgs),
+    /// Block a pack from auto-selected command/skill surfaces
+    Block(SurfacePackArgs),
+    /// Clear one override or all overrides
+    Reset(SurfaceResetArgs),
+}
+
+#[derive(Debug, Args)]
+struct SurfaceReportArgs {
+    /// Lifecycle mode for the recommendation run
+    #[arg(long, value_enum, default_value_t = SurfaceLifecycleModeArg::Recommend)]
+    lifecycle_mode: SurfaceLifecycleModeArg,
+    /// Mark this run as scheduled/report-only
+    #[arg(long)]
+    scheduled: bool,
+}
+
+#[derive(Debug, Args)]
+struct SurfacePinArgs {
+    /// Pack id to pin
+    pack_id: String,
+    /// Pin as command-visible without promoting full body to hot
+    #[arg(long)]
+    command: bool,
+}
+
+#[derive(Debug, Args)]
+struct SurfacePackArgs {
+    /// Pack id to update
+    pack_id: String,
+}
+
+#[derive(Debug, Args)]
+struct SurfaceResetArgs {
+    /// Pack id to reset; omit with --all to clear every override
+    pack_id: Option<String>,
+    /// Clear every surface override
+    #[arg(long)]
+    all: bool,
+}
+
+#[derive(Debug, Args)]
 struct ExplainArgs {
     /// Optional query context to explain selections for
     #[arg(long)]
@@ -1141,6 +1363,14 @@ enum SyncAdoptArg {
 enum SurfaceSelectionModeArg {
     Minimal,
     Full,
+    Auto,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SurfaceLifecycleModeArg {
+    Observe,
+    Recommend,
+    Apply,
 }
 
 impl From<ApplyModeArg> for ApplyMode {
@@ -1159,6 +1389,17 @@ impl From<SurfaceSelectionModeArg> for metactl::SurfaceSelectionMode {
         match value {
             SurfaceSelectionModeArg::Minimal => metactl::SurfaceSelectionMode::Minimal,
             SurfaceSelectionModeArg::Full => metactl::SurfaceSelectionMode::Full,
+            SurfaceSelectionModeArg::Auto => metactl::SurfaceSelectionMode::Auto,
+        }
+    }
+}
+
+impl From<SurfaceLifecycleModeArg> for SurfaceLifecycleMode {
+    fn from(value: SurfaceLifecycleModeArg) -> Self {
+        match value {
+            SurfaceLifecycleModeArg::Observe => SurfaceLifecycleMode::Observe,
+            SurfaceLifecycleModeArg::Recommend => SurfaceLifecycleMode::Recommend,
+            SurfaceLifecycleModeArg::Apply => SurfaceLifecycleMode::Apply,
         }
     }
 }
@@ -1361,6 +1602,9 @@ fn command_contract_name(command: &Commands) -> &'static str {
         Commands::Status(_) => "status",
         Commands::List(_) => "list",
         Commands::Search(_) => "search",
+        Commands::Stats(_) => "stats",
+        Commands::Surface(_) => "surface",
+        Commands::Background(_) => "background",
         Commands::Explain(_) => "explain",
         Commands::Preview(_) | Commands::Sync(_) => "sync",
         Commands::Compile(_) => "compile",
@@ -1480,6 +1724,9 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Status(args) => cmd_status(cli, args),
         Commands::List(args) => cmd_list(cli, args),
         Commands::Search(args) => cmd_search(cli, args),
+        Commands::Stats(args) => cmd_stats(cli, args),
+        Commands::Surface(args) => cmd_surface(cli, args),
+        Commands::Background(args) => cmd_background(cli, args),
         Commands::Explain(args) => cmd_explain(cli, args),
         Commands::Preview(args) => {
             let mut args = args.clone();
@@ -1570,6 +1817,22 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         },
         Commands::Preview(_) => Some("preview"),
         Commands::Sync(_) => Some("sync"),
+        Commands::Stats(args) => match &args.command {
+            StatsCommand::Rebuild(_) => Some("stats rebuild"),
+            StatsCommand::Show(_) => None,
+        },
+        Commands::Surface(args) => match &args.command {
+            SurfaceCommand::Report(_) => Some("surface report"),
+            SurfaceCommand::Pin(_) => Some("surface pin"),
+            SurfaceCommand::Block(_) => Some("surface block"),
+            SurfaceCommand::Reset(_) => Some("surface reset"),
+        },
+        Commands::Background(args) => match &args.command {
+            Some(BackgroundCommand::Install(_)) => Some("background install"),
+            Some(BackgroundCommand::Uninstall(_)) => Some("background uninstall"),
+            Some(BackgroundCommand::Run(_)) => Some("background run"),
+            Some(BackgroundCommand::Plan(_)) | Some(BackgroundCommand::Status(_)) | None => None,
+        },
         Commands::Compile(args) => {
             if args.apply {
                 Some("compile --apply")
@@ -3710,11 +3973,11 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
 
     if let Some(existing) = existing_config {
         let existing_targets = existing.targets.clone();
-        if args.artifact_policy.is_some() {
+        if args.artifact_policy.is_some() || args.install_background {
             if (cli.no_input_enabled() || !io::stdin().is_terminal()) && !args.yes {
                 let mut err = CliError::new(
                     EXIT_STATE,
-                    "Non-interactive setup requires --yes before updating agent artifact policy.",
+                    "Non-interactive setup requires --yes before updating machine or project state.",
                 )
                 .with_details(next_commands.clone());
                 if let Some(obj) = err.json.as_object_mut() {
@@ -3724,14 +3987,36 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
                 }
                 return Err(err);
             }
-            let artifact_report =
-                apply_setup_artifact_policy(&project_root, &config_path, artifact_policy)?;
+            let artifact_report = if args.artifact_policy.is_some() {
+                apply_setup_artifact_policy(&project_root, &config_path, artifact_policy)?
+            } else {
+                json!({
+                    "policy": existing.metadata.get(AGENT_ARTIFACT_POLICY_METADATA_KEY).cloned().unwrap_or_else(|| "not-configured".to_string()),
+                    "skipped": true,
+                })
+            };
+            let background_install = if args.install_background {
+                Some(cmd_background_install(
+                    cli,
+                    &BackgroundInstallArgs {
+                        scope: BackgroundScopeArg::Project,
+                        controller: None,
+                        interval_minutes: 60,
+                        log_dir: None,
+                        label: None,
+                        yes: args.yes,
+                    },
+                )?)
+            } else {
+                None
+            };
             return Ok(CommandOutput {
                 human: project_human_output(
                     &project_root,
                     format!(
-                        "Setup updated.\nArtifact policy: {}\nNext: metactl sync --preview",
-                        artifact_policy.as_str()
+                        "Setup updated.\nArtifact policy: {}\nBackground refresh: {}\nNext: metactl sync --preview",
+                        artifact_policy.as_str(),
+                        if background_install.is_some() { "installed" } else { "not installed" }
                     ),
                 ),
                 json: success_json(
@@ -3744,6 +4029,7 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
                         "targets": existing_targets,
                         "artifact_policy": artifact_policy.as_str(),
                         "artifact_policy_update": artifact_report,
+                        "background_install": background_install.map(|output| output.json),
                         "next_commands": ["metactl sync --preview", "metactl status"],
                     }),
                 ),
@@ -3817,12 +4103,30 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
     let init_output = cmd_init(cli, &init_args)?;
     let artifact_report =
         apply_setup_artifact_policy(&project_root, &config_path, artifact_policy)?;
+    let background_install = if args.install_background {
+        Some(cmd_background_install(
+            cli,
+            &BackgroundInstallArgs {
+                scope: BackgroundScopeArg::Project,
+                controller: None,
+                interval_minutes: 60,
+                log_dir: None,
+                label: None,
+                yes: args.yes,
+            },
+        )?)
+    } else {
+        None
+    };
     let mut lines = vec!["Setup applied.".to_string(), init_output.human];
     if artifact_policy != ArtifactPolicyArg::Off {
         lines.push(format!(
             "Portable agent artifacts: {}.",
             artifact_policy.as_str()
         ));
+    }
+    if background_install.is_some() {
+        lines.push("Background refresh installed.".to_string());
     }
     lines.push("Next: metactl ignore fix --plan".to_string());
 
@@ -3839,6 +4143,7 @@ fn cmd_setup(cli: &Cli, args: &SetupArgs) -> std::result::Result<CommandOutput, 
                 "init": init_output.json,
                 "artifact_policy": artifact_policy.as_str(),
                 "artifact_policy_update": artifact_report,
+                "background_install": background_install.map(|output| output.json),
                 "next_commands": next_commands,
             }),
         ),
@@ -3904,12 +4209,17 @@ fn setup_next_commands(args: &SetupArgs, targets: &[String]) -> Vec<String> {
         .artifact_policy
         .map(|policy| format!(" --artifact-policy {}", policy.as_str()))
         .unwrap_or_default();
-    vec![
+    let mut commands = vec![
         format!("metactl setup{target_arg}{artifact_arg} --yes"),
         format!("metactl setup{target_arg}{artifact_arg} --plan"),
         ignore_fix,
-        "metactl sync --preview".to_string(),
-    ]
+    ];
+    if !args.no_background {
+        commands.push("metactl background plan --scope project".to_string());
+        commands.push("metactl background install --scope project --yes".to_string());
+    }
+    commands.push("metactl sync --preview".to_string());
+    commands
 }
 
 fn setup_artifact_policy(args: &SetupArgs, already_configured: bool) -> ArtifactPolicyArg {
@@ -3956,6 +4266,17 @@ fn setup_actions(
             Value::Null
         },
     }));
+    if !args.no_background {
+        actions.push(json!({
+            "kind": "background-refresh",
+            "summary": "offer report-only usage-ranked surface refresh through the OS scheduler",
+            "default": "recommended",
+            "install_command": "metactl background install --scope project --yes",
+            "opt_out": "metactl setup --no-background",
+            "report_only": true,
+            "mutates_adapters": false,
+        }));
+    }
     actions
 }
 
@@ -6806,6 +7127,1343 @@ fn cmd_search(cli: &Cli, args: &SearchArgs) -> std::result::Result<CommandOutput
     ))
 }
 
+fn cmd_stats(cli: &Cli, args: &StatsArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        StatsCommand::Rebuild(args) => cmd_stats_rebuild(cli, args),
+        StatsCommand::Show(args) => cmd_stats_show(cli, args),
+    }
+}
+
+fn cmd_stats_rebuild(
+    cli: &Cli,
+    args: &StatsRebuildArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let stats = surface_usage::rebuild_usage_stats(
+        &project_root,
+        args.events.as_deref(),
+        args.output.as_deref(),
+    )
+    .map_err(state_error)?;
+    let stats_path = args
+        .output
+        .clone()
+        .unwrap_or_else(|| surface_usage::usage_stats_path(&project_root));
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Usage stats rebuilt.\nEvents: {}\nPacks: {}\nStats: {}",
+                stats.event_count,
+                stats.packs.len(),
+                relative_to_project(&project_root, &stats_path)
+            ),
+        ),
+        json: success_json(
+            "stats",
+            Some(&project_root),
+            json!({
+                "action": "rebuild",
+                "stats_path": relative_to_project(&project_root, &stats_path),
+                "stats": stats,
+            }),
+        ),
+    })
+}
+
+fn cmd_stats_show(cli: &Cli, args: &StatsShowArgs) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let stats = surface_usage::load_or_rebuild_usage_stats(&project_root).map_err(state_error)?;
+    let packs = if let Some(pack_id) = args.pack.as_deref() {
+        stats
+            .packs
+            .iter()
+            .filter(|pack| pack.pack_id == pack_id)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        stats.packs.clone()
+    };
+    let mut lines = vec![
+        "Usage stats.".to_string(),
+        format!("Events: {}", stats.event_count),
+        format!("Packs: {}", packs.len()),
+    ];
+    lines.extend(packs.iter().map(|pack| {
+        format!(
+            "- {} score={} events={} verified={} commands={}",
+            pack.pack_id, pack.score, pack.event_count, pack.task_verified, pack.command_invoked
+        )
+    }));
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "stats",
+            Some(&project_root),
+            json!({
+                "action": "show",
+                "stats_path": relative_to_project(&project_root, &surface_usage::usage_stats_path(&project_root)),
+                "packs": packs,
+            }),
+        ),
+    })
+}
+
+fn cmd_surface(cli: &Cli, args: &SurfaceArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        SurfaceCommand::Report(args) => cmd_surface_report(cli, args),
+        SurfaceCommand::Pin(args) => cmd_surface_pin(cli, args),
+        SurfaceCommand::Block(args) => cmd_surface_block(cli, args),
+        SurfaceCommand::Reset(args) => cmd_surface_reset(cli, args),
+    }
+}
+
+fn cmd_surface_report(
+    cli: &Cli,
+    args: &SurfaceReportArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let lifecycle_mode = SurfaceLifecycleMode::from(args.lifecycle_mode);
+    let rebuild_trigger = if args.scheduled {
+        SurfaceRebuildTrigger::Scheduled
+    } else {
+        SurfaceRebuildTrigger::Opportunistic
+    };
+    let report = write_surface_report_for_project(
+        &project_root,
+        cli.config.as_deref(),
+        cli.profile.as_deref(),
+        cli.overlay.as_deref(),
+        lifecycle_mode,
+        rebuild_trigger,
+    )?;
+    let mut lines = vec![
+        "Surface recommendation report written.".to_string(),
+        format!("Lifecycle mode: {:?}", report.lifecycle_mode),
+        format!(
+            "Pending recommendations: {}",
+            report.pending_recommendation_count
+        ),
+        format!("JSON: {}", report.report_json_path),
+        format!("Dashboard: {}", report.report_markdown_path),
+    ];
+    if args.scheduled {
+        lines.push("Scheduled run: report-only; adapters were not mutated.".to_string());
+    }
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "surface",
+            Some(&project_root),
+            json!({
+                "action": "report",
+                "report": report,
+            }),
+        ),
+    })
+}
+
+fn write_surface_report_for_project(
+    project_root: &Path,
+    config_override: Option<&Path>,
+    profile: Option<&str>,
+    overlay_path: Option<&Path>,
+    lifecycle_mode: SurfaceLifecycleMode,
+    rebuild_trigger: SurfaceRebuildTrigger,
+) -> std::result::Result<SurfaceReport, CliError> {
+    let context = load_project_context(project_root, config_override, profile, overlay_path)
+        .map_err(state_error)?;
+    let stats = surface_usage::load_or_rebuild_usage_stats(project_root).map_err(state_error)?;
+    let overrides = surface_usage::load_surface_overrides(project_root).map_err(state_error)?;
+    let known_pack_ids = known_surface_pack_ids(&context).map_err(state_error)?;
+    let report = surface_usage::build_surface_report(
+        project_root,
+        lifecycle_mode,
+        rebuild_trigger,
+        &known_pack_ids,
+        &stats,
+        &overrides,
+    );
+    surface_usage::write_surface_report(project_root, &report).map_err(state_error)?;
+    Ok(report)
+}
+
+#[derive(Debug, Clone)]
+struct BackgroundSchedulerPlan {
+    scope: BackgroundScopeArg,
+    project_root: PathBuf,
+    label: String,
+    os: String,
+    interval_minutes: u32,
+    log_dir: PathBuf,
+    executable: PathBuf,
+    run_args: Vec<String>,
+    files: Vec<(String, PathBuf, String)>,
+    install_commands: Vec<Vec<String>>,
+    status_commands: Vec<Vec<String>>,
+    uninstall_commands: Vec<Vec<String>>,
+}
+
+impl BackgroundSchedulerPlan {
+    fn run_command_display(&self) -> String {
+        command_display(&self.executable, &self.run_args)
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "scope": self.scope.as_str(),
+            "project_root": self.project_root,
+            "label": self.label,
+            "os": self.os,
+            "interval_minutes": self.interval_minutes,
+            "log_dir": self.log_dir,
+            "run_command": self.run_command_display(),
+            "files": self.files.iter().map(|(kind, path, _)| json!({
+                "kind": kind,
+                "path": path,
+            })).collect::<Vec<_>>(),
+            "install_commands": self.install_commands.iter().map(|cmd| command_vec_display(cmd)).collect::<Vec<_>>(),
+            "status_commands": self.status_commands.iter().map(|cmd| command_vec_display(cmd)).collect::<Vec<_>>(),
+            "uninstall_commands": self.uninstall_commands.iter().map(|cmd| command_vec_display(cmd)).collect::<Vec<_>>(),
+            "report_only": true,
+            "mutates_adapters": false,
+        })
+    }
+}
+
+fn cmd_background(
+    cli: &Cli,
+    args: &BackgroundArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        Some(BackgroundCommand::Plan(args)) => cmd_background_plan(cli, args),
+        Some(BackgroundCommand::Install(args)) => cmd_background_install(cli, args),
+        Some(BackgroundCommand::Status(args)) => cmd_background_status(cli, args),
+        Some(BackgroundCommand::Uninstall(args)) => cmd_background_uninstall(cli, args),
+        Some(BackgroundCommand::Run(args)) => cmd_background_run(cli, args),
+        None => cmd_background_plan(
+            cli,
+            &BackgroundPlanArgs {
+                scope: BackgroundScopeArg::Project,
+                controller: None,
+                interval_minutes: 60,
+                log_dir: None,
+                label: None,
+            },
+        ),
+    }
+}
+
+fn cmd_background_plan(
+    cli: &Cli,
+    args: &BackgroundPlanArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let plan = build_background_plan(
+        cli,
+        args.scope,
+        args.controller.as_deref(),
+        args.interval_minutes,
+        args.log_dir.as_deref(),
+        args.label.as_deref(),
+    )?;
+    let mut lines = vec![
+        "Background refresh plan:".to_string(),
+        format!("  scope: {}", plan.scope.as_str()),
+        format!("  scheduler: {}", plan.os),
+        format!("  interval: {} minutes", plan.interval_minutes),
+        format!("  run: {}", plan.run_command_display()),
+    ];
+    for (_, path, _) in &plan.files {
+        lines.push(format!("  file: {}", path.display()));
+    }
+    lines.push("Report-only: adapters are not mutated.".to_string());
+    Ok(CommandOutput {
+        human: project_human_output(&plan.project_root, lines.join("\n")),
+        json: success_json(
+            "background",
+            Some(&plan.project_root),
+            json!({
+                "action": "plan",
+                "plan": plan.to_json(),
+            }),
+        ),
+    })
+}
+
+fn cmd_background_install(
+    cli: &Cli,
+    args: &BackgroundInstallArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    if !args.yes {
+        let plan = build_background_plan(
+            cli,
+            args.scope,
+            args.controller.as_deref(),
+            args.interval_minutes,
+            args.log_dir.as_deref(),
+            args.label.as_deref(),
+        )?;
+        let mut err = CliError::new(
+            EXIT_STATE,
+            "Background install creates persistent OS scheduler state and requires --yes.",
+        )
+        .with_details(vec![format!(
+            "Next: metactl background install --scope {} --yes",
+            args.scope.as_str()
+        )]);
+        if let Some(obj) = err.json.as_object_mut() {
+            obj.insert(
+                "code".to_string(),
+                json!("background_confirmation_required"),
+            );
+            obj.insert("category".to_string(), json!("machine_state"));
+            obj.insert("plan".to_string(), plan.to_json());
+        }
+        return Err(err);
+    }
+    let plan = build_background_plan(
+        cli,
+        args.scope,
+        args.controller.as_deref(),
+        args.interval_minutes,
+        args.log_dir.as_deref(),
+        args.label.as_deref(),
+    )?;
+    install_background_plan(&plan)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &plan.project_root,
+            format!(
+                "Background refresh installed.\nScheduler: {}\nLabel: {}\nInterval: {} minutes\nRun: {}",
+                plan.os,
+                plan.label,
+                plan.interval_minutes,
+                plan.run_command_display()
+            ),
+        ),
+        json: success_json(
+            "background",
+            Some(&plan.project_root),
+            json!({
+                "action": "install",
+                "installed": true,
+                "plan": plan.to_json(),
+            }),
+        ),
+    })
+}
+
+fn cmd_background_status(
+    cli: &Cli,
+    args: &BackgroundStatusArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let plan = build_background_plan(
+        cli,
+        args.scope,
+        args.controller.as_deref(),
+        60,
+        args.log_dir.as_deref(),
+        args.label.as_deref(),
+    )?;
+    let status = background_status(&plan);
+    Ok(CommandOutput {
+        human: project_human_output(
+            &plan.project_root,
+            format!(
+                "Background refresh status.\nScheduler: {}\nLabel: {}\nInstalled: {}",
+                plan.os,
+                plan.label,
+                status["installed"].as_bool().unwrap_or(false)
+            ),
+        ),
+        json: success_json(
+            "background",
+            Some(&plan.project_root),
+            json!({
+                "action": "status",
+                "plan": plan.to_json(),
+                "status": status,
+            }),
+        ),
+    })
+}
+
+fn cmd_background_uninstall(
+    cli: &Cli,
+    args: &BackgroundUninstallArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let plan = build_background_plan(
+        cli,
+        args.scope,
+        args.controller.as_deref(),
+        60,
+        args.log_dir.as_deref(),
+        args.label.as_deref(),
+    )?;
+    if !args.yes {
+        let mut err = CliError::new(
+            EXIT_STATE,
+            "Background uninstall removes persistent OS scheduler state and requires --yes.",
+        )
+        .with_details(vec![format!(
+            "Next: metactl background uninstall --scope {} --yes",
+            args.scope.as_str()
+        )]);
+        if let Some(obj) = err.json.as_object_mut() {
+            obj.insert(
+                "code".to_string(),
+                json!("background_confirmation_required"),
+            );
+            obj.insert("category".to_string(), json!("machine_state"));
+            obj.insert("plan".to_string(), plan.to_json());
+        }
+        return Err(err);
+    }
+    uninstall_background_plan(&plan)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &plan.project_root,
+            format!("Background refresh uninstalled.\nLabel: {}", plan.label),
+        ),
+        json: success_json(
+            "background",
+            Some(&plan.project_root),
+            json!({
+                "action": "uninstall",
+                "uninstalled": true,
+                "plan": plan.to_json(),
+            }),
+        ),
+    })
+}
+
+fn cmd_background_run(
+    cli: &Cli,
+    args: &BackgroundRunArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let log_dir = args
+        .log_dir
+        .clone()
+        .unwrap_or_else(default_background_log_dir);
+    fs::create_dir_all(&log_dir).map_err(internal_error)?;
+    let mut results = Vec::new();
+    let mut failures = 0usize;
+    match args.scope {
+        BackgroundScopeArg::Project => {
+            let project_root = project_root(cli).map_err(internal_error)?;
+            let result = run_background_report_for_project(
+                &project_root,
+                cli.config.as_deref(),
+                cli.profile.as_deref(),
+                cli.overlay.as_deref(),
+                None,
+            );
+            if result["ok"] != true {
+                failures += 1;
+            }
+            results.push(result);
+            append_background_run_log(&log_dir, args.scope, &project_root, &results, failures)?;
+            background_run_output(args.scope, project_root, log_dir, results, failures)
+        }
+        BackgroundScopeArg::Fleet => {
+            let controller = resolve_background_fleet_controller(cli, args.controller.as_deref())?;
+            let controller_result = run_background_report_for_project(
+                &controller.project_root,
+                None,
+                cli.profile.as_deref(),
+                cli.overlay.as_deref(),
+                Some("fleet-controller"),
+            );
+            if controller_result["ok"] != true {
+                failures += 1;
+            }
+            results.push(controller_result);
+            let projects = fleet_projects_for_output(
+                &controller.project_root,
+                &controller.context.config_file,
+            );
+            for project in projects {
+                if project.status == LinkedProjectStatus::Disabled {
+                    results.push(json!({
+                        "id": project.id,
+                        "path": project.path,
+                        "ok": true,
+                        "skipped": true,
+                        "status": linked_project_status_label(project.status),
+                    }));
+                    continue;
+                }
+                let result = run_background_report_for_project(
+                    &project.path,
+                    None,
+                    project.profile.as_deref(),
+                    None,
+                    Some(&project.id),
+                );
+                if result["ok"] != true {
+                    failures += 1;
+                }
+                results.push(result);
+            }
+            append_background_run_log(
+                &log_dir,
+                args.scope,
+                &controller.project_root,
+                &results,
+                failures,
+            )?;
+            background_run_output(
+                args.scope,
+                controller.project_root,
+                log_dir,
+                results,
+                failures,
+            )
+        }
+    }
+}
+
+fn background_run_output(
+    scope: BackgroundScopeArg,
+    project_root: PathBuf,
+    log_dir: PathBuf,
+    results: Vec<Value>,
+    failures: usize,
+) -> std::result::Result<CommandOutput, CliError> {
+    let lines = vec![
+        "Background refresh complete.".to_string(),
+        format!("Scope: {}", scope.as_str()),
+        format!("Projects: {}", results.len()),
+        format!("Failures: {failures}"),
+        format!("Log dir: {}", log_dir.display()),
+    ];
+    let output = CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "background",
+            Some(&project_root),
+            json!({
+                "action": "run",
+                "scope": scope.as_str(),
+                "log_dir": log_dir,
+                "project_count": results.len(),
+                "failure_count": failures,
+                "results": results,
+            }),
+        ),
+    };
+    if failures == 0 {
+        Ok(output)
+    } else {
+        let mut err = CliError::new(EXIT_STATE, "one or more background reports failed");
+        err.json = output.json;
+        Err(err)
+    }
+}
+
+fn run_background_report_for_project(
+    project_root: &Path,
+    config_override: Option<&Path>,
+    profile: Option<&str>,
+    overlay_path: Option<&Path>,
+    id: Option<&str>,
+) -> Value {
+    match write_surface_report_for_project(
+        project_root,
+        config_override,
+        profile,
+        overlay_path,
+        SurfaceLifecycleMode::Recommend,
+        SurfaceRebuildTrigger::Scheduled,
+    ) {
+        Ok(report) => json!({
+            "id": id,
+            "path": project_root,
+            "ok": true,
+            "report_json_path": report.report_json_path,
+            "report_markdown_path": report.report_markdown_path,
+            "pending_recommendation_count": report.pending_recommendation_count,
+        }),
+        Err(err) => json!({
+            "id": id,
+            "path": project_root,
+            "ok": false,
+            "message": err.message,
+            "details": err.details,
+        }),
+    }
+}
+
+fn append_background_run_log(
+    log_dir: &Path,
+    scope: BackgroundScopeArg,
+    project_root: &Path,
+    results: &[Value],
+    failures: usize,
+) -> std::result::Result<(), CliError> {
+    fs::create_dir_all(log_dir).map_err(internal_error)?;
+    let entry = json!({
+        "timestamp": now_string(),
+        "scope": scope.as_str(),
+        "project_root": project_root,
+        "project_count": results.len(),
+        "failure_count": failures,
+        "results": results,
+    });
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("background-runs.jsonl"))
+        .map_err(internal_error)?;
+    writeln!(file, "{entry}").map_err(internal_error)
+}
+
+fn build_background_plan(
+    cli: &Cli,
+    scope: BackgroundScopeArg,
+    controller: Option<&Path>,
+    interval_minutes: u32,
+    log_dir_override: Option<&Path>,
+    label_override: Option<&str>,
+) -> std::result::Result<BackgroundSchedulerPlan, CliError> {
+    let project_root = match scope {
+        BackgroundScopeArg::Project => project_root(cli).map_err(internal_error)?,
+        BackgroundScopeArg::Fleet => {
+            resolve_background_fleet_controller(cli, controller)?.project_root
+        }
+    };
+    let log_dir = log_dir_override
+        .map(PathBuf::from)
+        .unwrap_or_else(default_background_log_dir);
+    let executable = std::env::current_exe().map_err(internal_error)?;
+    let label = label_override.map(ToOwned::to_owned).unwrap_or_else(|| {
+        format!(
+            "dev.metactl.surface-report.{}.{}",
+            scope.as_str(),
+            short_path_hash(&project_root)
+        )
+    });
+    let mut run_args = vec![
+        "--project".to_string(),
+        project_root.to_string_lossy().to_string(),
+        "--no-input".to_string(),
+        "--json".to_string(),
+        "background".to_string(),
+        "run".to_string(),
+        "--scope".to_string(),
+        scope.as_str().to_string(),
+        "--log-dir".to_string(),
+        log_dir.to_string_lossy().to_string(),
+    ];
+    if scope == BackgroundScopeArg::Fleet {
+        run_args.push("--controller".to_string());
+        run_args.push(project_root.to_string_lossy().to_string());
+    }
+    background_scheduler_plan_for_os(
+        scope,
+        project_root,
+        label,
+        interval_minutes.max(1),
+        log_dir,
+        executable,
+        run_args,
+    )
+}
+
+fn background_scheduler_plan_for_os(
+    scope: BackgroundScopeArg,
+    project_root: PathBuf,
+    label: String,
+    interval_minutes: u32,
+    log_dir: PathBuf,
+    executable: PathBuf,
+    run_args: Vec<String>,
+) -> std::result::Result<BackgroundSchedulerPlan, CliError> {
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let run_command = command_display(&executable, &run_args);
+    #[cfg(target_os = "macos")]
+    {
+        let home = home_dir().ok_or_else(|| state_error(anyhow!("HOME is not set")))?;
+        let plist_path = home
+            .join("Library/LaunchAgents")
+            .join(format!("{label}.plist"));
+        let stdout_path = log_dir.join(format!("{label}.out.log"));
+        let stderr_path = log_dir.join(format!("{label}.err.log"));
+        let plist = macos_launch_agent_plist(
+            &label,
+            &executable,
+            &run_args,
+            interval_minutes,
+            &stdout_path,
+            &stderr_path,
+        );
+        let uid = current_uid_string().unwrap_or_else(|| "$(id -u)".to_string());
+        return Ok(BackgroundSchedulerPlan {
+            scope,
+            project_root,
+            label: label.clone(),
+            os: "macos-launchd".to_string(),
+            interval_minutes,
+            log_dir,
+            executable,
+            run_args,
+            files: vec![("launchagent".to_string(), plist_path.clone(), plist)],
+            install_commands: vec![
+                vec![
+                    "mkdir".to_string(),
+                    "-p".to_string(),
+                    plist_path.parent().unwrap().to_string_lossy().to_string(),
+                ],
+                vec![
+                    "launchctl".to_string(),
+                    "bootstrap".to_string(),
+                    format!("gui/{uid}"),
+                    plist_path.to_string_lossy().to_string(),
+                ],
+                vec![
+                    "launchctl".to_string(),
+                    "enable".to_string(),
+                    format!("gui/{uid}/{label}"),
+                ],
+                vec![
+                    "launchctl".to_string(),
+                    "kickstart".to_string(),
+                    "-k".to_string(),
+                    format!("gui/{uid}/{label}"),
+                ],
+            ],
+            status_commands: vec![vec![
+                "launchctl".to_string(),
+                "print".to_string(),
+                format!("gui/{uid}/{label}"),
+            ]],
+            uninstall_commands: vec![
+                vec![
+                    "launchctl".to_string(),
+                    "bootout".to_string(),
+                    format!("gui/{uid}"),
+                    plist_path.to_string_lossy().to_string(),
+                ],
+                vec!["rm".to_string(), plist_path.to_string_lossy().to_string()],
+            ],
+        });
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let config_dir =
+            user_config_dir().ok_or_else(|| state_error(anyhow!("HOME is not set")))?;
+        let systemd_dir = config_dir.join("systemd/user");
+        let service_path = systemd_dir.join(format!("{label}.service"));
+        let timer_path = systemd_dir.join(format!("{label}.timer"));
+        let service = linux_systemd_service(&label, &run_command, &log_dir);
+        let timer = linux_systemd_timer(&label, interval_minutes);
+        return Ok(BackgroundSchedulerPlan {
+            scope,
+            project_root,
+            label: label.clone(),
+            os: "linux-systemd-user".to_string(),
+            interval_minutes,
+            log_dir,
+            executable,
+            run_args,
+            files: vec![
+                ("systemd-service".to_string(), service_path.clone(), service),
+                ("systemd-timer".to_string(), timer_path.clone(), timer),
+            ],
+            install_commands: vec![
+                vec![
+                    "mkdir".to_string(),
+                    "-p".to_string(),
+                    systemd_dir.to_string_lossy().to_string(),
+                ],
+                vec![
+                    "systemctl".to_string(),
+                    "--user".to_string(),
+                    "daemon-reload".to_string(),
+                ],
+                vec![
+                    "systemctl".to_string(),
+                    "--user".to_string(),
+                    "enable".to_string(),
+                    "--now".to_string(),
+                    format!("{label}.timer"),
+                ],
+            ],
+            status_commands: vec![vec![
+                "systemctl".to_string(),
+                "--user".to_string(),
+                "status".to_string(),
+                format!("{label}.timer"),
+            ]],
+            uninstall_commands: vec![
+                vec![
+                    "systemctl".to_string(),
+                    "--user".to_string(),
+                    "disable".to_string(),
+                    "--now".to_string(),
+                    format!("{label}.timer"),
+                ],
+                vec![
+                    "rm".to_string(),
+                    service_path.to_string_lossy().to_string(),
+                    timer_path.to_string_lossy().to_string(),
+                ],
+                vec![
+                    "systemctl".to_string(),
+                    "--user".to_string(),
+                    "daemon-reload".to_string(),
+                ],
+            ],
+        });
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let task_name = format!(r"\metactl\{label}");
+        return Ok(BackgroundSchedulerPlan {
+            scope,
+            project_root,
+            label: task_name.clone(),
+            os: "windows-scheduled-task".to_string(),
+            interval_minutes,
+            log_dir,
+            executable,
+            run_args,
+            files: Vec::new(),
+            install_commands: vec![vec![
+                "schtasks".to_string(),
+                "/Create".to_string(),
+                "/F".to_string(),
+                "/SC".to_string(),
+                "MINUTE".to_string(),
+                "/MO".to_string(),
+                interval_minutes.to_string(),
+                "/TN".to_string(),
+                task_name.clone(),
+                "/TR".to_string(),
+                run_command,
+            ]],
+            status_commands: vec![vec![
+                "schtasks".to_string(),
+                "/Query".to_string(),
+                "/TN".to_string(),
+                task_name.clone(),
+            ]],
+            uninstall_commands: vec![vec![
+                "schtasks".to_string(),
+                "/Delete".to_string(),
+                "/F".to_string(),
+                "/TN".to_string(),
+                task_name,
+            ]],
+        });
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        let _ = (
+            scope,
+            project_root,
+            label,
+            interval_minutes,
+            log_dir,
+            executable,
+            run_args,
+        );
+        Err(state_error(anyhow!(
+            "background scheduler install is not supported on this OS"
+        )))
+    }
+}
+
+fn install_background_plan(plan: &BackgroundSchedulerPlan) -> std::result::Result<(), CliError> {
+    fs::create_dir_all(&plan.log_dir).map_err(internal_error)?;
+    for (_, path, contents) in &plan.files {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(internal_error)?;
+        }
+        fs::write(path, contents).map_err(internal_error)?;
+    }
+    install_background_plan_for_os(plan)
+}
+
+fn uninstall_background_plan(plan: &BackgroundSchedulerPlan) -> std::result::Result<(), CliError> {
+    uninstall_background_plan_for_os(plan)
+}
+
+#[cfg(target_os = "macos")]
+fn install_background_plan_for_os(
+    plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    let Some((_, plist_path, _)) = plan.files.first() else {
+        return Err(state_error(anyhow!("missing LaunchAgent plist path")));
+    };
+    let uid = current_uid_string().ok_or_else(|| state_error(anyhow!("could not resolve uid")))?;
+    let _ = Command::new("launchctl")
+        .arg("bootout")
+        .arg(format!("gui/{uid}"))
+        .arg(plist_path)
+        .output();
+    run_os_command(
+        Command::new("launchctl")
+            .arg("bootstrap")
+            .arg(format!("gui/{uid}"))
+            .arg(plist_path),
+    )?;
+    run_os_command(
+        Command::new("launchctl")
+            .arg("enable")
+            .arg(format!("gui/{uid}/{}", plan.label)),
+    )?;
+    run_os_command(
+        Command::new("launchctl")
+            .arg("kickstart")
+            .arg("-k")
+            .arg(format!("gui/{uid}/{}", plan.label)),
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn install_background_plan_for_os(
+    _plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    run_os_command(Command::new("systemctl").arg("--user").arg("daemon-reload"))?;
+    run_os_command(
+        Command::new("systemctl")
+            .arg("--user")
+            .arg("enable")
+            .arg("--now")
+            .arg(format!("{}.timer", _plan.label)),
+    )?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn install_background_plan_for_os(
+    plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    if let Some(command) = plan.install_commands.first() {
+        run_command_vec(command)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn install_background_plan_for_os(
+    _plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    Err(state_error(anyhow!(
+        "background scheduler install is not supported on this OS"
+    )))
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_background_plan_for_os(
+    plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    let Some((_, plist_path, _)) = plan.files.first() else {
+        return Err(state_error(anyhow!("missing LaunchAgent plist path")));
+    };
+    let uid = current_uid_string().ok_or_else(|| state_error(anyhow!("could not resolve uid")))?;
+    let _ = Command::new("launchctl")
+        .arg("bootout")
+        .arg(format!("gui/{uid}"))
+        .arg(plist_path)
+        .output();
+    if plist_path.exists() {
+        fs::remove_file(plist_path).map_err(internal_error)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn uninstall_background_plan_for_os(
+    plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    let _ = Command::new("systemctl")
+        .arg("--user")
+        .arg("disable")
+        .arg("--now")
+        .arg(format!("{}.timer", plan.label))
+        .output();
+    for (_, path, _) in &plan.files {
+        if path.exists() {
+            fs::remove_file(path).map_err(internal_error)?;
+        }
+    }
+    let _ = Command::new("systemctl")
+        .arg("--user")
+        .arg("daemon-reload")
+        .output();
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn uninstall_background_plan_for_os(
+    plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    if let Some(command) = plan.uninstall_commands.first() {
+        let _ = run_command_vec(command);
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn uninstall_background_plan_for_os(
+    _plan: &BackgroundSchedulerPlan,
+) -> std::result::Result<(), CliError> {
+    Err(state_error(anyhow!(
+        "background scheduler install is not supported on this OS"
+    )))
+}
+
+fn background_status(plan: &BackgroundSchedulerPlan) -> Value {
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(command) = plan.status_commands.first() {
+            return command_status_json(command);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(command) = plan.status_commands.first() {
+            return command_status_json(command);
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(command) = plan.status_commands.first() {
+            return command_status_json(command);
+        }
+    }
+    json!({
+        "installed": false,
+        "message": "status is not supported on this OS",
+    })
+}
+
+fn command_status_json(command: &[String]) -> Value {
+    match run_command_vec_output(command) {
+        Ok((success, stdout, stderr)) => json!({
+            "installed": success,
+            "command": command_vec_display(command),
+            "stdout": stdout,
+            "stderr": stderr,
+        }),
+        Err(message) => json!({
+            "installed": false,
+            "command": command_vec_display(command),
+            "message": message,
+        }),
+    }
+}
+
+fn resolve_background_fleet_controller(
+    cli: &Cli,
+    controller: Option<&Path>,
+) -> std::result::Result<FleetControllerContext, CliError> {
+    if let Some(controller) = controller {
+        let project_root = controller.to_path_buf();
+        let context = load_project_context(&project_root, None, cli.profile.as_deref(), None)
+            .map_err(state_error)?;
+        return Ok(FleetControllerContext {
+            id: None,
+            project_root,
+            context,
+            source: FleetControllerSource::Environment,
+        });
+    }
+    resolve_fleet_controller(cli)
+}
+
+fn default_background_log_dir() -> PathBuf {
+    if let Some(state_home) = std::env::var_os("XDG_STATE_HOME") {
+        if !state_home.is_empty() {
+            return PathBuf::from(state_home).join("metactl/background");
+        }
+    }
+    home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local/state/metactl/background")
+}
+
+#[cfg(target_os = "linux")]
+fn user_config_dir() -> Option<PathBuf> {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return Some(PathBuf::from(xdg));
+        }
+    }
+    Some(home_dir()?.join(".config"))
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("USERPROFILE")
+                .filter(|value| !value.is_empty())
+                .map(PathBuf::from)
+        })
+}
+
+fn short_path_hash(path: &Path) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(path.to_string_lossy().as_bytes());
+    let digest = hasher.finalize();
+    hex::encode(digest)[..12].to_string()
+}
+
+fn command_display(program: &Path, args: &[String]) -> String {
+    let mut parts = vec![shell_quote(&program.to_string_lossy())];
+    parts.extend(args.iter().map(|arg| shell_quote(arg)));
+    parts.join(" ")
+}
+
+fn command_vec_display(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|part| shell_quote(part))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '/' | '.' | '_' | '-' | ':' | '='))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_launch_agent_plist(
+    label: &str,
+    executable: &Path,
+    args: &[String],
+    interval_minutes: u32,
+    stdout_path: &Path,
+    stderr_path: &Path,
+) -> String {
+    let mut program_args = vec![format!(
+        "    <string>{}</string>",
+        xml_escape(&executable.to_string_lossy())
+    )];
+    program_args.extend(
+        args.iter()
+            .map(|arg| format!("    <string>{}</string>", xml_escape(arg))),
+    );
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{label}</string>
+  <key>ProgramArguments</key>
+  <array>
+{program_args}
+  </array>
+  <key>StartInterval</key>
+  <integer>{interval_seconds}</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{stdout_path}</string>
+  <key>StandardErrorPath</key>
+  <string>{stderr_path}</string>
+</dict>
+</plist>
+"#,
+        label = xml_escape(label),
+        program_args = program_args.join("\n"),
+        interval_seconds = interval_minutes * 60,
+        stdout_path = xml_escape(&stdout_path.to_string_lossy()),
+        stderr_path = xml_escape(&stderr_path.to_string_lossy()),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn linux_systemd_service(label: &str, run_command: &str, log_dir: &Path) -> String {
+    format!(
+        "[Unit]\nDescription=metactl report-only surface refresh ({label})\n\n[Service]\nType=oneshot\nExecStart={run_command}\nStandardOutput=append:{}/{}.out.log\nStandardError=append:{}/{}.err.log\n",
+        log_dir.display(),
+        label,
+        log_dir.display(),
+        label
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn linux_systemd_timer(label: &str, interval_minutes: u32) -> String {
+    format!(
+        "[Unit]\nDescription=metactl report-only surface refresh timer ({label})\n\n[Timer]\nOnBootSec=1min\nOnUnitActiveSec={}min\nUnit={label}.service\n\n[Install]\nWantedBy=timers.target\n",
+        interval_minutes
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+#[cfg(target_os = "macos")]
+fn current_uid_string() -> Option<String> {
+    let output = Command::new("id").arg("-u").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn run_os_command(command: &mut Command) -> std::result::Result<(), CliError> {
+    let output = command.output().map_err(internal_error)?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Err(state_error(anyhow!(
+            "scheduler command failed: stdout={stdout} stderr={stderr}"
+        )))
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn run_command_vec(command: &[String]) -> std::result::Result<(), CliError> {
+    let (success, stdout, stderr) =
+        run_command_vec_output(command).map_err(|err| state_error(anyhow!(err)))?;
+    if success {
+        Ok(())
+    } else {
+        Err(state_error(anyhow!(
+            "scheduler command failed: stdout={stdout} stderr={stderr}"
+        )))
+    }
+}
+
+fn run_command_vec_output(
+    command: &[String],
+) -> std::result::Result<(bool, String, String), String> {
+    let Some((program, args)) = command.split_first() else {
+        return Err("empty command".to_string());
+    };
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|err| err.to_string())?;
+    Ok((
+        output.status.success(),
+        String::from_utf8_lossy(&output.stdout).trim().to_string(),
+        String::from_utf8_lossy(&output.stderr).trim().to_string(),
+    ))
+}
+
+fn cmd_surface_pin(
+    cli: &Cli,
+    args: &SurfacePinArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let action = if args.command {
+        SurfaceOverrideAction::PinCommand
+    } else {
+        SurfaceOverrideAction::PinHot
+    };
+    let overrides = surface_usage::set_surface_override(&project_root, &args.pack_id, action)
+        .map_err(state_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Surface override pinned for {}.\nNext: metactl surface report",
+                args.pack_id
+            ),
+        ),
+        json: success_json(
+            "surface",
+            Some(&project_root),
+            json!({
+                "action": "pin",
+                "pack_id": args.pack_id,
+                "overrides": overrides,
+                "next_steps": ["metactl surface report"],
+            }),
+        ),
+    })
+}
+
+fn cmd_surface_block(
+    cli: &Cli,
+    args: &SurfacePackArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let overrides = surface_usage::set_surface_override(
+        &project_root,
+        &args.pack_id,
+        SurfaceOverrideAction::Block,
+    )
+    .map_err(state_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Surface override blocked for {}.\nNext: metactl surface report",
+                args.pack_id
+            ),
+        ),
+        json: success_json(
+            "surface",
+            Some(&project_root),
+            json!({
+                "action": "block",
+                "pack_id": args.pack_id,
+                "overrides": overrides,
+                "next_steps": ["metactl surface report"],
+            }),
+        ),
+    })
+}
+
+fn cmd_surface_reset(
+    cli: &Cli,
+    args: &SurfaceResetArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    if args.pack_id.is_none() && !args.all {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "surface reset requires a pack id or --all.",
+        ));
+    }
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let overrides = surface_usage::reset_surface_override(&project_root, args.pack_id.as_deref())
+        .map_err(state_error)?;
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            "Surface override reset.\nNext: metactl surface report".to_string(),
+        ),
+        json: success_json(
+            "surface",
+            Some(&project_root),
+            json!({
+                "action": "reset",
+                "pack_id": args.pack_id,
+                "all": args.all,
+                "overrides": overrides,
+                "next_steps": ["metactl surface report"],
+            }),
+        ),
+    })
+}
+
 fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
@@ -6914,12 +8572,14 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         derived_surface_details.as_deref(),
         selected_surface_mode,
     );
+    let surface_usage_summary = surface_usage::surface_report_summary_json(&project_root);
     let surface_details = derived_surface_details;
     Ok(explain_output(
         &project_root,
         args.query.as_deref(),
         &explain,
         &target_projection,
+        &surface_usage_summary,
         surface_details.as_deref(),
         pack_lifecycle.as_ref(),
         &pack_sources,
@@ -8445,6 +10105,7 @@ fn explain_output(
     query: Option<&str>,
     explain: &ExplainResult,
     target_projection: &Value,
+    surface_usage_summary: &Value,
     surface_details: Option<&[metactl::library_registry::PackSurfaceSummary]>,
     pack_lifecycle: Option<&std::collections::BTreeMap<String, metactl::PackLifecycle>>,
     pack_sources: &Value,
@@ -8498,6 +10159,18 @@ fn explain_output(
     if let Some(surface_mode) = target_projection["surface_selection_mode"].as_str() {
         lines.push(format!("- Surface selection mode: {surface_mode}."));
     }
+    lines.push("Surface recommendations:".to_string());
+    let stats_state = if surface_usage_summary["stats_stale"].as_bool() == Some(true) {
+        "stale"
+    } else if surface_usage_summary["stats_exists"].as_bool() == Some(true) {
+        "current"
+    } else {
+        "not built"
+    };
+    lines.push(format!("- Usage stats: {stats_state}."));
+    if let Some(next) = surface_usage_summary["next_reversible_action"].as_str() {
+        lines.push(format!("- Next reversible action: {next}."));
+    }
     if let Some(surface_details) = surface_details {
         if !surface_details.is_empty() {
             lines.push("Surface detail:".to_string());
@@ -8549,6 +10222,7 @@ fn explain_output(
                 "unknown_or_unsupported": explain.unknown_or_unsupported,
                 "resolve_graph": explain.resolve_graph,
                 "target_projection": target_projection,
+                "surface_usage": surface_usage_summary,
                 "surface_details": surface_details,
                 "pack_lifecycle": pack_lifecycle,
                 "pack_sources": pack_sources,
@@ -9632,6 +11306,18 @@ fn target_projection_json(
     })
 }
 
+fn known_surface_pack_ids(context: &metactl::project::ProjectContext) -> Result<Vec<String>> {
+    if !context.has_corpus() {
+        return Ok(surface_usage::known_pack_ids_from_refs(
+            context.config_file.packs.clone(),
+        ));
+    }
+    let config = context.effective_config(&ConfigOverrides::default())?;
+    Ok(surface_usage::known_pack_ids_from_refs(
+        config.packs.into_iter().map(|pack_ref| pack_ref.id),
+    ))
+}
+
 fn instruction_projection_mode_label(mode: &metactl::InstructionProjectionMode) -> &'static str {
     match mode {
         metactl::InstructionProjectionMode::Inline => "inline",
@@ -9643,6 +11329,7 @@ fn surface_selection_mode_label(mode: &metactl::SurfaceSelectionMode) -> &'stati
     match mode {
         metactl::SurfaceSelectionMode::Minimal => "minimal",
         metactl::SurfaceSelectionMode::Full => "full",
+        metactl::SurfaceSelectionMode::Auto => "auto",
     }
 }
 

@@ -7,8 +7,8 @@ This guide covers the public local `metactl` CLI.
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.14 --locked
-# Installed package `metactl v0.1.14` (executable `metactl`)
+cargo install metactl --version 0.1.15 --locked
+# Installed package `metactl v0.1.15` (executable `metactl`)
 ```
 
 The published `metactl` package bundles the public starter library. You do not need a checkout of this repository for the built-in demo, `metactl list packs`, or the default `python-refactor` workflow.
@@ -16,8 +16,8 @@ The published `metactl` package bundles the public starter library. You do not n
 Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 
 ```bash
-cargo install metactld --version 0.1.14 --locked
-# Installed package `metactld v0.1.14` (executable `metactld`)
+cargo install metactld --version 0.1.15 --locked
+# Installed package `metactld v0.1.15` (executable `metactld`)
 ```
 
 The pinned commands above reproduce this release. To update to the latest
@@ -26,8 +26,8 @@ published crates.io versions later:
 ```bash
 cargo install metactl --locked --force
 cargo install metactld --locked --force
-# Installed package `metactl v0.1.14` (executable `metactl`)
-# Installed package `metactld v0.1.14` (executable `metactld`)
+# Installed package `metactl v0.1.15` (executable `metactl`)
+# Installed package `metactld v0.1.15` (executable `metactld`)
 ```
 
 Check installed binaries:
@@ -35,8 +35,8 @@ Check installed binaries:
 ```bash
 metactl --version
 metactld --version
-# metactl 0.1.14 (metactl/v2alpha1)
-# metactld 0.1.14
+# metactl 0.1.15 (metactl/v2alpha1)
+# metactld 0.1.15
 ```
 
 For source development:
@@ -45,8 +45,8 @@ For source development:
 git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo build -p metactl -p metactld
-#    Compiling metactl v0.1.14 (...)
-#    Compiling metactld v0.1.14 (...)
+#    Compiling metactl v0.1.15 (...)
+#    Compiling metactld v0.1.15 (...)
 #     Finished `dev` profile ...
 ```
 
@@ -107,11 +107,30 @@ metactl --project /path/to/project setup --target codex-cli --yes
 metactl --project /path/to/project ignore fix --plan
 ```
 
+`setup --plan` includes a report-only background refresh recommendation by
+default. Persistent OS scheduler installation is explicit:
+
+```bash
+metactl --project /path/to/project background plan --scope project
+metactl --project /path/to/project background install --scope project --yes
+metactl --project /path/to/project background status --scope project
+```
+
+To make setup perform that install in one confirmed flow:
+
+```bash
+metactl --project /path/to/project setup --target codex-cli --install-background --yes
+```
+
+Use `setup --no-background` when the project should not recommend a scheduled
+refresh.
+
 For agent or CI use, keep the same flow non-interactive:
 
 ```bash
 metactl --project /path/to/project --agent setup --plan --target codex-cli
 metactl --project /path/to/project setup --target codex-cli --artifact-policy portable-first --yes
+metactl --project /path/to/project background install --scope project --yes
 metactl --project /path/to/project --agent ignore fix --plan
 ```
 
