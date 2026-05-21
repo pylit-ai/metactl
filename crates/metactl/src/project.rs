@@ -1035,26 +1035,27 @@ pub fn resolve_starter_library_roots(
 ) -> Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    let bundled = ensure_bundled_starter_library_root()?;
-    let bundled_manifest_digest = digest_path(&bundled.join("library.json")).ok();
-    let bundled_library_digest = bundled_starter_library_digest();
-    push_unique_library_root(&mut roots, &mut seen, bundled);
-    for item in starter_library {
-        let path = PathBuf::from(item);
-        let root = if path.is_absolute() {
-            path
-        } else {
-            project_root.join(path)
-        };
-        if is_bundled_starter_equivalent(
-            &root,
-            bundled_manifest_digest.as_deref(),
-            &bundled_library_digest,
-        ) {
-            continue;
+    if !starter_library.is_empty() {
+        let mut has_explicit_manifest = false;
+        for item in starter_library {
+            let path = PathBuf::from(item);
+            let root = if path.is_absolute() {
+                path
+            } else {
+                project_root.join(path)
+            };
+            has_explicit_manifest |= root.join("library.json").exists();
+            push_unique_library_root(&mut roots, &mut seen, root);
         }
-        push_unique_library_root(&mut roots, &mut seen, root);
+        if !has_explicit_manifest {
+            let bundled = ensure_bundled_starter_library_root()?;
+            push_unique_library_root(&mut roots, &mut seen, bundled);
+        }
+        return Ok(roots);
     }
+
+    let bundled = ensure_bundled_starter_library_root()?;
+    push_unique_library_root(&mut roots, &mut seen, bundled);
     Ok(roots)
 }
 
@@ -1861,6 +1862,19 @@ mod tests {
         assert_eq!(roots.len(), 1);
         assert!(roots[0].join("library.json").exists());
         assert!(roots[0].join("packs").join("python-refactor.json").exists());
+    }
+
+    #[test]
+    fn explicit_starter_library_replaces_bundled_default() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let explicit = temp.path().join("starter");
+        fs::create_dir_all(&explicit).expect("starter dir");
+        fs::write(explicit.join("library.json"), b"{}").expect("library manifest");
+
+        let roots = resolve_starter_library_roots(temp.path(), &["starter".to_string()])
+            .expect("starter roots");
+
+        assert_eq!(roots, vec![explicit]);
     }
 
     #[test]

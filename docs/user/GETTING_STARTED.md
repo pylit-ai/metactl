@@ -7,8 +7,8 @@ This guide covers the public local `metactl` CLI.
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.16 --locked
-# Installed package `metactl v0.1.16` (executable `metactl`)
+cargo install metactl --version 0.1.17 --locked
+# Installed package `metactl v0.1.17` (executable `metactl`)
 ```
 
 The published `metactl` package bundles the public starter library. You do not need a checkout of this repository for the built-in demo, `metactl list packs`, or the default `python-refactor` workflow.
@@ -16,8 +16,8 @@ The published `metactl` package bundles the public starter library. You do not n
 Install `metactld` only if you need the local JSON-RPC/MCP daemon:
 
 ```bash
-cargo install metactld --version 0.1.16 --locked
-# Installed package `metactld v0.1.16` (executable `metactld`)
+cargo install metactld --version 0.1.17 --locked
+# Installed package `metactld v0.1.17` (executable `metactld`)
 ```
 
 The pinned commands above reproduce this release. To update to the latest
@@ -26,8 +26,8 @@ published crates.io versions later:
 ```bash
 cargo install metactl --locked --force
 cargo install metactld --locked --force
-# Installed package `metactl v0.1.16` (executable `metactl`)
-# Installed package `metactld v0.1.16` (executable `metactld`)
+# Installed package `metactl v0.1.17` (executable `metactl`)
+# Installed package `metactld v0.1.17` (executable `metactld`)
 ```
 
 Check installed binaries:
@@ -35,8 +35,8 @@ Check installed binaries:
 ```bash
 metactl --version
 metactld --version
-# metactl 0.1.16 (metactl/v2alpha1)
-# metactld 0.1.16
+# metactl 0.1.17 (metactl/v2alpha1)
+# metactld 0.1.17
 ```
 
 For source development:
@@ -45,8 +45,8 @@ For source development:
 git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo build -p metactl -p metactld
-#    Compiling metactl v0.1.16 (...)
-#    Compiling metactld v0.1.16 (...)
+#    Compiling metactl v0.1.17 (...)
+#    Compiling metactld v0.1.17 (...)
 #     Finished `dev` profile ...
 ```
 
