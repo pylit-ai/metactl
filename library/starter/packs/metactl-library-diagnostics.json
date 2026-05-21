@@ -1,0 +1,75 @@
+{
+  "kind": "pack",
+  "id": "metactl-library-diagnostics",
+  "version": "1.0.0",
+  "title": "metactl Library Diagnostics",
+  "description": "Diagnostic skills for reviewing pack boundaries, verifying projected agent surfaces, and explaining effective metactl profile/config pack selection.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": [
+    "metactl",
+    "library",
+    "diagnostics",
+    "profiles",
+    "packs",
+    "surfaces",
+    "verification"
+  ],
+  "compatible_roles": [
+    "builder",
+    "reviewer",
+    "release-manager"
+  ],
+  "compatible_targets": [
+    "claude-code",
+    "codex-cli",
+    "cursor",
+    "gemini-cli",
+    "openclaw"
+  ],
+  "resources": [
+    {
+      "path": "packs/metactl-library-diagnostics/pack-boundary-review/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/metactl-library-diagnostics/surface-projection-verifier/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/metactl-library-diagnostics/metactl-config-diagnostics/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    }
+  ],
+  "imports": [
+    {
+      "ecosystem": "first_party",
+      "origin": "starter-library"
+    }
+  ],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": [
+      "claude-code",
+      "codex-cli",
+      "cursor",
+      "gemini-cli",
+      "openclaw"
+    ],
+    "last_verified_at": "2026-05-21T12:00:00Z",
+    "evidence_refs": [
+      "tests:starter-library"
+    ]
+  },
+  "metadata": {
+    "pack_status": "starter-promoted"
+  }
+}

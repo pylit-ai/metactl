@@ -1,0 +1,19 @@
+{
+  "api_version": "metactl/v2alpha1",
+  "subject_ref": {
+    "kind": "pack",
+    "id": "metactl-library-diagnostics",
+    "version": "1.0.0"
+  },
+  "digest": "sha256:224b63662d49ef350fe4dfc713009d1110e4909142ba585da57cc9b2353928e8",
+  "origin": "library/starter/packs/metactl-library-diagnostics.json",
+  "imported_from_ecosystem": "first_party",
+  "review": {
+    "reviewed_by": "platform-review",
+    "reviewed_at": "2026-05-21T12:00:00Z",
+    "promotion_status": "promoted"
+  },
+  "validation_refs": [
+    "tests:starter-library"
+  ]
+}

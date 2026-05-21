@@ -2,11 +2,11 @@
   "api_version": "metactl/v2alpha1",
   "kind": "starter_library",
   "id": "metactl-first-party-starter",
-  "version": "2026.05.17",
+  "version": "2026.05.21",
   "title": "metactl First-Party Starter Library",
   "owner": "platform",
   "minimum_roles": 3,
-  "minimum_packs": 12,
+  "minimum_packs": 13,
   "supported_targets": [
     "claude-code",
     "codex-cli",
