@@ -133,6 +133,7 @@ impl<K: MetactlKernel> McpService<K> {
                 let scratch =
                     tempfile::tempdir().context("create compile preview scratch directory")?;
                 args.project_root = Some(scratch.path().to_string_lossy().to_string());
+                args.durable_staging = false;
                 Ok(tool_success(serde_json::to_value(
                     self.kernel.compile(args)?,
                 )?))

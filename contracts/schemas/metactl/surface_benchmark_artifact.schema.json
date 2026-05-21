@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/surface_benchmark_artifact.schema.json",
+  "title": "metactl Surface Benchmark Artifact",
+  "description": "Local deterministic proof artifact for usage-ranked surface budget and route retention. This is not a provider-backed model benchmark.",
+  "type": "object",
+  "$defs": {
+    "surface_mode": {
+      "type": "string",
+      "enum": ["minimal", "auto", "full"]
+    },
+    "mode_metrics": {
+      "type": "object",
+      "properties": {
+        "mode": { "$ref": "#/$defs/surface_mode" },
+        "generated_output_count": { "type": "integer", "minimum": 0 },
+        "generated_surface_bytes": { "type": "integer", "minimum": 0 },
+        "estimated_context_tokens": { "type": "integer", "minimum": 0 },
+        "root_instruction_bytes": { "type": "integer", "minimum": 0 },
+        "native_skill_count": { "type": "integer", "minimum": 0 },
+        "native_skill_bytes": { "type": "integer", "minimum": 0 },
+        "slash_command_count": { "type": "integer", "minimum": 0 },
+        "slash_command_bytes": { "type": "integer", "minimum": 0 },
+        "mcp_searchable_count": { "type": "integer", "minimum": 0 },
+        "suppressed_surface_count": { "type": "integer", "minimum": 0 },
+        "emitted_surface_count": { "type": "integer", "minimum": 0 },
+        "paths": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/path" },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "mode",
+        "generated_output_count",
+        "generated_surface_bytes",
+        "estimated_context_tokens",
+        "root_instruction_bytes",
+        "native_skill_count",
+        "native_skill_bytes",
+        "slash_command_count",
+        "slash_command_bytes",
+        "mcp_searchable_count",
+        "suppressed_surface_count",
+        "emitted_surface_count",
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "task_case_result": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/slug" },
+        "query": { "type": "string", "minLength": 1 },
+        "expected_pack": { "$ref": "common.schema.json#/$defs/slug" },
+        "expected_command": { "$ref": "common.schema.json#/$defs/path" },
+        "rank": { "type": ["integer", "null"], "minimum": 1 },
+        "recall_at_1": { "type": "boolean" },
+        "recall_at_3": { "type": "boolean" },
+        "mrr": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_command_available": { "type": "boolean" },
+        "body_read_route_available": { "type": "boolean" },
+        "false_negative": { "type": "boolean" },
+        "top_matches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pack_id": { "$ref": "common.schema.json#/$defs/slug" },
+              "score": { "type": "number" }
+            },
+            "required": ["pack_id", "score"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "id",
+        "query",
+        "expected_pack",
+        "rank",
+        "recall_at_1",
+        "recall_at_3",
+        "mrr",
+        "expected_command_available",
+        "body_read_route_available",
+        "false_negative",
+        "top_matches"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "properties": {
+    "api_version": { "const": "metactl/v2alpha1" },
+    "generated_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "evaluation_kind": { "const": "surface_budget_and_route_retention" },
+    "benchmark_scope": { "const": "local_deterministic_projection" },
+    "notes": { "type": "string", "minLength": 1, "maxLength": 2000 },
+    "library_root": { "$ref": "common.schema.json#/$defs/path" },
+    "metactl_version": { "type": "string", "minLength": 1 },
+    "repo": { "$ref": "common.schema.json#/$defs/path" },
+    "profile": { "type": "string" },
+    "target": { "$ref": "common.schema.json#/$defs/slug" },
+    "project": {
+      "type": "object",
+      "properties": {
+        "role": { "$ref": "common.schema.json#/$defs/slug" },
+        "policy": { "$ref": "common.schema.json#/$defs/slug" },
+        "target": { "$ref": "common.schema.json#/$defs/slug" },
+        "packs": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/slug" },
+          "uniqueItems": true
+        }
+      },
+      "required": ["role", "policy", "target", "packs"],
+      "additionalProperties": false
+    },
+    "modes": {
+      "type": "object",
+      "properties": {
+        "minimal": { "$ref": "#/$defs/mode_metrics" },
+        "auto": { "$ref": "#/$defs/mode_metrics" },
+        "full": { "$ref": "#/$defs/mode_metrics" }
+      },
+      "required": ["minimal", "auto", "full"],
+      "additionalProperties": false
+    },
+    "task_cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/task_case_result" }
+    },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "auto_generated_surface_reduction": { "type": "number" },
+        "auto_skill_body_reduction": { "type": "number" },
+        "expected_pack_recall_at_1": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_pack_recall_at_3": { "type": "number", "minimum": 0, "maximum": 1 },
+        "mrr": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_command_availability": { "type": "number", "minimum": 0, "maximum": 1 },
+        "body_read_route_availability": { "type": "number", "minimum": 0, "maximum": 1 },
+        "false_negative_count": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "auto_generated_surface_reduction",
+        "auto_skill_body_reduction",
+        "expected_pack_recall_at_1",
+        "expected_pack_recall_at_3",
+        "mrr",
+        "expected_command_availability",
+        "body_read_route_availability",
+        "false_negative_count"
+      ],
+      "additionalProperties": false
+    },
+    "thresholds": {
+      "type": "object",
+      "properties": {
+        "auto_generated_surface_reduction_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "auto_skill_body_reduction_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_pack_recall_at_3_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_command_availability_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "false_negative_count_max": { "type": "integer", "minimum": 0 }
+      },
+      "required": [
+        "auto_generated_surface_reduction_min",
+        "auto_skill_body_reduction_min",
+        "expected_pack_recall_at_3_min",
+        "expected_command_availability_min",
+        "false_negative_count_max"
+      ],
+      "additionalProperties": false
+    },
+    "verdict": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["pass", "warn", "fail"] },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "required": ["status", "reasons"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "api_version",
+    "generated_at",
+    "evaluation_kind",
+    "benchmark_scope",
+    "notes",
+    "library_root",
+    "metactl_version",
+    "repo",
+    "profile",
+    "target",
+    "project",
+    "modes",
+    "task_cases",
+    "metrics",
+    "thresholds",
+    "verdict"
+  ],
+  "additionalProperties": false
+}

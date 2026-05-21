@@ -10,7 +10,7 @@ MCP_SCOPE ?= project
 MCP_LIBRARY_ROOT ?= $(CURDIR)/library/starter
 MCP_PROJECT_ROOT ?= $(CURDIR)
 
-.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval run-metactld smoke-stdio smoke-cli smoke-dogfood smoke-packaged-metactl verify-packaged-starter-mirror verify-v1-charter verify-public-boundary verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-v1-release-gate verify-v1-lightweight-control-plane verify
+.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval metactl-surface-benchmark run-metactld smoke-stdio smoke-cli smoke-dogfood smoke-packaged-metactl verify-packaged-starter-mirror verify-v1-charter verify-public-boundary verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-v1-release-gate verify-v1-lightweight-control-plane verify
 validate-contracts: $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/validate_contracts.py --include-starter-library --include-targets --include-knowledge-fixtures --library-stack-fixtures
 
@@ -31,6 +31,11 @@ metactl-skill-eval: $(VALIDATE_STAMP)
 	$(CARGO) build -p metactl
 	$(PYTHON) scripts/evaluate_skills.py --metactl-bin ./target/debug/metactl --output tmp/starter-skill-eval.json
 	$(VALIDATE_PYTHON) -c 'import json, pathlib, sys; sys.path.insert(0, str(pathlib.Path("scripts").resolve())); import validate_contracts; root = pathlib.Path(".").resolve(); registry = validate_contracts.schema_registry(); data = json.loads((root / "tmp/starter-skill-eval.json").read_text()); validate_contracts.validate_instance(data, root / "contracts/schemas/metactl/skill_eval_artifact.schema.json", registry); print("validated: tmp/starter-skill-eval.json")'
+
+metactl-surface-benchmark: $(VALIDATE_STAMP)
+	$(CARGO) build -p metactl
+	$(PYTHON) scripts/evaluate_surface_benchmarks.py --metactl-bin ./target/debug/metactl --output tmp/starter-surface-benchmark.json
+	$(VALIDATE_PYTHON) -c 'import json, pathlib, sys; sys.path.insert(0, str(pathlib.Path("scripts").resolve())); import validate_contracts; root = pathlib.Path(".").resolve(); registry = validate_contracts.schema_registry(); data = json.loads((root / "tmp/starter-surface-benchmark.json").read_text()); validate_contracts.validate_instance(data, root / "contracts/schemas/metactl/surface_benchmark_artifact.schema.json", registry); print("validated: tmp/starter-surface-benchmark.json")'
 
 metactl-install:
 	$(CARGO) install --path crates/metactl --locked
@@ -89,7 +94,7 @@ verify-v1-release-gate: $(VALIDATE_STAMP)
 verify-v1-lightweight-control-plane: $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/verify_v1_lightweight_control_plane.py --report tmp/v1-lightweight-control-plane-report.json
 
-verify: verify-v1-charter verify-public-boundary verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-v1-release-gate metactl-validate-contracts metactl-test metactl-check smoke-stdio smoke-cli smoke-dogfood
+verify: verify-v1-charter verify-public-boundary verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-v1-release-gate metactl-validate-contracts metactl-surface-benchmark metactl-test metactl-check smoke-stdio smoke-cli smoke-dogfood
 
 $(VALIDATE_STAMP): requirements-dev.txt
 	$(PYTHON) -m venv $(VALIDATE_VENV)

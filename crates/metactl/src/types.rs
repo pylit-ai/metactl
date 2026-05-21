@@ -1124,6 +1124,8 @@ pub struct CompileParams {
     pub surface_selection_mode: Option<SurfaceSelectionMode>,
     #[serde(default)]
     pub emit_policy_report: bool,
+    #[serde(default = "default_true")]
+    pub durable_staging: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
 }

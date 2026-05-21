@@ -1312,6 +1312,11 @@ pub fn write_lock(path: &Path, lock: &ProjectLock) -> Result<()> {
     atomic_write(path, &bytes).with_context(|| format!("write {}", path.display()))
 }
 
+pub fn write_lock_relaxed(path: &Path, lock: &ProjectLock) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(lock).context("serialize metactl.lock.json")?;
+    atomic_write_relaxed(path, &bytes).with_context(|| format!("write {}", path.display()))
+}
+
 pub fn compile_manifest_path(project_root: &Path, target: &Ref) -> PathBuf {
     project_root
         .join(".metactl")
@@ -1343,6 +1348,14 @@ pub fn write_policy_report(path: &Path, report: &PolicyEnforcementReport) -> Res
     }
     let bytes = serde_json::to_vec_pretty(report).context("serialize policy report")?;
     atomic_write(path, &bytes).with_context(|| format!("write {}", path.display()))
+}
+
+pub fn write_policy_report_relaxed(path: &Path, report: &PolicyEnforcementReport) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    let bytes = serde_json::to_vec_pretty(report).context("serialize policy report")?;
+    atomic_write_relaxed(path, &bytes).with_context(|| format!("write {}", path.display()))
 }
 
 pub fn digest_bytes(bytes: &[u8]) -> String {
@@ -1518,6 +1531,14 @@ pub fn append_history_entry(project_root: &Path, entry: &HistoryEntry) -> Result
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_write_with_durability(path, bytes, true)
+}
+
+pub fn atomic_write_relaxed(path: &Path, bytes: &[u8]) -> Result<()> {
+    atomic_write_with_durability(path, bytes, false)
+}
+
+fn atomic_write_with_durability(path: &Path, bytes: &[u8], durable: bool) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("{} has no parent directory", path.display()))?;
@@ -1536,7 +1557,9 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
             .with_context(|| format!("create temp {}", tmp_path.display()))?;
         file.write_all(bytes)
             .with_context(|| format!("write temp {}", tmp_path.display()))?;
-        let _ = file.sync_all();
+        if durable {
+            let _ = file.sync_all();
+        }
     }
     #[cfg(windows)]
     if path.exists() {
@@ -1544,8 +1567,10 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     }
     fs::rename(&tmp_path, path)
         .with_context(|| format!("rename {} -> {}", tmp_path.display(), path.display()))?;
-    if let Ok(dir) = File::open(parent) {
-        let _ = dir.sync_all();
+    if durable {
+        if let Ok(dir) = File::open(parent) {
+            let _ = dir.sync_all();
+        }
     }
     Ok(())
 }
@@ -1942,5 +1967,30 @@ mod tests {
                 ("missing", LinkedProjectStatus::MissingPath),
             ]
         );
+    }
+
+    #[test]
+    fn relaxed_atomic_write_preserves_atomic_write_visible_behavior() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("generated").join("compile.manifest.json");
+
+        atomic_write_relaxed(&path, b"first").expect("relaxed write first");
+        assert_eq!(fs::read(&path).expect("read first"), b"first");
+
+        atomic_write_relaxed(&path, b"second").expect("relaxed write second");
+        assert_eq!(fs::read(&path).expect("read second"), b"second");
+        assert!(temp
+            .path()
+            .join("generated")
+            .read_dir()
+            .expect("read generated dir")
+            .all(|entry| {
+                let name = entry
+                    .expect("dir entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned();
+                !name.contains(".tmp-")
+            }));
     }
 }

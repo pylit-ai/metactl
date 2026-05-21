@@ -1,0 +1,51 @@
+{
+  "project": {
+    "role": "builder",
+    "policy": "brownfield-safe-builder",
+    "target": "codex-cli",
+    "packs": [
+      "python-refactor",
+      "unit-test-loop",
+      "migration-guard",
+      "metactl-skill-improvement",
+      "agentic-artifact-forge"
+    ]
+  },
+  "thresholds": {
+    "auto_generated_surface_reduction_min": 0.05,
+    "auto_skill_body_reduction_min": 0.05,
+    "expected_pack_recall_at_3_min": 1.0,
+    "expected_command_availability_min": 1.0,
+    "false_negative_count_max": 0
+  },
+  "task_cases": [
+    {
+      "id": "python-refactor-route",
+      "query": "safe python refactor api service code",
+      "expected_pack": "python-refactor"
+    },
+    {
+      "id": "migration-safety-route",
+      "query": "database migration safety rollback",
+      "expected_pack": "migration-guard"
+    },
+    {
+      "id": "test-verification-command-route",
+      "query": "run targeted tests verification loop",
+      "expected_pack": "unit-test-loop",
+      "expected_command": ".codex/commands/run-targeted-tests.md"
+    },
+    {
+      "id": "skill-improvement-command-route",
+      "query": "improve metactl skill command feedback",
+      "expected_pack": "metactl-skill-improvement",
+      "expected_command": ".codex/commands/metactl-improve-skill.md"
+    },
+    {
+      "id": "artifact-forge-command-route",
+      "query": "turn prompts commands rules into artifacts",
+      "expected_pack": "agentic-artifact-forge",
+      "expected_command": ".codex/commands/agentic-artifact-forge.md"
+    }
+  ]
+}

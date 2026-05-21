@@ -106,6 +106,7 @@ fn sandbox_greenfield_apply_revert() {
             apply_mode: ApplyMode::Copy,
             surface_selection_mode: None,
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(project_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -163,6 +164,7 @@ fn sandbox_brownfield_patch_and_refusal() {
             apply_mode: ApplyMode::Patch,
             surface_selection_mode: None,
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(patch_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -193,6 +195,7 @@ fn sandbox_brownfield_patch_and_refusal() {
             apply_mode: ApplyMode::Copy,
             surface_selection_mode: None,
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(refusal_root.to_string_lossy().to_string()),
         })
         .expect("compile refusal");
@@ -230,6 +233,7 @@ fn drift_detection() {
             apply_mode: ApplyMode::Copy,
             surface_selection_mode: None,
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(project_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -268,6 +272,7 @@ fn managed_drift_apply_patch_repairs_codex_agents() {
             apply_mode: ApplyMode::Patch,
             surface_selection_mode: None,
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(project_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -346,6 +351,7 @@ fn magicwormhole_overlay_entrypoints() {
                 apply_mode: ApplyMode::Copy,
                 surface_selection_mode: None,
                 emit_policy_report: true,
+                durable_staging: true,
                 project_root: Some(project_root.to_string_lossy().to_string()),
             })
             .expect("compile");
@@ -385,6 +391,7 @@ fn openclaw_target() {
             apply_mode: ApplyMode::Copy,
             surface_selection_mode: None,
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(project_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -424,6 +431,7 @@ fn codex_multi_surface_emission_uses_pack_scoped_surface_paths() {
             apply_mode: ApplyMode::Copy,
             surface_selection_mode: Some(metactl::SurfaceSelectionMode::Full),
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(project_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -477,6 +485,7 @@ fn merge_degradation_is_explicit_when_target_cannot_emit_separate_surfaces() {
             apply_mode: ApplyMode::Copy,
             surface_selection_mode: Some(metactl::SurfaceSelectionMode::Full),
             emit_policy_report: true,
+            durable_staging: true,
             project_root: Some(project_root.to_string_lossy().to_string()),
         })
         .expect("compile");
@@ -564,6 +573,7 @@ fn target_native_pack_resources() {
                 apply_mode: ApplyMode::Copy,
                 surface_selection_mode: None,
                 emit_policy_report: true,
+                durable_staging: true,
                 project_root: Some(project_root.to_string_lossy().to_string()),
             })
             .expect("compile");
@@ -644,6 +654,7 @@ fn reference_based_instruction_indexes() {
                 apply_mode: ApplyMode::Copy,
                 surface_selection_mode: None,
                 emit_policy_report: true,
+                durable_staging: true,
                 project_root: Some(project_root.to_string_lossy().to_string()),
             })
             .expect("compile");

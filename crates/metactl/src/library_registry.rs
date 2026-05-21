@@ -1,6 +1,8 @@
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::SystemTime;
 
 use anyhow::{anyhow, Context, Result};
 use serde::de::DeserializeOwned;
@@ -28,6 +30,15 @@ const CANDIDATE_VERSION: &str = "0.0.0-candidate";
 const INSTRUCTION_INDEX_WARN_BYTES: usize = 8 * 1024;
 const INSTRUCTION_INDEX_MAX_BYTES: usize = 32 * 1024;
 const INSTRUCTION_INDEX_POINTER: &str = "open the referenced pack root for full detail";
+
+#[derive(Debug, Clone)]
+struct CachedResource {
+    modified: Option<SystemTime>,
+    len: u64,
+    bytes: Vec<u8>,
+}
+
+static RESOURCE_READ_CACHE: OnceLock<Mutex<BTreeMap<PathBuf, CachedResource>>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct LibraryRegistry {
@@ -612,6 +623,7 @@ impl LibraryRegistry {
             supported_apply_modes(&params.target_capability),
             params.resolve_graph.brownfield_mode.clone(),
             degradations,
+            params.durable_staging,
         )?;
 
         Ok(CompileResult {
@@ -2876,7 +2888,7 @@ fn pack_resource_output_id(pack_id: &str, relative_path: &str) -> String {
 fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<Vec<u8>> {
     let path = pack.library_root.join(&resource.path);
     if path.exists() {
-        return fs::read(&path).with_context(|| format!("read {}", path.display()));
+        return read_cached_pack_resource(&path);
     }
     Ok(format!(
         "# {}\n\n{}\n",
@@ -2887,6 +2899,33 @@ fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<
             .unwrap_or_else(|| "No bundled instruction resource was available.".to_string())
     )
     .into_bytes())
+}
+
+fn read_cached_pack_resource(path: &Path) -> Result<Vec<u8>> {
+    let metadata = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
+    let modified = metadata.modified().ok();
+    let len = metadata.len();
+    let cache = RESOURCE_READ_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Ok(cache) = cache.lock() {
+        if let Some(entry) = cache.get(path) {
+            if entry.modified == modified && entry.len == len {
+                return Ok(entry.bytes.clone());
+            }
+        }
+    }
+
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(
+            path.to_path_buf(),
+            CachedResource {
+                modified,
+                len,
+                bytes: bytes.clone(),
+            },
+        );
+    }
+    Ok(bytes)
 }
 
 fn document_id_for_target(target: &TargetCapabilityMatrix) -> String {
@@ -3483,10 +3522,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{
-        budget_instruction_document, derive_skill_surfaces, resource_surface_slug,
-        skill_surface_document, validate_generated_skill_frontmatter, DerivedSkillSurface,
-        DiscoveredPack, LibraryRegistry, INSTRUCTION_INDEX_MAX_BYTES, INSTRUCTION_INDEX_POINTER,
-        INSTRUCTION_INDEX_WARN_BYTES,
+        budget_instruction_document, derive_skill_surfaces, read_cached_pack_resource,
+        resource_surface_slug, skill_surface_document, validate_generated_skill_frontmatter,
+        DerivedSkillSurface, DiscoveredPack, LibraryRegistry, INSTRUCTION_INDEX_MAX_BYTES,
+        INSTRUCTION_INDEX_POINTER, INSTRUCTION_INDEX_WARN_BYTES,
     };
     use crate::kernel::MetactlKernel;
     use crate::reference_kernel::ReferenceKernel;
@@ -4028,6 +4067,7 @@ mod tests {
                 target_capability: target,
                 apply_mode: ApplyMode::Copy,
                 emit_policy_report: true,
+                durable_staging: true,
                 project_root: Some(project.path().to_string_lossy().into_owned()),
                 surface_selection_mode: Some(SurfaceSelectionMode::Minimal),
             })
@@ -4070,6 +4110,7 @@ mod tests {
                 target_capability: target,
                 apply_mode: ApplyMode::Copy,
                 emit_policy_report: true,
+                durable_staging: true,
                 project_root: Some(project.path().to_string_lossy().into_owned()),
                 surface_selection_mode: Some(SurfaceSelectionMode::Full),
             })
@@ -4088,6 +4129,25 @@ mod tests {
                     && item.surface_slug == "contracts"
                     && item.emitted
             }));
+    }
+
+    #[test]
+    fn resource_read_cache_invalidates_changed_files() {
+        let root = TempDir::new().expect("tempdir");
+        let path = root.path().join("packs").join("demo").join("SKILL.md");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("parent dir");
+        std::fs::write(&path, b"first").expect("first write");
+
+        assert_eq!(
+            read_cached_pack_resource(&path).expect("first read"),
+            b"first"
+        );
+
+        std::fs::write(&path, b"second-version").expect("second write");
+        assert_eq!(
+            read_cached_pack_resource(&path).expect("second read"),
+            b"second-version"
+        );
     }
 
     #[test]

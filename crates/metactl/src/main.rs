@@ -9,22 +9,24 @@ use std::process::{Command, ExitCode};
 use anyhow::{anyhow, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use metactl::project::{
-    append_history_entry, atomic_write, brownfield_adoption_hint, builtin_profile_templates,
-    bundled_starter_library_root, compile_manifest_path, current_config_digest,
-    current_local_config_digest, current_overlay_digest, default_project_config,
-    detect_brownfield_repo, digest_path, ensure_bundled_starter_library_root,
-    ensure_gitignore_entries, ensure_project_layout, is_candidate_pack, list_user_profiles,
-    load_compile_manifest, load_lock, load_partial_project_config, load_policy_report,
-    load_profile_partial, load_project_context, load_user_settings, metactl_user_config_dir,
-    policy_report_path, preferred_apply_mode_for_target, private_source_lock_path, profile_path,
-    profiles_directory, project_config_path, project_lock_path, resolve_profile_name_for_init,
+    append_history_entry, atomic_write, atomic_write_relaxed, brownfield_adoption_hint,
+    builtin_profile_templates, bundled_starter_library_root, compile_manifest_path,
+    current_config_digest, current_local_config_digest, current_overlay_digest,
+    default_project_config, detect_brownfield_repo, digest_path,
+    ensure_bundled_starter_library_root, ensure_gitignore_entries, ensure_project_layout,
+    is_candidate_pack, list_user_profiles, load_compile_manifest, load_lock,
+    load_partial_project_config, load_policy_report, load_profile_partial, load_project_context,
+    load_user_settings, metactl_user_config_dir, policy_report_path,
+    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
+    project_config_path, project_lock_path, resolve_profile_name_for_init,
     resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
-    update_managed_files_index, user_settings_path, write_lock, write_partial_project_config,
-    write_policy_report, write_private_source_lock, write_project_config, ConfigOverrides,
-    FleetSyncAdoptMode, HistoryEntry, LinkedProject, LinkedProjectStatus, LockedSource,
-    LockedTarget, OperationLock, PrivateSourceLock, ProfileActivationSource, ProjectConfigDefaults,
-    ProjectConfigFile, ProjectLock, SourceLockPublicity, SourceRecord, SourceType,
-    SourceVisibility, UserFleetController, UserFleetSettings,
+    update_managed_files_index, user_settings_path, write_lock, write_lock_relaxed,
+    write_partial_project_config, write_policy_report, write_policy_report_relaxed,
+    write_private_source_lock, write_project_config, ConfigOverrides, FleetSyncAdoptMode,
+    HistoryEntry, LinkedProject, LinkedProjectStatus, LockedSource, LockedTarget, OperationLock,
+    PrivateSourceLock, ProfileActivationSource, ProjectConfigDefaults, ProjectConfigFile,
+    ProjectLock, SourceLockPublicity, SourceRecord, SourceType, SourceVisibility,
+    UserFleetController, UserFleetSettings,
 };
 use metactl::surface_usage::{
     self, SurfaceLifecycleMode, SurfaceOverrideAction, SurfaceRebuildTrigger, SurfaceReport,
@@ -8631,7 +8633,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         ));
     }
     let sync_targets = split_comma_args(&args.target);
-    let compile_out = cmd_compile(
+    let compile_out = cmd_compile_with_durable_writes(
         cli,
         &CompileArgs {
             target: sync_targets,
@@ -8643,6 +8645,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
             apply_mode: None,
             surface_mode: args.surface_mode,
         },
+        durable_compile_writes_for_sync(args.preview),
     )?;
 
     let effective_adopt = if args.preview {
@@ -8887,6 +8890,14 @@ fn infer_pack_source_id(
 }
 
 fn cmd_compile(cli: &Cli, args: &CompileArgs) -> std::result::Result<CommandOutput, CliError> {
+    cmd_compile_with_durable_writes(cli, args, false)
+}
+
+fn cmd_compile_with_durable_writes(
+    cli: &Cli,
+    args: &CompileArgs,
+    durable_writes: bool,
+) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
     if !context.has_corpus() {
@@ -9020,6 +9031,7 @@ fn cmd_compile(cli: &Cli, args: &CompileArgs) -> std::result::Result<CommandOutp
                 apply_mode: preferred_apply_mode.clone(),
                 surface_selection_mode,
                 emit_policy_report: true,
+                durable_staging: durable_writes,
                 project_root: Some(project_root.to_string_lossy().to_string()),
             })
             .map_err(state_error)?;
@@ -9031,11 +9043,15 @@ fn cmd_compile(cli: &Cli, args: &CompileArgs) -> std::result::Result<CommandOutp
             &shared_surface_rules,
         )
         .map_err(internal_error)?;
-        write_compile_manifest_json(&manifest_path, &compile.compile_manifest)
+        write_compile_manifest_json(&manifest_path, &compile.compile_manifest, durable_writes)
             .map_err(internal_error)?;
         let policy_path = policy_report_path(&project_root, &target.target_ref());
         if let Some(report) = compile.policy_enforcement_report.as_ref() {
-            write_policy_report(&policy_path, report).map_err(internal_error)?;
+            if durable_writes {
+                write_policy_report(&policy_path, report).map_err(internal_error)?;
+            } else {
+                write_policy_report_relaxed(&policy_path, report).map_err(internal_error)?;
+            }
         }
 
         lock.targets.push(LockedTarget {
@@ -9065,7 +9081,11 @@ fn cmd_compile(cli: &Cli, args: &CompileArgs) -> std::result::Result<CommandOutp
         }));
     }
 
-    write_lock(&context.lock_path, &lock).map_err(internal_error)?;
+    if durable_writes {
+        write_lock(&context.lock_path, &lock).map_err(internal_error)?;
+    } else {
+        write_lock_relaxed(&context.lock_path, &lock).map_err(internal_error)?;
+    }
 
     let compile_human = {
         let mut human_lines = vec!["Compiled:".to_string()];
@@ -9140,6 +9160,10 @@ fn cmd_compile(cli: &Cli, args: &CompileArgs) -> std::result::Result<CommandOutp
         human: format!("{}\n{}", compile_out.human, apply_out.human),
         json: merged_json,
     })
+}
+
+fn durable_compile_writes_for_sync(_preview: bool) -> bool {
+    false
 }
 
 fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -10427,11 +10451,17 @@ fn apply_shared_surface_rules_to_manifest(
     Ok(())
 }
 
-fn write_compile_manifest_json(path: &Path, manifest: &CompileManifest) -> Result<()> {
-    atomic_write(
-        path,
-        &serde_json::to_vec_pretty(manifest).context("serialize compile manifest")?,
-    )
+fn write_compile_manifest_json(
+    path: &Path,
+    manifest: &CompileManifest,
+    durable: bool,
+) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(manifest).context("serialize compile manifest")?;
+    if durable {
+        atomic_write(path, &bytes)
+    } else {
+        atomic_write_relaxed(path, &bytes)
+    }
     .with_context(|| format!("write {}", path.display()))
 }
 
@@ -10890,6 +10920,12 @@ mod cli_init_wizard_tests {
         assert!(!details
             .iter()
             .any(|detail| detail == "Next: metactl init --detect"));
+    }
+
+    #[test]
+    fn sync_uses_relaxed_compile_staging_writes() {
+        assert!(!durable_compile_writes_for_sync(true));
+        assert!(!durable_compile_writes_for_sync(false));
     }
 }
 

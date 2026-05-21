@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::project::atomic_write;
+use crate::project::{atomic_write, atomic_write_relaxed};
 use crate::types::{
     ApplyConflict, ApplyMode, ApplyReport, BrownfieldMode, CapabilityGap, CompileManifest,
     GeneratedOutput, GeneratedOutputKind, InstructionProjectionMode, ReasonCode, Ref, RevertReport,
@@ -94,6 +94,7 @@ pub(crate) fn stage_outputs(
     apply_modes_supported: Vec<ApplyMode>,
     brownfield_mode: Option<BrownfieldMode>,
     degradations: Vec<CapabilityGap>,
+    durable: bool,
 ) -> Result<CompileManifest> {
     let stage_root = project_root
         .join(".metactl")
@@ -119,8 +120,12 @@ pub(crate) fn stage_outputs(
         if let Some(parent) = stage_path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
-        atomic_write(&stage_path, &input.contents)
-            .with_context(|| format!("write {}", stage_path.display()))?;
+        if durable {
+            atomic_write(&stage_path, &input.contents)
+        } else {
+            atomic_write_relaxed(&stage_path, &input.contents)
+        }
+        .with_context(|| format!("write {}", stage_path.display()))?;
         outputs.push(GeneratedOutput {
             id: input.id,
             path: normalize_relative(&relative_stage_path),

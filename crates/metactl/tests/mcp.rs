@@ -243,6 +243,7 @@ fn mcp_compile_preview_does_not_write_to_caller_project_root() {
         apply_mode: ApplyMode::Copy,
         surface_selection_mode: None,
         emit_policy_report: false,
+        durable_staging: false,
         project_root: Some(project.path().to_string_lossy().to_string()),
     };
 
