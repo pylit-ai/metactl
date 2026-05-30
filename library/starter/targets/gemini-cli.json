@@ -1,6 +1,7 @@
 {
   "kind": "target_capability_matrix",
   "target_id": "gemini-cli",
+  "aliases": ["gemini"],
   "version": "2026.03.26",
   "title": "Gemini CLI",
   "capabilities": {

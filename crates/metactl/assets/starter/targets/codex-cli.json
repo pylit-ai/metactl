@@ -1,6 +1,7 @@
 {
   "kind": "target_capability_matrix",
   "target_id": "codex-cli",
+  "aliases": ["codex"],
   "version": "2026.03.26",
   "title": "Codex CLI",
   "capabilities": {

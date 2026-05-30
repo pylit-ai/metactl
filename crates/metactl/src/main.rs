@@ -3703,17 +3703,13 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
             .collect()
     } else {
         // No target specified, no profile targets, no detected surfaces — refuse to guess.
-        let available = registry
+        let available_targets = registry
             .as_ref()
-            .map(|r| {
-                r.list_targets()
-                    .into_iter()
-                    .map(|t| t.target_id)
-                    .collect::<Vec<_>>()
-            })
+            .map(|registry| registry.list_targets())
             .unwrap_or_default();
+        let available = target_ids_from_targets(&available_targets);
         if !cli.no_input_enabled() && io::stdin().is_terminal() {
-            run_init_target_wizard(&available)?
+            run_init_target_wizard(&available_targets)?
         } else {
             let available_display = available_targets_display(&available);
             return Err(CliError::new(
@@ -5003,6 +4999,7 @@ fn cmd_target_list(
                 .map(|target| {
                     json!({
                         "id": target.target_id,
+                        "aliases": target.aliases,
                         "title": target.title,
                         "configured": configured_set.contains(&target.target_id),
                     })
@@ -5206,8 +5203,10 @@ fn cmd_target_remove(
         return Err(missing_config_error(cli, &project_root));
     }
 
+    let context = load_required_context(cli, &project_root)?;
     let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
-    let requested = unique_strings(args.target_ids.clone());
+    let requested =
+        expand_target_ids(&args.target_ids, context.registry.as_ref()).map_err(state_error)?;
     let mut removed = Vec::new();
     let mut not_configured = Vec::new();
     for target_id in requested {
@@ -8916,11 +8915,11 @@ fn cmd_compile_with_durable_writes(
         split_comma_args(&args.target)
     };
 
-    // Resolve target aliases (claude -> claude-code, codex -> codex-cli, gemini -> gemini-cli)
+    // Resolve target aliases declared by target manifests.
     target_overrides = target_overrides
         .into_iter()
         .map(|id| {
-            let (canonical, was_alias) = resolve_target_alias(&id);
+            let (canonical, was_alias) = resolve_target_alias(&id, context.registry.as_ref());
             if was_alias && !cli.quiet {
                 eprintln!("note: resolved target alias '{}' to '{}'", id, canonical);
             }
@@ -10762,17 +10761,21 @@ fn expand_target_ids(
             }
             expanded.extend(available);
         } else {
-            expanded.push(target_id.clone());
+            let (canonical, _) = resolve_target_alias(target_id, registry);
+            expanded.push(canonical);
         }
     }
     Ok(unique_strings(expanded))
 }
 
-fn run_init_target_wizard(available: &[String]) -> std::result::Result<Vec<String>, CliError> {
-    if available.is_empty() {
+fn run_init_target_wizard(
+    available: &[TargetCapabilityMatrix],
+) -> std::result::Result<Vec<String>, CliError> {
+    let available_ids = target_ids_from_targets(available);
+    if available_ids.is_empty() {
         return Err(
             CliError::new(EXIT_STATE, "No targets are available for interactive init.")
-                .with_details(init_target_next_steps(available)),
+                .with_details(init_target_next_steps(&available_ids)),
         );
     }
 
@@ -10781,7 +10784,7 @@ fn run_init_target_wizard(available: &[String]) -> std::result::Result<Vec<Strin
     eprintln!("Generated files stay target-specific; preview before applying changes.");
     eprintln!();
     eprintln!("Available targets:");
-    for (index, target) in available.iter().enumerate() {
+    for (index, target) in available_ids.iter().enumerate() {
         eprintln!("  {}. {}", index + 1, target);
     }
     eprintln!();
@@ -10795,9 +10798,10 @@ fn run_init_target_wizard(available: &[String]) -> std::result::Result<Vec<Strin
 
 fn parse_init_wizard_targets(
     input: &str,
-    available: &[String],
+    available: &[TargetCapabilityMatrix],
 ) -> std::result::Result<Vec<String>, CliError> {
-    let available_set = available.iter().cloned().collect::<BTreeSet<_>>();
+    let available_ids = target_ids_from_targets(available);
+    let available_set = available_ids.iter().cloned().collect::<BTreeSet<_>>();
     let tokens = input
         .split(|ch: char| ch == ',' || ch.is_whitespace())
         .map(str::trim)
@@ -10806,33 +10810,33 @@ fn parse_init_wizard_targets(
 
     if tokens.is_empty() {
         return Err(CliError::new(EXIT_STATE, "No init target was selected.")
-            .with_details(init_target_next_steps(available)));
+            .with_details(init_target_next_steps(&available_ids)));
     }
 
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
     for token in tokens {
         if token.eq_ignore_ascii_case("all") {
-            return Ok(available.to_vec());
+            return Ok(available_ids);
         }
 
         let target_id = if let Ok(index) = token.parse::<usize>() {
-            if index == 0 || index > available.len() {
+            if index == 0 || index > available_ids.len() {
                 return Err(CliError::new(
                     EXIT_STATE,
                     format!("Init target selection '{}' is out of range.", token),
                 )
-                .with_details(init_target_next_steps(available)));
+                .with_details(init_target_next_steps(&available_ids)));
             }
-            available[index - 1].clone()
+            available_ids[index - 1].clone()
         } else {
-            let (canonical, _) = resolve_target_alias(token);
+            let (canonical, _) = resolve_target_alias_from_targets(token, available.iter());
             if !available_set.contains(&canonical) {
                 return Err(CliError::new(
                     EXIT_STATE,
                     format!("Init target '{}' is not available.", token),
                 )
-                .with_details(init_target_next_steps(available)));
+                .with_details(init_target_next_steps(&available_ids)));
             }
             canonical
         };
@@ -10843,6 +10847,13 @@ fn parse_init_wizard_targets(
     }
 
     Ok(selected)
+}
+
+fn target_ids_from_targets(available: &[TargetCapabilityMatrix]) -> Vec<String> {
+    available
+        .iter()
+        .map(|target| target.target_id.clone())
+        .collect()
 }
 
 fn available_targets_display(available: &[String]) -> String {
@@ -10872,11 +10883,39 @@ fn init_target_next_steps(available: &[String]) -> Vec<String> {
 mod cli_init_wizard_tests {
     use super::*;
 
-    fn available_targets() -> Vec<String> {
+    fn available_target(target_id: &str, aliases: &[&str]) -> TargetCapabilityMatrix {
+        TargetCapabilityMatrix {
+            kind: "target_capability_matrix".to_string(),
+            target_id: target_id.to_string(),
+            aliases: aliases.iter().map(|alias| alias.to_string()).collect(),
+            version: "test".to_string(),
+            title: target_id.to_string(),
+            capabilities: metactl::TargetCapabilities {
+                layered_instructions: false,
+                skill_folders: false,
+                deterministic_hooks: false,
+                subagents: false,
+                mcp_servers: false,
+                tool_allowlists: false,
+                approval_policies: false,
+                readonly_hints: false,
+                local_scripts: false,
+                scheduled_tasks: false,
+                ui_surfaces: false,
+            },
+            compile_targets: Vec::new(),
+            runtime_template: None,
+            local_projection: None,
+            apply_modes: Vec::new(),
+            metadata: BTreeMap::new(),
+        }
+    }
+
+    fn available_targets() -> Vec<TargetCapabilityMatrix> {
         vec![
-            "codex-cli".to_string(),
-            "claude-code".to_string(),
-            "gemini-cli".to_string(),
+            available_target("codex-cli", &["codex"]),
+            available_target("claude-code", &["claude"]),
+            available_target("gemini-cli", &["gemini"]),
         ]
     }
 
@@ -10893,9 +10932,10 @@ mod cli_init_wizard_tests {
 
     #[test]
     fn init_wizard_targets_accept_all() {
-        let selected = parse_init_wizard_targets("all", &available_targets()).expect("selection");
+        let available = available_targets();
+        let selected = parse_init_wizard_targets("all", &available).expect("selection");
 
-        assert_eq!(selected, available_targets());
+        assert_eq!(selected, target_ids_from_targets(&available));
     }
 
     #[test]
@@ -10912,7 +10952,8 @@ mod cli_init_wizard_tests {
 
     #[test]
     fn init_target_next_steps_do_not_repeat_detect_after_detect_fails() {
-        let details = init_target_next_steps(&available_targets());
+        let available = available_targets();
+        let details = init_target_next_steps(&target_ids_from_targets(&available));
 
         assert!(details
             .iter()
@@ -10929,14 +10970,26 @@ mod cli_init_wizard_tests {
     }
 }
 
-fn resolve_target_alias(target_id: &str) -> (String, bool) {
-    // Returns (canonical_id, was_aliased)
-    match target_id {
-        "claude" => ("claude-code".to_string(), true),
-        "codex" => ("codex-cli".to_string(), true),
-        "gemini" => ("gemini-cli".to_string(), true),
-        id => (id.to_string(), false),
+fn resolve_target_alias(target_id: &str, registry: Option<&LibraryRegistry>) -> (String, bool) {
+    if let Some(registry) = registry {
+        return resolve_target_alias_from_targets(target_id, registry.list_targets().iter());
     }
+    (target_id.to_string(), false)
+}
+
+fn resolve_target_alias_from_targets<'a>(
+    target_id: &str,
+    targets: impl IntoIterator<Item = &'a TargetCapabilityMatrix>,
+) -> (String, bool) {
+    for target in targets {
+        if target.target_id == target_id {
+            return (target.target_id.clone(), false);
+        }
+        if target.aliases.iter().any(|alias| alias == target_id) {
+            return (target.target_id.clone(), true);
+        }
+    }
+    (target_id.to_string(), false)
 }
 
 impl DiscoverabilityReport {
@@ -11203,7 +11256,10 @@ fn validate_target_ids(target_ids: &[String], registry: Option<&LibraryRegistry>
     let available_set = available.iter().cloned().collect::<BTreeSet<_>>();
     let unknown = target_ids
         .iter()
-        .filter(|target_id| !available_set.contains(*target_id))
+        .filter(|target_id| {
+            let (canonical, _) = resolve_target_alias(target_id, Some(registry));
+            !available_set.contains(&canonical)
+        })
         .cloned()
         .collect::<Vec<_>>();
     if unknown.is_empty() {
@@ -11332,6 +11388,7 @@ fn target_projection_json(
 
     json!({
         "target_id": target.target_id,
+        "aliases": target.aliases,
         "skill_folders": target.capabilities.skill_folders,
         "surface_selection_mode": surface_selection_mode_label(&surface_selection_mode),
         "summary": summary,

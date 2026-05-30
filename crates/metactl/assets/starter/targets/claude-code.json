@@ -1,6 +1,7 @@
 {
   "kind": "target_capability_matrix",
   "target_id": "claude-code",
+  "aliases": ["claude"],
   "version": "2026.03.26",
   "title": "Claude Code",
   "capabilities": {

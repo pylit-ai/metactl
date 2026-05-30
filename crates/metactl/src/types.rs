@@ -746,6 +746,8 @@ pub enum CommandAdapterFormat {
 pub struct TargetCapabilityMatrix {
     pub kind: String,
     pub target_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<String>,
     pub version: String,
     pub title: String,
     pub capabilities: TargetCapabilities,
