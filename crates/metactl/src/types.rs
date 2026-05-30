@@ -700,6 +700,8 @@ pub struct CompileTarget {
     pub supports_surface_scripts: bool,
     #[serde(default)]
     pub supports_surface_frontmatter: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub materialize_as_regular_file: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_merge_strategy: Option<SurfaceMergeStrategy>,
     /// Optional frontmatter key/value pairs to wrap around projected instruction
@@ -1026,6 +1028,8 @@ pub struct GeneratedOutput {
     pub degradation_codes: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ownership_token: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub materialize_as_regular_file: bool,
     #[serde(default = "default_true")]
     pub managed: bool,
 }
@@ -1181,6 +1185,11 @@ pub struct RevertReport {
 pub fn default_true() -> bool {
     true
 }
+
+pub fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SurfaceMergeStrategy {

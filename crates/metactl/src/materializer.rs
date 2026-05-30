@@ -27,6 +27,7 @@ pub(crate) struct StagedOutputInput {
     pub merge_status: Option<SurfaceMergeStatus>,
     pub degradation_codes: Vec<String>,
     pub ownership_token: Option<String>,
+    pub materialize_as_regular_file: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +44,8 @@ struct ManagedOutputState {
     staged_path: String,
     destination_path: String,
     applied_digest: String,
+    #[serde(default)]
+    source_digest: Option<String>,
     backup_path: Option<String>,
     existed_before: bool,
     patch_marker: Option<String>,
@@ -66,6 +69,7 @@ struct ManagedOutputState {
 
 #[derive(Debug, Clone)]
 enum ActionKind {
+    Noop,
     CreateFile,
     CreateSymlink,
     OverwriteManaged,
@@ -74,6 +78,35 @@ enum ActionKind {
     MergeJsonUnmanaged,
     PatchUnmanaged,
     TakeoverUnmanaged,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyReuseDecision {
+    ReuseExistingManagedOutput,
+    RewriteManagedOutput,
+}
+
+impl ApplyReuseDecision {
+    fn for_managed_output(
+        output: &GeneratedOutput,
+        apply_mode: &ApplyMode,
+        existing_apply_mode: Option<&ApplyMode>,
+        merge_json: bool,
+        patch_marker: Option<&String>,
+        state_output: &ManagedOutputState,
+    ) -> Self {
+        if existing_apply_mode != Some(apply_mode) {
+            return Self::RewriteManagedOutput;
+        }
+        if !source_digest_matches(output, state_output, merge_json, patch_marker) {
+            return Self::RewriteManagedOutput;
+        }
+        Self::ReuseExistingManagedOutput
+    }
+
+    fn can_reuse_existing_output(self) -> bool {
+        matches!(self, Self::ReuseExistingManagedOutput)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -120,12 +153,8 @@ pub(crate) fn stage_outputs(
         if let Some(parent) = stage_path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
-        if durable {
-            atomic_write(&stage_path, &input.contents)
-        } else {
-            atomic_write_relaxed(&stage_path, &input.contents)
-        }
-        .with_context(|| format!("write {}", stage_path.display()))?;
+        write_staged_if_changed(&stage_path, &input.contents, durable)
+            .with_context(|| format!("write {}", stage_path.display()))?;
         outputs.push(GeneratedOutput {
             id: input.id,
             path: normalize_relative(&relative_stage_path),
@@ -140,6 +169,7 @@ pub(crate) fn stage_outputs(
             merge_status: input.merge_status,
             degradation_codes: input.degradation_codes,
             ownership_token: input.ownership_token,
+            materialize_as_regular_file: input.materialize_as_regular_file,
             managed: true,
         });
     }
@@ -163,6 +193,17 @@ pub(crate) fn stage_outputs(
     .with_context(|| format!("write {}", manifest_path.display()))?;
 
     Ok(manifest)
+}
+
+fn write_staged_if_changed(path: &Path, contents: &[u8], durable: bool) -> Result<()> {
+    if matches!(fs::read(path), Ok(existing) if existing == contents) {
+        return Ok(());
+    }
+    if durable {
+        atomic_write(path, contents)
+    } else {
+        atomic_write_relaxed(path, contents)
+    }
 }
 
 pub(crate) fn apply_manifest(
@@ -198,12 +239,39 @@ pub(crate) fn apply_manifest(
             .ok_or_else(|| anyhow!("generated output is missing destination_path"))?;
         let destination_abs = project_root.join(destination_path);
         let staged_abs = project_root.join(&plan.output.path);
-        let staged_bytes =
-            fs::read(&staged_abs).with_context(|| format!("read {}", staged_abs.display()))?;
 
         if let Some(parent) = destination_abs.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
+
+        if matches!(plan.kind, ActionKind::Noop) {
+            let applied_digest = sha256_path(&destination_abs)?;
+            applied_paths.push(destination_path.clone());
+            state_outputs.push(ManagedOutputState {
+                id: plan.output.id.clone(),
+                staged_path: plan.output.path.clone(),
+                destination_path: destination_path.clone(),
+                applied_digest,
+                source_digest: plan.output.digest.clone(),
+                backup_path: plan.backup_path.as_ref().map(|path: &PathBuf| {
+                    normalize_relative(path.strip_prefix(project_root).unwrap_or(path))
+                }),
+                existed_before: plan.existed_before,
+                patch_marker: plan.patch_marker,
+                instruction_mode: plan.output.instruction_mode.clone(),
+                pack_ref: plan.output.pack_ref.clone(),
+                surface_id: plan.output.surface_id.clone(),
+                surface_slug: plan.output.surface_slug.clone(),
+                source_resource_paths: plan.output.source_resource_paths.clone(),
+                merge_status: plan.output.merge_status.clone(),
+                degradation_codes: plan.output.degradation_codes.clone(),
+                ownership_token: plan.output.ownership_token.clone(),
+            });
+            continue;
+        }
+
+        let staged_bytes =
+            fs::read(&staged_abs).with_context(|| format!("read {}", staged_abs.display()))?;
 
         if plan.existed_before
             && matches!(
@@ -220,6 +288,7 @@ pub(crate) fn apply_manifest(
 
         let patch_marker = plan.patch_marker.clone();
         match plan.kind {
+            ActionKind::Noop => unreachable!("no-op plans are handled before writes"),
             ActionKind::CreateFile | ActionKind::TakeoverUnmanaged => {
                 // `fs::write` follows symlinks; replacing a managed symlink with a regular file
                 // requires removing the link first (otherwise bytes land in `.metactl/generated/`).
@@ -232,11 +301,7 @@ pub(crate) fn apply_manifest(
             }
             ActionKind::OverwriteManaged => {
                 let replace_link = !matches!(apply_mode, ApplyMode::Symlink)
-                    || materialize_as_regular_file(
-                        &manifest.target,
-                        &plan.output,
-                        destination_path,
-                    );
+                    || materialize_as_regular_file(&plan.output, destination_path);
                 if replace_link && destination_abs.is_symlink() {
                     fs::remove_file(&destination_abs)
                         .with_context(|| format!("remove symlink {}", destination_abs.display()))?;
@@ -281,6 +346,7 @@ pub(crate) fn apply_manifest(
             staged_path: plan.output.path.clone(),
             destination_path: destination_path.clone(),
             applied_digest,
+            source_digest: plan.output.digest.clone(),
             backup_path: plan.backup_path.as_ref().map(|path: &PathBuf| {
                 normalize_relative(path.strip_prefix(project_root).unwrap_or(path))
             }),
@@ -441,38 +507,50 @@ pub(crate) fn drift_conflicts(project_root: &Path, target: &Ref) -> Result<Vec<A
     Ok(conflicts)
 }
 
-/// Cursor discovers project rules from `.cursor/rules/`. Some editors and tooling resolve
-/// symlinked `.mdc` entries poorly compared to regular files. When apply mode is `Symlink`,
-/// still materialize the pack **index** as a real file; other cursor outputs may remain
-/// symlinks into `.metactl/generated/`.
-const CURSOR_PACK_INDEX_DEST: &str = ".cursor/rules/metactl-pack-index.mdc";
-
-fn cursor_pack_index_materialize_as_file(
-    target: &crate::types::Ref,
-    destination_path: &str,
-) -> bool {
-    target.id == "cursor" && normalize_relative_dest(destination_path) == CURSOR_PACK_INDEX_DEST
-}
-
-fn codex_skill_materialize_as_file(
-    target: &crate::types::Ref,
-    output: &GeneratedOutput,
-    destination_path: &str,
-) -> bool {
-    target.id == "codex-cli"
-        && matches!(output.kind, GeneratedOutputKind::SkillFolder)
-        && normalize_relative_dest(destination_path).starts_with(".codex/skills/")
-}
-
-fn materialize_as_regular_file(
-    target: &crate::types::Ref,
-    output: &GeneratedOutput,
-    destination_path: &str,
-) -> bool {
+/// Some runtime surfaces must stay as real files even when apply mode is `Symlink`.
+/// Target data marks those outputs with `materialize_as_regular_file` so the
+/// materializer does not need per-target filesystem exceptions.
+fn materialize_as_regular_file(output: &GeneratedOutput, destination_path: &str) -> bool {
     matches!(output.kind, GeneratedOutputKind::InstructionFile)
-        || cursor_pack_index_materialize_as_file(target, destination_path)
-        || codex_skill_materialize_as_file(target, output, destination_path)
+        || output.materialize_as_regular_file
         || structured_json_merge_output(output, destination_path)
+}
+
+fn can_skip_managed_apply(
+    output: &GeneratedOutput,
+    apply_mode: &ApplyMode,
+    existing_apply_mode: Option<&ApplyMode>,
+    merge_json: bool,
+    patch_marker: Option<&String>,
+    state_output: &ManagedOutputState,
+) -> bool {
+    ApplyReuseDecision::for_managed_output(
+        output,
+        apply_mode,
+        existing_apply_mode,
+        merge_json,
+        patch_marker,
+        state_output,
+    )
+    .can_reuse_existing_output()
+}
+
+fn source_digest_matches(
+    output: &GeneratedOutput,
+    state_output: &ManagedOutputState,
+    merge_json: bool,
+    patch_marker: Option<&String>,
+) -> bool {
+    match (
+        state_output.source_digest.as_deref(),
+        output.digest.as_deref(),
+    ) {
+        (Some(previous), Some(current)) => previous == current,
+        (None, Some(current)) if !merge_json && patch_marker.is_none() => {
+            current == state_output.applied_digest
+        }
+        _ => false,
+    }
 }
 
 fn structured_json_merge_output(output: &GeneratedOutput, destination_path: &str) -> bool {
@@ -617,6 +695,7 @@ fn plan_apply(
     apply_mode: &ApplyMode,
     existing_state: Option<&ManagedState>,
 ) -> Result<Vec<Result<PlannedAction>>> {
+    let existing_apply_mode = existing_state.map(|state| state.apply_mode.clone());
     let managed = existing_state
         .map(|state| {
             state
@@ -655,7 +734,7 @@ fn plan_apply(
             if !destination_abs.exists() {
                 let kind = match apply_mode {
                     ApplyMode::Symlink => {
-                        if materialize_as_regular_file(&manifest.target, output, destination_path) {
+                        if materialize_as_regular_file(output, destination_path) {
                             ActionKind::CreateFile
                         } else {
                             ActionKind::CreateSymlink
@@ -676,8 +755,8 @@ fn plan_apply(
                 continue;
             }
 
-            let drift = destination_abs.exists()
-                && sha256_path(&destination_abs)? != state_output.applied_digest;
+            let actual_digest = sha256_path(&destination_abs)?;
+            let drift = destination_abs.exists() && actual_digest != state_output.applied_digest;
 
             if drift {
                 // Reconcile on-disk edits (or another target overwriting a shared path) using the
@@ -764,11 +843,7 @@ fn plan_apply(
                     ApplyMode::Symlink => {
                         let kind = if managed_instruction_marker.is_some() {
                             ActionKind::PatchManaged
-                        } else if materialize_as_regular_file(
-                            &manifest.target,
-                            output,
-                            destination_path,
-                        ) {
+                        } else if materialize_as_regular_file(output, destination_path) {
                             if merge_json {
                                 ActionKind::MergeJsonManaged
                             } else {
@@ -786,6 +861,27 @@ fn plan_apply(
                         }));
                     }
                 }
+                continue;
+            }
+
+            if can_skip_managed_apply(
+                output,
+                apply_mode,
+                existing_apply_mode.as_ref(),
+                merge_json,
+                managed_instruction_marker.as_ref(),
+                state_output,
+            ) {
+                plans.push(Ok(PlannedAction {
+                    output: output.clone(),
+                    kind: ActionKind::Noop,
+                    backup_path: state_output
+                        .backup_path
+                        .as_ref()
+                        .map(|item| project_root.join(item)),
+                    patch_marker: state_output.patch_marker.clone(),
+                    existed_before: state_output.existed_before,
+                }));
                 continue;
             }
 
@@ -813,7 +909,7 @@ fn plan_apply(
         if !destination_abs.exists() {
             let kind = match apply_mode {
                 ApplyMode::Symlink => {
-                    if materialize_as_regular_file(&manifest.target, output, destination_path) {
+                    if materialize_as_regular_file(output, destination_path) {
                         ActionKind::CreateFile
                     } else {
                         ActionKind::CreateSymlink
@@ -1053,4 +1149,230 @@ fn sha256_path(path: &Path) -> Result<String> {
 
 fn normalize_relative(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::RefKind;
+
+    fn generated_output_with_digest(digest: Option<&str>) -> GeneratedOutput {
+        GeneratedOutput {
+            id: Some("output".to_string()),
+            path: ".metactl/generated/codex-cli/AGENTS.md".to_string(),
+            destination_path: Some("AGENTS.md".to_string()),
+            kind: GeneratedOutputKind::InstructionFile,
+            digest: digest.map(str::to_string),
+            instruction_mode: None,
+            pack_ref: None,
+            surface_id: None,
+            surface_slug: None,
+            source_resource_paths: Vec::new(),
+            merge_status: None,
+            degradation_codes: Vec::new(),
+            ownership_token: None,
+            materialize_as_regular_file: false,
+            managed: true,
+        }
+    }
+
+    fn managed_state_output(
+        source_digest: Option<&str>,
+        applied_digest: &str,
+    ) -> ManagedOutputState {
+        ManagedOutputState {
+            id: Some("output".to_string()),
+            staged_path: ".metactl/generated/codex-cli/AGENTS.md".to_string(),
+            destination_path: "AGENTS.md".to_string(),
+            applied_digest: applied_digest.to_string(),
+            source_digest: source_digest.map(str::to_string),
+            backup_path: None,
+            existed_before: true,
+            patch_marker: None,
+            instruction_mode: None,
+            pack_ref: None,
+            surface_id: None,
+            surface_slug: None,
+            source_resource_paths: Vec::new(),
+            merge_status: None,
+            degradation_codes: Vec::new(),
+            ownership_token: None,
+        }
+    }
+
+    fn reuse_decision(
+        output: &GeneratedOutput,
+        state_output: &ManagedOutputState,
+    ) -> ApplyReuseDecision {
+        ApplyReuseDecision::for_managed_output(
+            output,
+            &ApplyMode::Copy,
+            Some(&ApplyMode::Copy),
+            false,
+            None,
+            state_output,
+        )
+    }
+
+    #[test]
+    fn apply_reuse_decision_reuses_matching_source_digest() {
+        let output = generated_output_with_digest(Some("sha256:current"));
+        let state_output = managed_state_output(Some("sha256:current"), "sha256:applied");
+
+        assert_eq!(
+            reuse_decision(&output, &state_output),
+            ApplyReuseDecision::ReuseExistingManagedOutput
+        );
+    }
+
+    #[test]
+    fn apply_reuse_decision_rewrites_changed_source_digest() {
+        let output = generated_output_with_digest(Some("sha256:current"));
+        let state_output = managed_state_output(Some("sha256:previous"), "sha256:previous");
+
+        assert_eq!(
+            reuse_decision(&output, &state_output),
+            ApplyReuseDecision::RewriteManagedOutput
+        );
+    }
+
+    #[test]
+    fn apply_reuse_decision_rewrites_when_apply_mode_changes() {
+        let output = generated_output_with_digest(Some("sha256:current"));
+        let state_output = managed_state_output(Some("sha256:current"), "sha256:applied");
+
+        assert_eq!(
+            ApplyReuseDecision::for_managed_output(
+                &output,
+                &ApplyMode::Copy,
+                Some(&ApplyMode::Patch),
+                false,
+                None,
+                &state_output,
+            ),
+            ApplyReuseDecision::RewriteManagedOutput
+        );
+    }
+
+    #[test]
+    fn apply_reuse_decision_accepts_legacy_digest_for_plain_outputs() {
+        let output = generated_output_with_digest(Some("sha256:applied"));
+        let state_output = managed_state_output(None, "sha256:applied");
+
+        assert_eq!(
+            reuse_decision(&output, &state_output),
+            ApplyReuseDecision::ReuseExistingManagedOutput
+        );
+    }
+
+    #[test]
+    fn apply_reuse_decision_rewrites_legacy_digest_for_patch_outputs() {
+        let marker = "managed-block".to_string();
+        let output = generated_output_with_digest(Some("sha256:applied"));
+        let state_output = managed_state_output(None, "sha256:applied");
+
+        assert_eq!(
+            ApplyReuseDecision::for_managed_output(
+                &output,
+                &ApplyMode::Copy,
+                Some(&ApplyMode::Copy),
+                false,
+                Some(&marker),
+                &state_output,
+            ),
+            ApplyReuseDecision::RewriteManagedOutput
+        );
+    }
+
+    #[test]
+    fn apply_reuse_decision_rewrites_legacy_digest_for_json_merge_outputs() {
+        let output = generated_output_with_digest(Some("sha256:applied"));
+        let state_output = managed_state_output(None, "sha256:applied");
+
+        assert_eq!(
+            ApplyReuseDecision::for_managed_output(
+                &output,
+                &ApplyMode::Copy,
+                Some(&ApplyMode::Copy),
+                true,
+                None,
+                &state_output,
+            ),
+            ApplyReuseDecision::RewriteManagedOutput
+        );
+    }
+
+    #[test]
+    fn apply_reuse_decision_rewrites_without_current_digest() {
+        let output = generated_output_with_digest(None);
+        let state_output = managed_state_output(Some("sha256:previous"), "sha256:previous");
+
+        assert_eq!(
+            reuse_decision(&output, &state_output),
+            ApplyReuseDecision::RewriteManagedOutput
+        );
+    }
+
+    #[test]
+    fn materialize_as_regular_file_uses_output_policy() {
+        let mut output = generated_output_with_digest(Some("sha256:current"));
+        output.kind = GeneratedOutputKind::SkillFolder;
+        output.destination_path = Some(".codex/skills/example/SKILL.md".to_string());
+
+        assert!(!materialize_as_regular_file(
+            &output,
+            ".codex/skills/example/SKILL.md"
+        ));
+
+        output.materialize_as_regular_file = true;
+
+        assert!(materialize_as_regular_file(
+            &output,
+            ".codex/skills/example/SKILL.md"
+        ));
+    }
+
+    #[test]
+    fn noop_apply_preserves_patch_managed_file_digest() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let project_root = project.path();
+        let staged_path = project_root.join(".metactl/generated/codex-cli/AGENTS.md");
+        std::fs::create_dir_all(staged_path.parent().expect("staged parent"))
+            .expect("create staged parent");
+
+        let managed = "# Repository Builder\n";
+        std::fs::write(&staged_path, managed).expect("write staged");
+        std::fs::write(
+            project_root.join("AGENTS.md"),
+            "Private preface.\n\n<!-- metactl:begin output -->\nold\n<!-- metactl:end output -->\n",
+        )
+        .expect("write existing");
+
+        let output = generated_output_with_digest(Some(&sha256_bytes(managed.as_bytes())));
+        let target = Ref {
+            kind: RefKind::Target,
+            id: "codex-cli".to_string(),
+            version: None,
+        };
+        let manifest = CompileManifest {
+            api_version: "metactl/v2alpha1".to_string(),
+            target: target.clone(),
+            generated_outputs: vec![output],
+            surface_selection_mode: None,
+            surface_selection: Vec::new(),
+            apply_modes_supported: vec![ApplyMode::Patch],
+            brownfield_mode: None,
+            degradations: Vec::new(),
+        };
+
+        apply_manifest(project_root, &manifest, &ApplyMode::Patch).expect("first apply");
+        assert!(drift_conflicts(project_root, &target)
+            .expect("first drift check")
+            .is_empty());
+
+        apply_manifest(project_root, &manifest, &ApplyMode::Patch).expect("second apply");
+        assert!(drift_conflicts(project_root, &target)
+            .expect("second drift check")
+            .is_empty());
+    }
 }

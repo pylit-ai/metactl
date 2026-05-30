@@ -26,6 +26,21 @@ use crate::types::{
     ValidateParams, ValidationCheck, ValidationReport, ValidationStatus, VisibilityScope,
 };
 
+#[path = "library_frontmatter.rs"]
+mod library_frontmatter;
+#[path = "library_hooks.rs"]
+mod library_hooks;
+#[path = "library_validation.rs"]
+mod library_validation;
+
+use library_frontmatter::{render_frontmatter, wrap_with_frontmatter};
+use library_hooks::{
+    aggregate_hook_wirings_for_target, default_skill_surface_bytes, pack_resource_paths,
+    primary_instruction_bytes, primary_instruction_snippet, resource_file_name,
+    resource_surface_slug,
+};
+use library_validation::{validate_skill_frontmatter_text, validate_staged_outputs};
+
 const CANDIDATE_VERSION: &str = "0.0.0-candidate";
 const INSTRUCTION_INDEX_WARN_BYTES: usize = 8 * 1024;
 const INSTRUCTION_INDEX_MAX_BYTES: usize = 32 * 1024;
@@ -1028,114 +1043,6 @@ fn compile_project_root(project_root: Option<&str>) -> Result<PathBuf> {
     }
 }
 
-fn validate_skill_frontmatter_text(text: &str) -> Vec<String> {
-    let mut failures = Vec::new();
-    let mut lines = text.lines();
-    if lines.next() != Some("---") {
-        failures.push("SKILL.md must start with YAML frontmatter.".to_string());
-        return failures;
-    }
-
-    let mut yaml_lines = Vec::new();
-    let mut closed = false;
-    for line in lines {
-        if line.trim_end() == "---" {
-            closed = true;
-            break;
-        }
-        yaml_lines.push(line);
-    }
-    if !closed {
-        failures.push("SKILL.md frontmatter is not closed.".to_string());
-        return failures;
-    }
-
-    let yaml = yaml_lines.join("\n");
-    let value: serde_yaml::Value = match serde_yaml::from_str(&yaml) {
-        Ok(value) => value,
-        Err(err) => {
-            failures.push(format!("SKILL.md frontmatter invalid YAML: {err}."));
-            return failures;
-        }
-    };
-
-    for field in ["name", "description"] {
-        match value.get(field).and_then(|item| item.as_str()) {
-            Some(value) if !value.trim().is_empty() => {}
-            _ => failures.push(format!("SKILL.md frontmatter.{field} is required.")),
-        }
-    }
-
-    failures
-}
-
-fn validate_generated_skill_frontmatter(path: &Path) -> Result<Vec<String>> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("read generated skill {}", path.display()))?;
-    Ok(validate_skill_frontmatter_text(&text))
-}
-
-fn validate_staged_outputs(
-    project_root: PathBuf,
-    manifest: &CompileManifest,
-) -> Result<Vec<String>> {
-    let mut failures = Vec::new();
-    for output in &manifest.generated_outputs {
-        let staged_abs = project_root.join(&output.path);
-        if !staged_abs.exists() {
-            failures.push(format!("{} is missing from the staging area.", output.path));
-            continue;
-        }
-        if output.kind == GeneratedOutputKind::SkillFolder {
-            for failure in validate_generated_skill_frontmatter(&staged_abs)? {
-                failures.push(format!("{}: {}", output.path, failure));
-            }
-        }
-        if let Some(expected) = output.digest.as_deref() {
-            let actual = sha256_digest(&staged_abs)?;
-            if actual != expected {
-                failures.push(format!(
-                    "{} digest mismatch: expected {} got {}.",
-                    output.path, expected, actual
-                ));
-            }
-        }
-    }
-    Ok(failures)
-}
-
-fn render_frontmatter(frontmatter: &BTreeMap<String, String>) -> Result<String> {
-    let typed_frontmatter = frontmatter
-        .iter()
-        .map(|(key, value)| (key.clone(), yaml_frontmatter_value(value)))
-        .collect::<BTreeMap<_, _>>();
-    let yaml = serde_yaml::to_string(&typed_frontmatter).context("serialize YAML frontmatter")?;
-    let mut out = String::from("---\n");
-    out.push_str(&yaml);
-    if !yaml.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str("---\n");
-    Ok(out)
-}
-
-fn yaml_frontmatter_value(value: &str) -> serde_yaml::Value {
-    match value {
-        "true" => serde_yaml::Value::Bool(true),
-        "false" => serde_yaml::Value::Bool(false),
-        _ => serde_yaml::Value::String(value.to_string()),
-    }
-}
-
-fn wrap_with_frontmatter(body: &[u8], frontmatter: &BTreeMap<String, String>) -> Result<Vec<u8>> {
-    if frontmatter.is_empty() {
-        return Ok(body.to_vec());
-    }
-    let mut out = render_frontmatter(frontmatter)?;
-    out.push_str(std::str::from_utf8(body).unwrap_or(""));
-    Ok(out.into_bytes())
-}
-
 fn synthesize_outputs(
     role: &RoleManifest,
     policy: &PolicyManifest,
@@ -1206,6 +1113,7 @@ fn synthesize_outputs(
                         target.target_id,
                         document_id_for_target(target)
                     )),
+                    materialize_as_regular_file: compile_target.materialize_as_regular_file,
                 });
 
                 // Local instruction document: private packs only
@@ -1256,6 +1164,7 @@ fn synthesize_outputs(
                             merge_status: None,
                             degradation_codes: local_degradation_codes,
                             ownership_token: Some(format!("{}::{}", target.target_id, local_id)),
+                            materialize_as_regular_file: compile_target.materialize_as_regular_file,
                         });
                         emitted_local_instruction_document = true;
                     } else {
@@ -1327,6 +1236,8 @@ fn synthesize_outputs(
                                     "{}::{}",
                                     pack.manifest.id, surface.surface_id
                                 )),
+                                materialize_as_regular_file: compile_target
+                                    .materialize_as_regular_file,
                             });
                         }
                     } else {
@@ -1387,6 +1298,7 @@ fn synthesize_outputs(
                                     merged_surfaces.join("+")
                                 }
                             )),
+                            materialize_as_regular_file: compile_target.materialize_as_regular_file,
                         });
                     }
                 }
@@ -1425,6 +1337,7 @@ fn synthesize_outputs(
                     merge_status: None,
                     degradation_codes: Vec::new(),
                     ownership_token: Some("mcp-config".to_string()),
+                    materialize_as_regular_file: compile_target.materialize_as_regular_file,
                 });
             }
         }
@@ -1454,6 +1367,7 @@ fn synthesize_outputs(
             merge_status: None,
             degradation_codes: Vec::new(),
             ownership_token: Some(ownership),
+            materialize_as_regular_file: false,
         });
     }
 
@@ -2130,6 +2044,7 @@ fn emit_pack_extension_manifests(
             merge_status: None,
             degradation_codes: Vec::new(),
             ownership_token: Some(format!("{}::extension-manifest", pack.manifest.id)),
+            materialize_as_regular_file: compile_target.materialize_as_regular_file,
         });
     }
     Ok(outputs)
@@ -2195,6 +2110,7 @@ fn emit_pack_resource_outputs(
                 merge_status: None,
                 degradation_codes: Vec::new(),
                 ownership_token: Some(format!("{}::resource:{}", pack.manifest.id, relative_path)),
+                materialize_as_regular_file: compile_target.materialize_as_regular_file,
             });
         }
     }
@@ -2308,169 +2224,6 @@ fn expand_runtime_template(
         _ => GeneratedOutputKind::RuntimeJson,
     };
     Ok((kind, expanded.into_bytes()))
-}
-
-/// Build the `hooks` map for a runtime template by aggregating every
-/// `HookWiring` resource from the activated packs whose `compatible_targets`
-/// includes the requested target. Returns an empty object when the target
-/// does not advertise `deterministic_hooks`.
-///
-/// The kernel does not invent matchers, events, or commands — packs declare
-/// them. The materialized command path mirrors the `.claude/hooks/{pack_id}/
-/// {resource_path}` template that `emit_pack_resource_outputs` produces for
-/// the sibling `Hook` script (see `library/starter/targets/claude-code.json`).
-fn aggregate_hook_wirings_for_target(
-    target: &TargetCapabilityMatrix,
-    packs: &[&DiscoveredPack],
-) -> Result<serde_json::Value> {
-    if !target.capabilities.deterministic_hooks {
-        return Ok(serde_json::json!({}));
-    }
-    let mut events: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
-    for pack in packs {
-        for resource in &pack.manifest.resources {
-            if resource.kind != ResourceKind::HookWiring {
-                continue;
-            }
-            let bytes = read_pack_resource(pack, resource)?;
-            let wiring: serde_json::Value = serde_json::from_slice(&bytes)
-                .with_context(|| format!("malformed hook wiring: {}", resource.path))?;
-            if let Some(compat) = wiring.get("compatible_targets").and_then(|v| v.as_array()) {
-                if !compat
-                    .iter()
-                    .any(|v| v.as_str() == Some(target.target_id.as_str()))
-                {
-                    continue;
-                }
-            }
-            let event = wiring
-                .get("event")
-                .and_then(|v| v.as_str())
-                .unwrap_or("PostToolUse")
-                .to_string();
-            let matcher = wiring
-                .get("matcher")
-                .and_then(|v| v.as_str())
-                .unwrap_or("*")
-                .to_string();
-            let command_ref = wiring
-                .get("command_ref")
-                .and_then(|v| v.as_str())
-                .with_context(|| format!("hook wiring {} missing command_ref", resource.path))?;
-            // Resolve command_ref against the pack's Hook resources so the
-            // emitted `command` matches the path that emit_pack_resource_outputs
-            // will write into the project. Falls back to a basename derived from
-            // command_ref if no matching Hook resource is declared.
-            let hook_resource = pack
-                .manifest
-                .resources
-                .iter()
-                .find(|r| r.kind == ResourceKind::Hook && r.path == command_ref);
-            let materialized = match hook_resource {
-                Some(hook) => format!(
-                    ".claude/hooks/{}/{}",
-                    pack.manifest.id,
-                    pack_resource_relative_path(pack, hook)
-                ),
-                None => {
-                    let basename = command_ref
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or(command_ref)
-                        .to_string();
-                    format!(".claude/hooks/{}/{}", pack.manifest.id, basename)
-                }
-            };
-            events.entry(event).or_default().push(serde_json::json!({
-                "matcher": matcher,
-                "hooks": [{ "type": "command", "command": materialized }],
-            }));
-        }
-    }
-    Ok(serde_json::to_value(events).unwrap_or_else(|_| serde_json::json!({})))
-}
-
-fn primary_instruction_snippet(pack: &DiscoveredPack) -> Result<String> {
-    let Some(bytes) = primary_instruction_bytes(pack)? else {
-        return Ok(String::new());
-    };
-    Ok(String::from_utf8(bytes).unwrap_or_default())
-}
-
-fn primary_instruction_bytes(pack: &DiscoveredPack) -> Result<Option<Vec<u8>>> {
-    let instructions: Vec<&PackResource> = pack
-        .manifest
-        .resources
-        .iter()
-        .filter(|item| item.kind == ResourceKind::Instruction)
-        .collect();
-    if instructions.is_empty() {
-        return Ok(None);
-    }
-
-    let mut combined = Vec::<u8>::new();
-    for (index, resource) in instructions.iter().enumerate() {
-        let bytes = read_pack_resource(pack, resource)?;
-        if index == 0 {
-            combined = bytes;
-            continue;
-        }
-        let label = instruction_resource_heading(resource);
-        combined.extend_from_slice(b"\n\n---\n\n## ");
-        combined.extend_from_slice(label.as_bytes());
-        combined.extend_from_slice(b"\n\n");
-        combined.extend_from_slice(&bytes);
-    }
-    Ok(Some(combined))
-}
-
-fn default_skill_surface_bytes(pack: &DiscoveredPack) -> Result<Vec<u8>> {
-    let description = pack
-        .manifest
-        .description
-        .clone()
-        .unwrap_or_else(|| "No bundled instruction resource was available.".to_string());
-    let mut frontmatter = BTreeMap::new();
-    frontmatter.insert("name".to_string(), pack.manifest.title.clone());
-    frontmatter.insert("description".to_string(), description.clone());
-    let mut document = render_frontmatter(&frontmatter)?.into_bytes();
-    document
-        .extend_from_slice(format!("\n# {}\n\n{}\n", pack.manifest.title, description).as_bytes());
-    Ok(document)
-}
-
-fn pack_resource_paths(pack: &DiscoveredPack, kind: ResourceKind) -> Vec<String> {
-    pack.manifest
-        .resources
-        .iter()
-        .filter(|item| item.kind == kind)
-        .map(|item| item.path.clone())
-        .collect()
-}
-
-fn resource_surface_slug(resource: &PackResource, contents: &[u8]) -> Option<String> {
-    frontmatter_name(contents)
-        .and_then(|value| slugify_surface_candidate(&value))
-        .or_else(|| semantic_carrier_parent_slug(resource))
-        .or_else(|| {
-            Path::new(&resource.path)
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .and_then(slugify_surface_candidate)
-        })
-        .or_else(|| first_heading_slug(contents))
-}
-
-fn resource_file_name(resource: &PackResource) -> Option<&str> {
-    Path::new(&resource.path)
-        .file_name()
-        .and_then(|value| value.to_str())
-}
-
-fn first_heading_slug(contents: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(contents);
-    text.lines()
-        .find_map(|line| line.strip_prefix("# ").and_then(slugify_surface_candidate))
 }
 
 fn surface_title(pack: &DiscoveredPack, resource: &PackResource, contents: &[u8]) -> String {
@@ -3521,11 +3274,12 @@ mod tests {
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
 
+    use super::library_validation::validate_generated_skill_frontmatter;
     use super::{
         budget_instruction_document, derive_skill_surfaces, read_cached_pack_resource,
-        resource_surface_slug, skill_surface_document, validate_generated_skill_frontmatter,
-        DerivedSkillSurface, DiscoveredPack, LibraryRegistry, INSTRUCTION_INDEX_MAX_BYTES,
-        INSTRUCTION_INDEX_POINTER, INSTRUCTION_INDEX_WARN_BYTES,
+        resource_surface_slug, skill_surface_document, DerivedSkillSurface, DiscoveredPack,
+        LibraryRegistry, INSTRUCTION_INDEX_MAX_BYTES, INSTRUCTION_INDEX_POINTER,
+        INSTRUCTION_INDEX_WARN_BYTES,
     };
     use crate::kernel::MetactlKernel;
     use crate::reference_kernel::ReferenceKernel;

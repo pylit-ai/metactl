@@ -30,6 +30,7 @@
       "supports_surface_assets": true,
       "supports_surface_scripts": true,
       "supports_surface_frontmatter": true,
+      "materialize_as_regular_file": true,
       "surface_merge_strategy": "optional"
     },
     {

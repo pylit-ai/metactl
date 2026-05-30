@@ -229,6 +229,30 @@ fn kernel_has_no_target_id_string_match() {
     );
 }
 
+#[test]
+fn materializer_regular_file_policy_has_no_target_id_branches() {
+    let src = include_str!("../src/materializer.rs");
+
+    let diag = "Regular-file materialization policy must be carried by generated output metadata \
+                instead of target-id string checks in the apply/revert safety path.";
+
+    assert!(
+        !src.contains("target.id == \"cursor\""),
+        "materializer.rs contains a Cursor target-id branch. {}",
+        diag
+    );
+    assert!(
+        !src.contains("target.id == \"codex-cli\""),
+        "materializer.rs contains a Codex target-id branch. {}",
+        diag
+    );
+    assert!(
+        src.contains("materialize_as_regular_file"),
+        "materializer.rs no longer references the data-driven regular-file policy. {}",
+        diag
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Test 4: claude-code emits discoverable skills
 // ---------------------------------------------------------------------------
