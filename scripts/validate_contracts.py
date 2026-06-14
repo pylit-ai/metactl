@@ -6,10 +6,19 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from jsonschema import FormatChecker
-from jsonschema.validators import validator_for
-from referencing import Registry
-from referencing.jsonschema import DRAFT201909
+try:
+    from jsonschema import FormatChecker
+    from jsonschema.validators import validator_for
+    from referencing import Registry
+    from referencing.jsonschema import DRAFT201909
+except ModuleNotFoundError as exc:
+    if exc.name in {"jsonschema", "referencing"}:
+        raise SystemExit(
+            "Missing Python dependency for scripts/validate_contracts.py. "
+            "Install the dev requirements first: "
+            "python3 -m pip install -r requirements-dev.txt"
+        ) from exc
+    raise
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_ROOT = ROOT / "contracts" / "schemas" / "metactl"

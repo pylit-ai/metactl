@@ -182,6 +182,16 @@ metactl validate --json
 
 Expected success signal: JSON responses include `api_version: "metactl/v2alpha1"` and either `ok: true` or a stable machine-readable error.
 
+`skills audit` JSON reports include a run-specific `report.generated_at`
+timestamp. Normalize or ignore that field when diffing automation output.
+
+`scripts/validate_contracts.py` depends on the Python packages listed in
+`requirements-dev.txt`. In a fresh shell, install them first with:
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+```
+
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP flows. Start with [docs/mcp/servers.md](docs/mcp/servers.md) and the `run-metactld` Make target when integrating an editor or agent runtime.
 
 ## Documentation Map
