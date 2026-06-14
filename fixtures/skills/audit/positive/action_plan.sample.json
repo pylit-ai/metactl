@@ -1,0 +1,23 @@
+{
+  "plan_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "generated_at": "unix:1",
+  "target_id": "codex-cli",
+  "scan_scope": "repo",
+  "approval_required": true,
+  "mutation_allowed": false,
+  "actions": [
+    {
+      "action": "repair_metadata",
+      "subject_ids": [
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "reason_codes": [
+        "validation_failed"
+      ],
+      "confidence": "high",
+      "evidence": [
+        "frontmatter missing description"
+      ]
+    }
+  ]
+}

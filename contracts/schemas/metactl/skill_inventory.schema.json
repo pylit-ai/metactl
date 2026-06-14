@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/skill_inventory.schema.json",
+  "title": "metactl Skill Inventory",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "local_id": { "type": "string" },
+      "name": { "type": "string" },
+      "target_kind": { "type": "string" },
+      "scope": {
+        "type": "string",
+        "enum": ["repo", "user", "admin", "system", "plugin", "generated", "explicit-root"]
+      },
+      "path": {
+        "anyOf": [
+          { "type": "string", "minLength": 1 },
+          { "type": "null" }
+        ]
+      },
+      "path_hash": {
+        "type": "string",
+        "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+      },
+      "source_pack_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "source_library_ref": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "source_visibility": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+      "digest": {
+        "type": "string",
+        "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+      },
+      "tree_digest": {
+        "anyOf": [
+          { "type": "string", "pattern": "^sha256:[A-Fa-f0-9]{64}$" },
+          { "type": "null" }
+        ]
+      },
+      "frontmatter": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "validation_findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "string" },
+            "severity": { "type": "string", "enum": ["info", "warning", "error"] },
+            "message": { "type": "string" }
+          },
+          "required": ["code", "severity", "message"]
+        }
+      },
+      "enabled": { "anyOf": [{ "type": "boolean" }, { "type": "null" }] },
+      "discovery_evidence": {
+        "type": "array",
+        "items": { "type": "string" }
+      },
+      "discovery_confidence": {
+        "type": "string",
+        "enum": ["high", "medium", "low"]
+      },
+      "host_adapter": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "host": { "type": "string" },
+          "source_url": { "type": "string" },
+          "source_checked_at": { "type": "string" },
+          "verified_by_test": { "type": "boolean" },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          }
+        },
+        "required": [
+          "host",
+          "source_url",
+          "source_checked_at",
+          "verified_by_test",
+          "confidence"
+        ]
+      },
+      "visibility": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "effective_visibility": { "type": "string" },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "notes": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["effective_visibility", "confidence", "notes"]
+      },
+      "usage_join": {
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "join_method": {
+                "type": "string",
+                "enum": [
+                  "pack_resource_id",
+                  "surface_metadata",
+                  "digest",
+                  "path",
+                  "inferred"
+                ]
+              },
+              "join_confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"]
+              },
+              "evidence": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "pack_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "source_library_ref": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "digest": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "path_hash": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+              "stats": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "command_invoked": { "type": "integer", "minimum": 0 },
+                      "skill_body_read": { "type": "integer", "minimum": 0 },
+                      "pack_resolved": { "type": "integer", "minimum": 0 },
+                      "search_result_selected": { "type": "integer", "minimum": 0 },
+                      "task_verified": { "type": "integer", "minimum": 0 },
+                      "correction_or_retry": { "type": "integer", "minimum": 0 },
+                      "dismissed_or_abandoned": { "type": "integer", "minimum": 0 },
+                      "blocked_or_rejected": { "type": "integer", "minimum": 0 },
+                      "event_count": { "type": "integer", "minimum": 0 },
+                      "score": { "type": "integer" },
+                      "last_event_at": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
+                    },
+                    "required": []
+                  },
+                  { "type": "null" }
+                ]
+              }
+            },
+            "required": ["join_method", "join_confidence", "evidence"]
+          },
+          { "type": "null" }
+        ]
+      }
+    },
+    "required": [
+      "local_id",
+      "name",
+      "target_kind",
+      "scope",
+      "path_hash",
+      "digest",
+      "frontmatter",
+      "validation_findings",
+      "discovery_evidence",
+      "discovery_confidence",
+      "host_adapter",
+      "visibility"
+    ]
+  }
+}

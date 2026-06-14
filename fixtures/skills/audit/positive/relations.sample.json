@@ -1,0 +1,18 @@
+[
+  {
+    "kind": "same_name_as",
+    "left_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "right_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "confidence": "medium",
+    "reason_code": "duplicate_candidate",
+    "evidence": ["name: repo-local-skill", "name: generated-review-skill"]
+  },
+  {
+    "kind": "generated_from_pack",
+    "left_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "right_id": "demo-pack",
+    "confidence": "high",
+    "reason_code": "generated_from_pack",
+    "evidence": ["pack_id: demo-pack", "surface:review"]
+  }
+]

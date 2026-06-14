@@ -14,6 +14,8 @@ from referencing.jsonschema import DRAFT201909
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_ROOT = ROOT / "contracts" / "schemas" / "metactl"
 FIXTURE_ROOT = ROOT / "fixtures" / "golden"
+SKILL_AUDIT_FIXTURE_ROOT = ROOT / "fixtures" / "skills" / "audit"
+HOST_FIXTURE_ROOT = ROOT / "fixtures" / "hosts"
 REPO_JSONRPC_ROOT = ROOT / "contracts" / "jsonrpc" / "v1"
 
 
@@ -77,6 +79,62 @@ def validate_jsonrpc_pairs(fixture_dir: Path) -> None:
             raise SystemExit(f"JSON-RPC id mismatch in {fixture_dir.name} for {name}")
 
 
+def validate_skill_audit_fixtures(registry: Registry) -> None:
+    for fixture_path, schema_path in SKILL_AUDIT_SCHEMA_MAP.items():
+        validate_instance(load_json(fixture_path), schema_path, registry)
+        print(f"validated: {fixture_path.relative_to(ROOT)}")
+
+    for fixture_path, kind in SKILL_AUDIT_NEGATIVE_FILES.items():
+        data = load_json(fixture_path)
+        if kind in {"prompt_leak", "secret_leak"}:
+            try:
+                validate_instance(data, SCHEMA_ROOT / "skill_portfolio_audit.schema.json", registry)
+            except SystemExit:
+                continue
+            raise SystemExit(f"Expected validation failure for {fixture_path.relative_to(ROOT)}")
+        if kind == "unredacted_home_path":
+            paths = []
+            for item in data.get("inventory", []):
+                if isinstance(item, dict) and item.get("path"):
+                    paths.append(item["path"])
+            if not any(str(path).startswith("/Users/") for path in paths):
+                raise SystemExit(
+                    f"Expected a home path leak in {fixture_path.relative_to(ROOT)}"
+                )
+        if kind == "unsupported_mutation_plan":
+            if data.get("mutation_allowed") is not True:
+                raise SystemExit(
+                    f"Expected mutation_allowed=true in {fixture_path.relative_to(ROOT)}"
+                )
+            if any(action.get("action") == "apply" for action in data.get("actions", [])):
+                continue
+            raise SystemExit(
+                f"Expected unsupported apply action in {fixture_path.relative_to(ROOT)}"
+            )
+
+
+def validate_host_fixtures() -> None:
+    for host_dir, paths in HOST_FIXTURE_MAP.items():
+        source = load_json(paths["source"])
+        if source.get("host") != host_dir.name:
+            raise SystemExit(f"Host fixture mismatch in {paths['source'].relative_to(ROOT)}")
+        required = {"host", "source_url", "source_checked_at", "verified_by_test", "confidence"}
+        if set(source) != required:
+            raise SystemExit(f"Unexpected source.json keys in {paths['source'].relative_to(ROOT)}")
+        expected = load_json(paths["expected_visibility"])
+        required_visibility = {
+            "target_id",
+            "scope",
+            "discovery_confidence",
+            "visibility_confidence",
+            "duplicate_name_behavior",
+        }
+        if set(expected) != required_visibility:
+            raise SystemExit(
+                f"Unexpected expected_visibility.json keys in {paths['expected_visibility'].relative_to(ROOT)}"
+            )
+
+
 FIXTURE_SCHEMA_MAP = {
     "role.manifest.json": SCHEMA_ROOT / "role_manifest.schema.json",
     "policy.manifest.json": SCHEMA_ROOT / "policy_manifest.schema.json",
@@ -89,6 +147,31 @@ FIXTURE_SCHEMA_MAP = {
     "compile.manifest.json": SCHEMA_ROOT / "compile_manifest.schema.json",
     "policy.enforcement.report.json": SCHEMA_ROOT / "policy_enforcement_report.schema.json",
     "validation.report.json": SCHEMA_ROOT / "validation_report.schema.json",
+}
+
+SKILL_AUDIT_SCHEMA_MAP = {
+    SKILL_AUDIT_FIXTURE_ROOT / "positive" / "inventory.sample.json": SCHEMA_ROOT / "skill_inventory.schema.json",
+    SKILL_AUDIT_FIXTURE_ROOT / "positive" / "relations.sample.json": SCHEMA_ROOT / "skill_relation.schema.json",
+    SKILL_AUDIT_FIXTURE_ROOT / "positive" / "report.sample.json": SCHEMA_ROOT / "skill_portfolio_audit.schema.json",
+    SKILL_AUDIT_FIXTURE_ROOT / "positive" / "action_plan.sample.json": SCHEMA_ROOT / "skill_action_plan.schema.json",
+}
+
+SKILL_AUDIT_NEGATIVE_FILES = {
+    SKILL_AUDIT_FIXTURE_ROOT / "negative" / "prompt_leak.json": "prompt_leak",
+    SKILL_AUDIT_FIXTURE_ROOT / "negative" / "secret_leak.json": "secret_leak",
+    SKILL_AUDIT_FIXTURE_ROOT / "negative" / "unredacted_home_path.json": "unredacted_home_path",
+    SKILL_AUDIT_FIXTURE_ROOT / "negative" / "unsupported_mutation_plan.json": "unsupported_mutation_plan",
+}
+
+HOST_FIXTURE_MAP = {
+    HOST_FIXTURE_ROOT / "codex-cli": {
+        "source": HOST_FIXTURE_ROOT / "codex-cli" / "source.json",
+        "expected_visibility": HOST_FIXTURE_ROOT / "codex-cli" / "expected_visibility.json",
+    },
+    HOST_FIXTURE_ROOT / "metactl-generated": {
+        "source": HOST_FIXTURE_ROOT / "metactl-generated" / "source.json",
+        "expected_visibility": HOST_FIXTURE_ROOT / "metactl-generated" / "expected_visibility.json",
+    },
 }
 
 JSONRPC_SCHEMA_MAP = {
@@ -162,6 +245,8 @@ if __name__ == "__main__":
     registry = schema_registry()
     validate_repo_jsonrpc_copies()
     validate_auxiliary_artifacts(registry)
+    validate_skill_audit_fixtures(registry)
+    validate_host_fixtures()
     for fixture_dir in sorted(p for p in FIXTURE_ROOT.iterdir() if p.is_dir()):
         validate_fixture_dir(fixture_dir, registry)
         print(f"validated: {fixture_dir.relative_to(ROOT)}")

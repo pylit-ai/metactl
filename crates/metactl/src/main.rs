@@ -23,6 +23,9 @@ use metactl::project::{
     ProjectConfigFile, ProjectLock, SourceLockPublicity, SourceRecord, SourceType,
     SourceVisibility,
 };
+use metactl::skill_audit::{
+    self, SkillAuditOptions, SkillAuditScope, SkillReportFormat,
+};
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
     ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, ReferenceKernel, ResolveParams,
@@ -47,6 +50,7 @@ Quick start:
   metactl init --bind-profile        # record the active machine default in metactl.yaml
   metactl use python-refactor        # resolve, add, and sync a pack in one step
   metactl add python-refactor        # import a pack from the library
+  metactl skills audit               # audit local and generated skill surfaces
   metactl add <pack> --sync          # add (or already added) then sync in one step
   metactl target add cursor          # add another target without editing YAML
   metactl sync                       # compile + apply in one command
@@ -134,6 +138,8 @@ enum Commands {
     Status(StatusArgs),
     /// List roles, packs, policies, or targets from the library or project
     List(ListArgs),
+    /// Audit skill-like artifacts across local and generated roots
+    Skills(SkillsArgs),
     /// Search the pack corpus for a natural-language or keyword query
     Search(SearchArgs),
     /// Show why packs and targets were selected for the current config
@@ -495,6 +501,58 @@ struct ListArgs {
     candidate: bool,
 }
 
+#[derive(Debug, Args)]
+struct SkillsArgs {
+    #[command(subcommand)]
+    command: SkillsCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum SkillsCommand {
+    /// Audit skill-like artifacts across repo, generated, user, and explicit roots
+    Audit(SkillsAuditArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsAuditArgs {
+    /// Target host kind to model
+    #[arg(long, short = 't', default_value = "codex-cli")]
+    target: String,
+    /// Scope selector: repo, user, all, or explicit-root
+    #[arg(long, value_enum, default_value = "repo")]
+    scope: SkillsAuditScopeArg,
+    /// Override the cwd used for visibility calculations
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+    /// Explicit roots to scan in addition to scope-derived roots
+    #[arg(long = "scan-root")]
+    scan_root: Vec<PathBuf>,
+    /// Include local filesystem paths in the output instead of hashes only
+    #[arg(long)]
+    include_local_paths: bool,
+    /// Print the audit report as Markdown instead of human summary
+    #[arg(long, value_enum)]
+    format: Option<SkillsAuditFormatArg>,
+    /// Write the selected report format to a custom path
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillsAuditScopeArg {
+    Repo,
+    User,
+    All,
+    ExplicitRoot,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillsAuditFormatArg {
+    Human,
+    Markdown,
+    Json,
+}
+
 #[derive(Debug, Clone, Subcommand)]
 enum ListSubject {
     /// Available roles (e.g. builder, reviewer)
@@ -816,6 +874,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Fleet(args) => cmd_fleet(cli, args),
         Commands::Status(args) => cmd_status(cli, args),
         Commands::List(args) => cmd_list(cli, args),
+        Commands::Skills(args) => cmd_skills(cli, args),
         Commands::Search(args) => cmd_search(cli, args),
         Commands::Explain(args) => cmd_explain(cli, args),
         Commands::Sync(args) => cmd_sync(cli, args),
@@ -890,6 +949,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
         Commands::Status(_)
         | Commands::List(_)
         | Commands::Search(_)
+        | Commands::Skills(_)
         | Commands::Explain(_)
         | Commands::Validate(_)
         | Commands::Doctor(_)
@@ -3159,6 +3219,89 @@ fn cmd_list(cli: &Cli, args: &ListArgs) -> std::result::Result<CommandOutput, Cl
             })
         }
     }
+}
+
+fn cmd_skills(cli: &Cli, args: &SkillsArgs) -> std::result::Result<CommandOutput, CliError> {
+    match &args.command {
+        SkillsCommand::Audit(args) => cmd_skills_audit(cli, args),
+    }
+}
+
+fn cmd_skills_audit(
+    cli: &Cli,
+    args: &SkillsAuditArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let cwd = match args.cwd.as_ref() {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir().map_err(|err| internal_error(err.into()))?,
+    };
+    let scope = match args.scope {
+        SkillsAuditScopeArg::Repo => SkillAuditScope::Repo,
+        SkillsAuditScopeArg::User => SkillAuditScope::User,
+        SkillsAuditScopeArg::All => SkillAuditScope::All,
+        SkillsAuditScopeArg::ExplicitRoot => SkillAuditScope::ExplicitRoot,
+    };
+    let format = match args.format.unwrap_or(if cli.json {
+        SkillsAuditFormatArg::Json
+    } else {
+        SkillsAuditFormatArg::Human
+    }) {
+        SkillsAuditFormatArg::Human => SkillReportFormat::Human,
+        SkillsAuditFormatArg::Markdown => SkillReportFormat::Markdown,
+        SkillsAuditFormatArg::Json => SkillReportFormat::Json,
+    };
+    let output = skill_audit::run_audit(
+        &project_root,
+        SkillAuditOptions {
+            target_id: args.target.clone(),
+            scope,
+            cwd,
+            scan_roots: args.scan_root.clone(),
+            include_local_paths: args.include_local_paths,
+            format,
+            output_path: args.output.clone(),
+        },
+    )
+    .map_err(internal_error)?;
+
+    let summary = &output.report.summary;
+    let human = format!(
+        "Project: {}\nTarget: {}\nScope: {}\nSkills: {}\nRelations: {}\nCollector: {}\nUsage: {}\nNext: inspect {}/latest.md",
+        project_root.display(),
+        output.report.target_id,
+        output.report.scan_scope,
+        summary.total_skills,
+        summary.relation_count,
+        output.report.collector_status,
+        output.report.usage_window,
+        output.report_markdown_path.parent().unwrap_or(&output.report_markdown_path).display()
+    );
+
+    let command_json = output.json.clone();
+    let command_human = match format {
+        SkillReportFormat::Json => serde_json::to_string_pretty(&command_json)
+            .unwrap_or_else(|_| "{}".to_string()),
+        SkillReportFormat::Markdown => output.markdown.clone(),
+        SkillReportFormat::Human => human.clone(),
+    };
+
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, command_human),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({
+                "action": "audit",
+                "report": command_json,
+                "report_json_path": relative_to_project(&project_root, &output.report_json_path),
+                "report_markdown_path": relative_to_project(&project_root, &output.report_markdown_path),
+                "inventory_path": relative_to_project(&project_root, &output.inventory_path),
+                "relations_path": relative_to_project(&project_root, &output.relations_path),
+                "plan_path": output.plan_path.as_ref().map(|path| relative_to_project(&project_root, path)),
+            }),
+        ),
+    })
 }
 
 fn cmd_search(cli: &Cli, args: &SearchArgs) -> std::result::Result<CommandOutput, CliError> {

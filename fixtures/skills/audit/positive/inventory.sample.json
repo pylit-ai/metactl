@@ -1,0 +1,91 @@
+[
+  {
+    "local_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "repo-local-skill",
+    "target_kind": "codex-cli",
+    "scope": "repo",
+    "path": null,
+    "path_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "source_pack_id": null,
+    "source_library_ref": null,
+    "source_visibility": null,
+    "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "tree_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "frontmatter": {
+      "name": "repo-local-skill",
+      "description": "Repo-local skill fixture."
+    },
+    "validation_findings": [],
+    "enabled": true,
+    "discovery_evidence": ["filesystem discovery", "repo-local path"],
+    "discovery_confidence": "high",
+    "host_adapter": {
+      "host": "codex-cli",
+      "source_url": "docs/internal/host-adapter-matrix.md#codex-cli",
+      "source_checked_at": "2026-06-14",
+      "verified_by_test": true,
+      "confidence": "medium"
+    },
+    "visibility": {
+      "effective_visibility": "visible",
+      "confidence": "medium",
+      "notes": []
+    },
+    "usage_join": null
+  },
+  {
+    "local_id": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "name": "generated-review-skill",
+    "target_kind": "metactl-generated",
+    "scope": "generated",
+    "path": "/tmp/repo/.codex/skills/demo-pack/review/SKILL.md",
+    "path_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "source_pack_id": "demo-pack",
+    "source_library_ref": "surface:review",
+    "source_visibility": "private",
+    "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "tree_digest": null,
+    "frontmatter": {
+      "name": "generated-review-skill",
+      "description": "Generated skill fixture."
+    },
+    "validation_findings": [],
+    "enabled": true,
+    "discovery_evidence": ["generated surface or pack-backed root"],
+    "discovery_confidence": "medium",
+    "host_adapter": {
+      "host": "codex-cli",
+      "source_url": "docs/internal/host-adapter-matrix.md#metactl-generated",
+      "source_checked_at": "2026-06-14",
+      "verified_by_test": true,
+      "confidence": "medium"
+    },
+    "visibility": {
+      "effective_visibility": "generated",
+      "confidence": "medium",
+      "notes": []
+    },
+    "usage_join": {
+      "join_method": "pack_resource_id",
+      "join_confidence": "high",
+      "evidence": ["pack_id: demo-pack"],
+      "pack_id": "demo-pack",
+      "source_library_ref": "surface:review",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "path_hash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "stats": {
+        "command_invoked": 4,
+        "skill_body_read": 2,
+        "pack_resolved": 3,
+        "search_result_selected": 1,
+        "task_verified": 2,
+        "correction_or_retry": 0,
+        "dismissed_or_abandoned": 0,
+        "blocked_or_rejected": 0,
+        "event_count": 12,
+        "score": 7,
+        "last_event_at": "2026-06-14T00:00:00Z"
+      }
+    }
+  }
+]

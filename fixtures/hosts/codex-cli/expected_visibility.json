@@ -1,0 +1,7 @@
+{
+  "target_id": "codex-cli",
+  "scope": "repo",
+  "discovery_confidence": "high",
+  "visibility_confidence": "medium",
+  "duplicate_name_behavior": "ambiguity"
+}
