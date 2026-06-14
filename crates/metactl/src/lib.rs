@@ -5,8 +5,8 @@ pub mod library_registry;
 pub mod materializer;
 pub mod mcp;
 pub mod project;
-pub mod skill_audit;
 pub mod reference_kernel;
+pub mod skill_audit;
 pub mod suite_registry;
 pub mod types;
 

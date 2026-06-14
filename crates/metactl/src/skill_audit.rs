@@ -355,7 +355,8 @@ pub struct SkillAuditOutput {
 pub fn run_audit(project_root: &Path, opts: SkillAuditOptions) -> Result<SkillAuditOutput> {
     let generated_at = now_string();
     let host_adapter = host_adapter_metadata(&opts.target_id);
-    let project_instruction_sources = discover_project_instruction_sources(project_root, &opts.cwd)?;
+    let project_instruction_sources =
+        discover_project_instruction_sources(project_root, &opts.cwd)?;
     let scan_roots = resolve_scan_roots(project_root, &opts);
     let usage_stats = load_usage_stats(project_root)?;
     let collector_status = collector_status(project_root);
@@ -402,7 +403,7 @@ pub fn run_audit(project_root: &Path, opts: SkillAuditOptions) -> Result<SkillAu
         relations: relations.clone(),
         recommendations: recommendations.clone(),
         action_plan: action_plan.clone(),
-        notes: build_notes(&items, &relations, usage_stats.as_ref()),
+        notes: build_notes(&items, &relations, usage_stats.as_ref(), &scan_roots),
     };
 
     let report_json = serde_json::to_value(&report).context("serialize skill audit report")?;
@@ -412,10 +413,11 @@ pub fn run_audit(project_root: &Path, opts: SkillAuditOptions) -> Result<SkillAu
     let relations_path = project_root.join(".metactl/skills/relations.json");
     let report_json_path = project_root.join(".metactl/reports/skills/latest.json");
     let report_markdown_path = project_root.join(".metactl/reports/skills/latest.md");
-    let plan_path = report
-        .action_plan
-        .as_ref()
-        .map(|plan| project_root.join(".metactl/reports/skills/plans").join(format!("{}.json", plan.plan_id)));
+    let plan_path = report.action_plan.as_ref().map(|plan| {
+        project_root
+            .join(".metactl/reports/skills/plans")
+            .join(format!("{}.json", plan.plan_id))
+    });
 
     write_json_file(&inventory_path, &serde_json::to_value(&report.inventory)?)?;
     write_json_file(&relations_path, &serde_json::to_value(&report.relations)?)?;
@@ -490,12 +492,33 @@ fn build_notes(
     inventory: &[SkillInventoryItem],
     relations: &[SkillRelation],
     usage_stats: Option<&UsageStatsFile>,
+    scan_roots: &[PathBuf],
 ) -> Vec<String> {
     let mut notes = Vec::new();
     if usage_stats.is_none() {
         notes.push("usage_window: none".to_string());
     }
-    if inventory.is_empty() {
+    let missing_scan_roots: Vec<String> = scan_roots
+        .iter()
+        .filter(|root| !root.exists())
+        .map(|root| root.display().to_string())
+        .collect();
+    if !missing_scan_roots.is_empty() {
+        notes.push(format!(
+            "explicit scan root missing: {}",
+            missing_scan_roots.join(", ")
+        ));
+    }
+    if !scan_roots.is_empty() && inventory.is_empty() {
+        if missing_scan_roots.len() == scan_roots.len() {
+            notes.push("explicit scan roots were supplied but none existed".to_string());
+        } else {
+            notes.push(
+                "explicit scan roots were supplied but no skill-like artifacts were discovered"
+                    .to_string(),
+            );
+        }
+    } else if inventory.is_empty() {
         notes.push("No skill-like artifacts discovered.".to_string());
     }
     if relations.is_empty() && !inventory.is_empty() {
@@ -855,7 +878,9 @@ fn collect_skill_items(
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             collect_skill_items(project_root, &path, opts, host_adapter, usage_stats, out)?;
-        } else if file_type.is_file() && path.file_name().and_then(|s| s.to_str()) == Some("SKILL.md") {
+        } else if file_type.is_file()
+            && path.file_name().and_then(|s| s.to_str()) == Some("SKILL.md")
+        {
             out.push(scan_skill_file(
                 project_root,
                 &path,
@@ -899,9 +924,7 @@ fn scan_skill_file(
     item.tree_digest = compute_tree_digest(skill_root).ok();
     item.frontmatter = frontmatter.clone();
     item.validation_findings = findings;
-    item.enabled = frontmatter
-        .get("enabled")
-        .and_then(|value| value.as_bool());
+    item.enabled = frontmatter.get("enabled").and_then(|value| value.as_bool());
 
     let name = frontmatter
         .get("name")
@@ -922,7 +945,10 @@ fn scan_skill_file(
         });
     item.name = name;
 
-    match frontmatter.get("description").and_then(|value| value.as_str()) {
+    match frontmatter
+        .get("description")
+        .and_then(|value| value.as_str())
+    {
         Some(value) if !value.trim().is_empty() => {}
         _ => item.validation_findings.push(ValidationFinding {
             code: "missing_description".to_string(),
@@ -990,8 +1016,7 @@ fn scan_skill_file(
             .push("filesystem discovery".to_string());
     }
     if skill_path.starts_with(project_root) {
-        item.discovery_evidence
-            .push("repo-local path".to_string());
+        item.discovery_evidence.push("repo-local path".to_string());
     }
     item.discovery_confidence = if opts.scope == SkillAuditScope::ExplicitRoot {
         Confidence::High.as_str().to_string()
@@ -1099,7 +1124,9 @@ fn scope_for_path(project_root: &Path, path: &Path, requested: SkillAuditScope) 
     if normalized.starts_with(&normalize_path(project_root)) {
         return "repo".to_string();
     }
-    if normalized.starts_with("/usr/") || normalized.starts_with("/System/") || normalized.starts_with("/etc/")
+    if normalized.starts_with("/usr/")
+        || normalized.starts_with("/System/")
+        || normalized.starts_with("/etc/")
     {
         return "system".to_string();
     }
@@ -1109,7 +1136,10 @@ fn scope_for_path(project_root: &Path, path: &Path, requested: SkillAuditScope) 
     "repo".to_string()
 }
 
-fn visibility_for(item: &SkillInventoryItem, host_adapter: &HostAdapterMetadata) -> VisibilityRecord {
+fn visibility_for(
+    item: &SkillInventoryItem,
+    host_adapter: &HostAdapterMetadata,
+) -> VisibilityRecord {
     let mut notes = Vec::new();
     let effective_visibility = if item.target_kind == "codex-cli" {
         if item.name.trim().is_empty() {
@@ -1123,7 +1153,11 @@ fn visibility_for(item: &SkillInventoryItem, host_adapter: &HostAdapterMetadata)
     } else {
         "parse_only".to_string()
     };
-    if item.validation_findings.iter().any(|finding| finding.code == "missing_name") {
+    if item
+        .validation_findings
+        .iter()
+        .any(|finding| finding.code == "missing_name")
+    {
         notes.push("name missing; visibility ambiguous".to_string());
     }
     VisibilityRecord {
@@ -1140,10 +1174,7 @@ fn join_usage(
 ) -> Option<UsageJoin> {
     let stats = usage_stats?;
     let pack_id = item.source_pack_id.clone()?;
-    let pack_stats = stats
-        .packs
-        .iter()
-        .find(|entry| entry.pack_id == pack_id)?;
+    let pack_stats = stats.packs.iter().find(|entry| entry.pack_id == pack_id)?;
     let mut evidence = Vec::new();
     let join_method = if item.source_library_ref.is_some() {
         JoinMethod::SurfaceMetadata
@@ -1203,7 +1234,10 @@ fn host_adapter_metadata(target_id: &str) -> HostAdapterMetadata {
         host: target_id.to_string(),
         source_url,
         source_checked_at: HOST_MATRIX_CHECKED_AT.to_string(),
-        verified_by_test: matches!(target_id, "codex-cli" | "metactl-generated" | "explicit-root"),
+        verified_by_test: matches!(
+            target_id,
+            "codex-cli" | "metactl-generated" | "explicit-root"
+        ),
         confidence: confidence.to_string(),
     }
 }
@@ -1494,6 +1528,14 @@ fn render_markdown(report: &SkillPortfolioAuditReport) -> String {
     if report.recommendations.is_empty() {
         lines.push("- (none)".to_string());
     }
+    lines.push(String::new());
+    lines.push("## Notes".to_string());
+    for note in &report.notes {
+        lines.push(format!("- {}", note));
+    }
+    if report.notes.is_empty() {
+        lines.push("- (none)".to_string());
+    }
     if let Some(plan) = report.action_plan.as_ref() {
         lines.push(String::new());
         lines.push("## Action Plan".to_string());
@@ -1533,7 +1575,9 @@ mod tests {
         let (frontmatter, body, findings) = parse_frontmatter("name: bad\nbody");
         assert!(frontmatter.is_empty());
         assert!(body.contains("name: bad"));
-        assert!(findings.iter().any(|finding| finding.code == "missing_frontmatter"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == "missing_frontmatter"));
     }
 
     #[test]
@@ -1551,7 +1595,12 @@ Body
         assert_eq!(frontmatter["name"], Value::String("demo".to_string()));
         assert_eq!(frontmatter["enabled"], Value::Bool(false));
         assert_eq!(body.trim(), "Body");
-        assert!(findings.is_empty() || findings.iter().any(|finding| finding.code == "unsupported_field"));
+        assert!(
+            findings.is_empty()
+                || findings
+                    .iter()
+                    .any(|finding| finding.code == "unsupported_field")
+        );
     }
 
     #[test]
@@ -1562,11 +1611,13 @@ Body
             target_kind: "codex-cli".to_string(),
             scope: "repo".to_string(),
             path: None,
-            path_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            path_hash: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
             source_pack_id: Some("pack-a".to_string()),
             source_library_ref: None,
             source_visibility: None,
-            digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+            digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                .to_string(),
             tree_digest: None,
             frontmatter: Map::new(),
             validation_findings: Vec::new(),
@@ -1587,7 +1638,11 @@ Body
             ..left.clone()
         };
         let relations = build_relations(&[left, right]);
-        assert!(relations.iter().any(|relation| relation.kind == "same_name_as"));
-        assert!(relations.iter().any(|relation| relation.kind == "duplicate_candidate"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.kind == "same_name_as"));
+        assert!(relations
+            .iter()
+            .any(|relation| relation.kind == "duplicate_candidate"));
     }
 }

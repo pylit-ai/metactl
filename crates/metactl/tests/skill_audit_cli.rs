@@ -62,7 +62,9 @@ Repo local guidance.
 "#,
     );
     write_skill(
-        &project.path().join(".codex/skills/demo-pack/review/SKILL.md"),
+        &project
+            .path()
+            .join(".codex/skills/demo-pack/review/SKILL.md"),
         r#"---
 name: generated-review-skill
 description: Generated skill fixture.
@@ -105,7 +107,12 @@ Generated review guidance.
     .expect("write stats");
 
     let output = run_cli(project.path(), &["--json", "skills", "audit"]);
-    assert!(output.status.success(), "stdout:\n{}\nstderr:\n{}", stdout(&output), stderr(&output));
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        stdout(&output),
+        stderr(&output)
+    );
     let value = json_output(&output);
     assert_eq!(value["ok"], true);
     assert_eq!(value["command"], "skills");
@@ -116,16 +123,23 @@ Generated review guidance.
     );
     assert_eq!(value["report"]["scan_scope"], "repo");
     assert!(
-        value["report"]["inventory"].as_array().expect("inventory").len() >= 2
+        value["report"]["inventory"]
+            .as_array()
+            .expect("inventory")
+            .len()
+            >= 2
     );
-    assert!(
-        !value["report"]["relations"].as_array().expect("relations").is_empty()
-    );
+    assert!(!value["report"]["relations"]
+        .as_array()
+        .expect("relations")
+        .is_empty());
     let instruction_sources = value["report"]["project_instruction_sources"]
         .as_array()
         .expect("instruction sources");
     assert!(
-        instruction_sources.iter().any(|item| item["kind"] == "AGENTS.md"),
+        instruction_sources
+            .iter()
+            .any(|item| item["kind"] == "AGENTS.md"),
         "instruction sources: {}",
         serde_json::to_string_pretty(&value["report"]["project_instruction_sources"])
             .expect("pretty instruction sources")
@@ -137,8 +151,16 @@ Generated review guidance.
     let relations_path = project.path().join(".metactl/skills/relations.json");
     assert!(report_json.exists(), "missing {}", report_json.display());
     assert!(report_md.exists(), "missing {}", report_md.display());
-    assert!(inventory_path.exists(), "missing {}", inventory_path.display());
-    assert!(relations_path.exists(), "missing {}", relations_path.display());
+    assert!(
+        inventory_path.exists(),
+        "missing {}",
+        inventory_path.display()
+    );
+    assert!(
+        relations_path.exists(),
+        "missing {}",
+        relations_path.display()
+    );
 
     let markdown = run_cli(project.path(), &["skills", "audit", "--format", "markdown"]);
     assert!(
@@ -151,4 +173,62 @@ Generated review guidance.
     assert!(text.contains("# Skill Portfolio Audit"));
     assert!(text.contains("Inventory:"));
     assert!(text.contains("Project:"));
+}
+
+#[test]
+fn skills_audit_reports_missing_explicit_scan_roots() {
+    let project = TempDir::new().expect("tempdir");
+    let missing_root = project.path().join("missing-scan-root");
+    let missing_root_str = missing_root.to_str().expect("missing root str");
+
+    let json = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "audit",
+            "--scope",
+            "explicit-root",
+            "--scan-root",
+            missing_root_str,
+        ],
+    );
+    assert!(
+        json.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        stdout(&json),
+        stderr(&json)
+    );
+    let value = json_output(&json);
+    let notes = value["report"]["notes"].as_array().expect("notes");
+    assert!(
+        notes.iter().any(|note| note
+            .as_str()
+            .expect("note string")
+            .contains("explicit scan root missing")),
+        "notes: {}",
+        serde_json::to_string_pretty(&value["report"]["notes"]).expect("pretty notes")
+    );
+
+    let human = run_cli(
+        project.path(),
+        &[
+            "skills",
+            "audit",
+            "--scope",
+            "explicit-root",
+            "--scan-root",
+            missing_root_str,
+        ],
+    );
+    assert!(
+        human.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        stdout(&human),
+        stderr(&human)
+    );
+    let text = stdout(&human);
+    assert!(text.contains("Notes:"));
+    assert!(text.contains("explicit scan root missing"));
+    assert!(text.contains("explicit scan roots were supplied but none existed"));
 }

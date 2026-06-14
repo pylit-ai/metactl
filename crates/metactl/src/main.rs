@@ -23,9 +23,7 @@ use metactl::project::{
     ProjectConfigFile, ProjectLock, SourceLockPublicity, SourceRecord, SourceType,
     SourceVisibility,
 };
-use metactl::skill_audit::{
-    self, SkillAuditOptions, SkillAuditScope, SkillReportFormat,
-};
+use metactl::skill_audit::{self, SkillAuditOptions, SkillAuditScope, SkillReportFormat};
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
     ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, ReferenceKernel, ResolveParams,
@@ -3277,11 +3275,17 @@ fn cmd_skills_audit(
         output.report.usage_window,
         output.report_markdown_path.parent().unwrap_or(&output.report_markdown_path).display()
     );
+    let human = if output.report.notes.is_empty() {
+        human
+    } else {
+        format!("{}\nNotes: {}", human, output.report.notes.join(" | "))
+    };
 
     let command_json = output.json.clone();
     let command_human = match format {
-        SkillReportFormat::Json => serde_json::to_string_pretty(&command_json)
-            .unwrap_or_else(|_| "{}".to_string()),
+        SkillReportFormat::Json => {
+            serde_json::to_string_pretty(&command_json).unwrap_or_else(|_| "{}".to_string())
+        }
         SkillReportFormat::Markdown => output.markdown.clone(),
         SkillReportFormat::Human => human.clone(),
     };
