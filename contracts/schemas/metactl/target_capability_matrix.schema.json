@@ -10,6 +10,13 @@
     "target_id": {
       "$ref": "common.schema.json#/$defs/slug"
     },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/slug"
+      },
+      "uniqueItems": true
+    },
     "version": {
       "$ref": "common.schema.json#/$defs/version_string"
     },
@@ -140,6 +147,10 @@
             "default": false
           },
           "supports_surface_frontmatter": {
+            "type": "boolean",
+            "default": false
+          },
+          "materialize_as_regular_file": {
             "type": "boolean",
             "default": false
           },
