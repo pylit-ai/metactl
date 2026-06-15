@@ -8,6 +8,7 @@ pub(super) fn cmd_skills(
         SkillsCommand::Add(add_args) => cmd_skills_add(cli, add_args),
         SkillsCommand::List(list_args) => cmd_skills_list(cli, list_args),
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
+        SkillsCommand::Audit(audit_args) => cmd_skills_audit(cli, audit_args),
     }
 }
 

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/skill_action_plan.schema.json",
+  "title": "metactl Skill Action Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "plan_id": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "target_id": { "type": "string" },
+    "scan_scope": { "type": "string" },
+    "approval_required": { "type": "boolean" },
+    "mutation_allowed": { "type": "boolean" },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string" },
+          "subject_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": [
+          "action",
+          "subject_ids",
+          "reason_codes",
+          "confidence",
+          "evidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "plan_id",
+    "generated_at",
+    "target_id",
+    "scan_scope",
+    "approval_required",
+    "mutation_allowed",
+    "actions"
+  ]
+}

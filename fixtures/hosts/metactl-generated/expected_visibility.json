@@ -1,0 +1,7 @@
+{
+  "target_id": "metactl-generated",
+  "scope": "generated",
+  "discovery_confidence": "medium",
+  "visibility_confidence": "medium",
+  "duplicate_name_behavior": "ambiguity"
+}

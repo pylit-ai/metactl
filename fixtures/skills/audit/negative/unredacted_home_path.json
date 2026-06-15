@@ -1,0 +1,64 @@
+{
+  "api_version": "0.1.0",
+  "generated_at": "unix:1",
+  "target_id": "codex-cli",
+  "repo_root": "/tmp/repo",
+  "repo_root_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cwd": "/tmp/repo",
+  "scan_scope": "repo",
+  "collector_status": "disabled",
+  "usage_window": "present",
+  "project_instruction_sources": [],
+  "summary": {
+    "total_skills": 1,
+    "host_counts": {
+      "codex-cli": 1
+    },
+    "scope_counts": {
+      "repo": 1
+    },
+    "low_confidence_count": 0,
+    "duplicate_cluster_count": 0,
+    "relation_count": 0,
+    "recommendation_counts": {}
+  },
+  "inventory": [
+    {
+      "local_id": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "leaky-skill",
+      "target_kind": "codex-cli",
+      "scope": "repo",
+      "path": "/Users/example/private/skill/SKILL.md",
+      "path_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source_pack_id": null,
+      "source_library_ref": null,
+      "source_visibility": null,
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "tree_digest": null,
+      "frontmatter": {
+        "name": "leaky-skill",
+        "description": "Leaky path fixture."
+      },
+      "validation_findings": [],
+      "enabled": true,
+      "discovery_evidence": ["filesystem discovery"],
+      "discovery_confidence": "high",
+      "host_adapter": {
+        "host": "codex-cli",
+        "source_url": "docs/internal/host-adapter-matrix.md#codex-cli",
+        "source_checked_at": "2026-06-14",
+        "verified_by_test": true,
+        "confidence": "medium"
+      },
+      "visibility": {
+        "effective_visibility": "visible",
+        "confidence": "medium",
+        "notes": []
+      },
+      "usage_join": null
+    }
+  ],
+  "relations": [],
+  "recommendations": [],
+  "notes": []
+}

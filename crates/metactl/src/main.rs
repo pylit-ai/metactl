@@ -31,6 +31,7 @@ use metactl::project::{
 use metactl::surface_usage::{
     self, SurfaceLifecycleMode, SurfaceOverrideAction, SurfaceRebuildTrigger, SurfaceReport,
 };
+use metactl::skill_audit::{self, SkillAuditOptions, SkillAuditScope, SkillReportFormat};
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
     ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, PluginExportOptions, PluginTier,
@@ -66,6 +67,7 @@ Quick start:
   metactl preview                    # compile and preview generated changes without applying
   metactl use python-refactor        # resolve, add, and sync a pack in one step
   metactl add python-refactor        # import a pack from the library
+  metactl skills audit               # audit local and generated skill surfaces
   metactl add <pack> --sync          # add (or already added) then sync in one step
   metactl demo create                # create a disposable brownfield sandbox
   metactl target add cursor          # add another target without editing YAML
@@ -788,6 +790,8 @@ enum SkillsCommand {
     List(SkillsListArgs),
     /// Remove a user-global Codex Agent Skill folder
     Remove(SkillsRemoveArgs),
+    /// Audit skill-like artifacts across repo, generated, user, and explicit roots
+    Audit(SkillsAuditArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1010,6 +1014,46 @@ struct ListArgs {
     /// Include candidate (unverified) packs
     #[arg(long)]
     candidate: bool,
+}
+
+#[derive(Debug, Args)]
+struct SkillsAuditArgs {
+    /// Target host kind to model
+    #[arg(long, short = 't', default_value = "codex-cli")]
+    target: String,
+    /// Scope selector: repo, user, all, or explicit-root
+    #[arg(long, value_enum, default_value = "repo")]
+    scope: SkillsAuditScopeArg,
+    /// Override the cwd used for visibility calculations
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+    /// Explicit roots to scan in addition to scope-derived roots
+    #[arg(long = "scan-root")]
+    scan_root: Vec<PathBuf>,
+    /// Include local filesystem paths in the output instead of hashes only
+    #[arg(long)]
+    include_local_paths: bool,
+    /// Print the audit report as Markdown instead of human summary
+    #[arg(long, value_enum)]
+    format: Option<SkillsAuditFormatArg>,
+    /// Write the selected report format to a custom path
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillsAuditScopeArg {
+    Repo,
+    User,
+    All,
+    ExplicitRoot,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillsAuditFormatArg {
+    Human,
+    Markdown,
+    Json,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -1786,6 +1830,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::Add(_) => Some("skills add"),
             SkillsCommand::List(_) => None,
             SkillsCommand::Remove(_) => Some("skills remove"),
+            SkillsCommand::Audit(_) => Some("skills audit"),
         },
         Commands::Plugin(args) => match &args.command {
             PluginCommand::List(_) | PluginCommand::Verify(_) => None,
@@ -5784,6 +5829,89 @@ fn cmd_list(cli: &Cli, args: &ListArgs) -> std::result::Result<CommandOutput, Cl
             })
         }
     }
+}
+
+fn cmd_skills_audit(
+    cli: &Cli,
+    args: &SkillsAuditArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let cwd = match args.cwd.as_ref() {
+        Some(cwd) => cwd.clone(),
+        None => std::env::current_dir().map_err(internal_error)?,
+    };
+    let scope = match args.scope {
+        SkillsAuditScopeArg::Repo => SkillAuditScope::Repo,
+        SkillsAuditScopeArg::User => SkillAuditScope::User,
+        SkillsAuditScopeArg::All => SkillAuditScope::All,
+        SkillsAuditScopeArg::ExplicitRoot => SkillAuditScope::ExplicitRoot,
+    };
+    let format = match args.format.unwrap_or(if cli.json {
+        SkillsAuditFormatArg::Json
+    } else {
+        SkillsAuditFormatArg::Human
+    }) {
+        SkillsAuditFormatArg::Human => SkillReportFormat::Human,
+        SkillsAuditFormatArg::Markdown => SkillReportFormat::Markdown,
+        SkillsAuditFormatArg::Json => SkillReportFormat::Json,
+    };
+    let output = skill_audit::run_audit(
+        &project_root,
+        SkillAuditOptions {
+            target_id: args.target.clone(),
+            scope,
+            cwd,
+            scan_roots: args.scan_root.clone(),
+            include_local_paths: args.include_local_paths,
+            format,
+            output_path: args.output.clone(),
+        },
+    )
+    .map_err(internal_error)?;
+
+    let summary = &output.report.summary;
+    let human = format!(
+        "Project: {}\nTarget: {}\nScope: {}\nSkills: {}\nRelations: {}\nCollector: {}\nUsage: {}\nNext: inspect {}/latest.md",
+        project_root.display(),
+        output.report.target_id,
+        output.report.scan_scope,
+        summary.total_skills,
+        summary.relation_count,
+        output.report.collector_status,
+        output.report.usage_window,
+        output.report_markdown_path.parent().unwrap_or(&output.report_markdown_path).display()
+    );
+    let human = if output.report.notes.is_empty() {
+        human
+    } else {
+        format!("{}\nNotes: {}", human, output.report.notes.join(" | "))
+    };
+
+    let command_json = output.json.clone();
+    let command_human = match format {
+        SkillReportFormat::Json => {
+            serde_json::to_string_pretty(&command_json).unwrap_or_else(|_| "{}".to_string())
+        }
+        SkillReportFormat::Markdown => output.markdown.clone(),
+        SkillReportFormat::Human => human.clone(),
+    };
+
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, command_human),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({
+                "action": "audit",
+                "report": command_json,
+                "report_json_path": relative_to_project(&project_root, &output.report_json_path),
+                "report_markdown_path": relative_to_project(&project_root, &output.report_markdown_path),
+                "inventory_path": relative_to_project(&project_root, &output.inventory_path),
+                "relations_path": relative_to_project(&project_root, &output.relations_path),
+                "plan_path": output.plan_path.as_ref().map(|path| relative_to_project(&project_root, path)),
+            }),
+        ),
+    })
 }
 
 fn cmd_search(cli: &Cli, args: &SearchArgs) -> std::result::Result<CommandOutput, CliError> {

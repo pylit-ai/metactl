@@ -23,7 +23,7 @@ bash scripts/check_public_boundary.sh
 
 Use precise claims:
 
-- "passes metactl 0.1.0 Codex CLI conformance"
-- "tested with metactl 0.1.0"
+- "passes metactl 0.1.18 Codex CLI conformance"
+- "tested with metactl 0.1.18"
 
 Avoid broad claims such as "official" or "certified" unless maintainers have published a release-specific compatibility note.

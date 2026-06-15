@@ -1,0 +1,26 @@
+{
+  "api_version": "0.1.0",
+  "generated_at": "unix:1",
+  "target_id": "codex-cli",
+  "repo_root": "/tmp/repo",
+  "repo_root_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "cwd": "/tmp/repo",
+  "scan_scope": "repo",
+  "collector_status": "disabled",
+  "usage_window": "none",
+  "project_instruction_sources": [],
+  "summary": {
+    "total_skills": 0,
+    "host_counts": {},
+    "scope_counts": {},
+    "low_confidence_count": 0,
+    "duplicate_cluster_count": 0,
+    "relation_count": 0,
+    "recommendation_counts": {}
+  },
+  "inventory": [],
+  "relations": [],
+  "recommendations": [],
+  "notes": [],
+  "prompt": "system prompt leakage"
+}

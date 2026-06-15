@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2019-09/schema",
+  "$id": "https://dropzone/contracts/schemas/metactl/skill_portfolio_audit.schema.json",
+  "title": "metactl Skill Portfolio Audit",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "target_id": { "type": "string" },
+    "repo_root": { "type": "string" },
+    "repo_root_hash": {
+      "type": "string",
+      "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+    },
+    "cwd": { "type": "string" },
+    "scan_scope": { "type": "string" },
+    "collector_status": {
+      "type": "string",
+      "enum": ["unavailable", "disabled", "running", "stale", "error"]
+    },
+    "usage_window": { "type": "string" },
+    "project_instruction_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total_skills": { "type": "integer", "minimum": 0 },
+        "host_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "scope_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "low_confidence_count": { "type": "integer", "minimum": 0 },
+        "duplicate_cluster_count": { "type": "integer", "minimum": 0 },
+        "relation_count": { "type": "integer", "minimum": 0 },
+        "recommendation_counts": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "required": [
+        "total_skills",
+        "host_counts",
+        "scope_counts",
+        "low_confidence_count",
+        "duplicate_cluster_count",
+        "relation_count",
+        "recommendation_counts"
+      ]
+    },
+    "inventory": {
+      "$ref": "skill_inventory.schema.json"
+    },
+    "relations": {
+      "$ref": "skill_relation.schema.json"
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string" },
+          "subject_ids": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"]
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "next_reversible_action": { "type": "string" }
+        },
+        "required": [
+          "action",
+          "subject_ids",
+          "confidence",
+          "reason_codes",
+          "evidence",
+          "next_reversible_action"
+        ]
+      }
+    },
+    "action_plan": {
+      "anyOf": [
+        { "$ref": "skill_action_plan.schema.json" },
+        { "type": "null" }
+      ]
+    },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": [
+    "api_version",
+    "generated_at",
+    "target_id",
+    "repo_root",
+    "repo_root_hash",
+    "cwd",
+    "scan_scope",
+    "collector_status",
+    "usage_window",
+    "project_instruction_sources",
+    "summary",
+    "inventory",
+    "relations",
+    "recommendations",
+    "notes"
+  ]
+}
