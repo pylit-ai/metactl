@@ -8,7 +8,7 @@ Last local verification: 2026-05-04.
 - `cargo tree -d`: passed with no duplicate dependency versions reported.
 - `cargo audit`: passed.
 - `cargo publish -p metactl --dry-run --allow-dirty`: passed.
-- `cargo publish -p metactld --dry-run --allow-dirty`: deferred until `metactl` is published to crates.io, because `metactld` depends on `metactl = 0.1.0`.
+- `cargo publish -p metactld --dry-run --allow-dirty`: deferred until `metactl` is published to crates.io, because `metactld` depends on `metactl = 0.1.18`.
 
 License summary from Cargo metadata:
 
@@ -45,6 +45,6 @@ Release artifacts should be created through `.github/workflows/release.yml`, whi
 Publish order for crates.io:
 
 1. Publish `metactl`.
-2. Wait for `metactl = 0.1.0` to appear in the crates.io index.
+2. Wait for `metactl = 0.1.18` to appear in the crates.io index.
 3. Run `cargo publish -p metactld --dry-run`.
 4. Publish `metactld`.

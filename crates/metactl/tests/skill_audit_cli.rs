@@ -81,7 +81,7 @@ Generated review guidance.
     fs::write(
         project.path().join(".metactl/usage/stats.json"),
         r#"{
-  "api_version": "0.1.0",
+  "api_version": "0.1.18",
   "generated_at": "2026-06-14T00:00:00Z",
   "source_path": ".metactl/usage/events.jsonl",
   "event_count": 1,

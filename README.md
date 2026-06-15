@@ -62,7 +62,7 @@ cargo install --path crates/metactl --locked
 Expected success signal:
 
 ```text
-Installed package `metactl v0.1.0 (...)` (executable `metactl`)
+Installed package `metactl v0.1.18 (...)` (executable `metactl`)
 ```
 
 For local development without installing:
@@ -234,7 +234,7 @@ Public-boundary rules:
 
 ## Project Status
 
-Current crate version: `0.1.0`.
+Current crate version: `0.1.18`.
 
 Current API version: `metactl/v2alpha1`.
 
