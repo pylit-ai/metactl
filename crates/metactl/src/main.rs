@@ -28,10 +28,10 @@ use metactl::project::{
     ProjectLock, SourceLockPublicity, SourceRecord, SourceType, SourceVisibility,
     UserFleetController, UserFleetSettings,
 };
+use metactl::skill_audit::{self, SkillAuditOptions, SkillAuditScope, SkillReportFormat};
 use metactl::surface_usage::{
     self, SurfaceLifecycleMode, SurfaceOverrideAction, SurfaceRebuildTrigger, SurfaceReport,
 };
-use metactl::skill_audit::{self, SkillAuditOptions, SkillAuditScope, SkillReportFormat};
 use metactl::{
     ApplyMode, ApplyReport, BrownfieldMode, CompileManifest, CompileParams, DiscoveryMode,
     ExplainParams, ExplainResult, LibraryRegistry, MetactlKernel, PluginExportOptions, PluginTier,
