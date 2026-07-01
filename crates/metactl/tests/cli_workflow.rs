@@ -17,6 +17,8 @@ mod ignore_workflow;
 mod plugin_workflow;
 #[path = "cli_workflow/profile.rs"]
 mod profile_workflow;
+#[path = "cli_workflow/project_import.rs"]
+mod project_import_workflow;
 #[path = "cli_workflow/search.rs"]
 mod search_workflow;
 #[path = "cli_workflow/source.rs"]

@@ -72,6 +72,40 @@ linked_projects:
     path: /path/to/repos/app
 ```
 
+## Importing Project Configuration
+
+Fleet controllers are also a convenient registry for project configuration import. Import is separate from Fleet sync: it copies selected `metactl.yaml` fields into the current project, while Fleet sync previews or applies generated runtime surfaces across linked projects.
+
+Discover importable projects:
+
+```bash
+metactl project import list
+metactl project import list --search-root /path/to/repos
+```
+
+Preview and apply an import by project id, folder name, or direct path:
+
+```bash
+metactl project import plan app
+metactl project import apply app --yes
+metactl setup --import-from /path/to/repos/app --yes
+```
+
+By default, import copies `role`, `policy`, `packs`, `targets`, `extends_profile`, `defaults`, and the agent artifact policy metadata. It does not copy `sources`, `linked_projects`, locks, generated files, logs, reports, or arbitrary local state. Use source flags only when the destination should intentionally reference the same libraries. Public and private source records are selected independently:
+
+```bash
+metactl project import apply app --include-public-sources --yes
+metactl project import apply app --include-private-sources --yes
+metactl project import apply app --include-public-sources --include-private-sources --yes
+```
+
+When importing into an existing project, choose the write behavior explicitly:
+
+```bash
+metactl project import apply app --merge --yes
+metactl project import apply app --replace --yes
+```
+
 The global file stores only the pointer:
 
 ```yaml

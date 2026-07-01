@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current crate version: `0.1.18`
+Current crate version: `0.1.19`
 
 `metactl` is a local control plane for agent instructions. It compiles reusable roles, packs, policies, and targets into reviewable tool-specific files for Codex CLI, Claude Code, Cursor, Gemini CLI, OpenClaw, filesystem agents, and local MCP/JSON-RPC clients.
 
@@ -56,9 +56,9 @@ Modern coding agents read different files, directories, skill formats, and rule 
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.18 --locked
+cargo install metactl --version 0.1.19 --locked
 metactl version
-# metactl 0.1.18 (metactl/v2alpha1)
+# metactl 0.1.19 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -112,7 +112,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.18 (metactl/v2alpha1)
+# metactl 0.1.19 (metactl/v2alpha1)
 ```
 
 </details>
@@ -123,9 +123,9 @@ metactl version
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.18 --locked
+cargo install metactld --version 0.1.19 --locked
 metactld --version
-# metactld 0.1.18
+# metactld 0.1.19
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -201,6 +201,10 @@ metactl validate
 | `metactl setup` | Human-friendly setup with portable agent artifact stewardship enabled for new projects. |
 | `metactl setup --plan` | Show guided setup actions and equivalent raw commands without writing files. |
 | `metactl setup --target codex-cli --artifact-policy portable-first --yes` | Create project config for one explicit target without running `sync`. |
+| `metactl project import list` | List importable projects from linked Fleet config or explicit search roots. |
+| `metactl project import plan <project-or-path>` | Preview a config import before writing the destination project. |
+| `metactl project import apply <project-or-path> --yes` | Create `metactl.yaml` from another project; source records are omitted unless explicitly included. |
+| `metactl setup --import-from <project-or-path> --yes` | First-run setup shortcut that imports another project's packs, policy, role, targets, defaults, and artifact policy. |
 | `metactl profile list` | Show user profiles and built-in templates such as `neutral`, `multi-agent`, `agent-ci`, and `solo-codex`. |
 | `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
 | `metactl preview` | Convenience alias for `metactl sync --preview`; stages output without applying runtime files. |
@@ -410,7 +414,7 @@ Create a controller, select it, and link projects deliberately:
 ```bash
 metactl fleet controller init team-agents
 metactl fleet controller set team-agents /path/to/team-agents
-metactl project link /path/to/project
+# Edit /path/to/team-agents/metactl.yaml and add linked_projects entries.
 metactl fleet status
 ```
 
@@ -574,7 +578,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.18` for both `metactl` and `metactld`.
+Current public crate version: `0.1.19` for both `metactl` and `metactld`.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 
