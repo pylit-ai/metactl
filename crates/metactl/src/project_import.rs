@@ -15,10 +15,19 @@ use serde_json::{json, Value};
 
 use super::*;
 
+const PROJECT_IMPORT_LIST_DEFAULT_LIMIT: usize = 20;
+const PROJECT_IMPORT_NAME_WIDTH: usize = 24;
+const PROJECT_IMPORT_ID_WIDTH: usize = 24;
+const PROJECT_IMPORT_STATUS_WIDTH: usize = 12;
+const PROJECT_IMPORT_SOURCE_WIDTH: usize = 16;
+const PROJECT_IMPORT_PATH_WIDTH: usize = 56;
+
 #[derive(Debug, Subcommand)]
 pub(super) enum ProjectImportCommand {
     /// List importable projects discovered from fleet configuration and search roots
     List(ProjectImportListArgs),
+    /// Show importable configuration fields and aliases
+    Fields(ProjectImportFieldsArgs),
     /// Inspect an importable source project without writing anything
     Inspect(ProjectImportSourceArgs),
     /// Preview the configuration that would be imported
@@ -37,7 +46,17 @@ pub(super) struct ProjectImportListArgs {
     /// Include disabled, missing, or invalid projects in the listing
     #[arg(long)]
     all: bool,
+    /// Limit human table rows; 0 shows all (JSON always includes all matches)
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = PROJECT_IMPORT_LIST_DEFAULT_LIMIT
+    )]
+    limit: usize,
 }
+
+#[derive(Debug, Args)]
+pub(super) struct ProjectImportFieldsArgs {}
 
 #[derive(Debug, Args)]
 pub(super) struct ProjectImportSourceArgs {
@@ -199,6 +218,30 @@ enum ProjectImportField {
     StarterLibrary,
 }
 
+const PROJECT_IMPORT_DEFAULT_FIELDS: &[ProjectImportField] = &[
+    ProjectImportField::Role,
+    ProjectImportField::Policy,
+    ProjectImportField::Packs,
+    ProjectImportField::Targets,
+    ProjectImportField::ExtendsProfile,
+    ProjectImportField::Defaults,
+    ProjectImportField::ArtifactPolicy,
+];
+
+const PROJECT_IMPORT_ALL_FIELDS: &[ProjectImportField] = &[
+    ProjectImportField::Role,
+    ProjectImportField::Policy,
+    ProjectImportField::Packs,
+    ProjectImportField::Targets,
+    ProjectImportField::ExtendsProfile,
+    ProjectImportField::Defaults,
+    ProjectImportField::ArtifactPolicy,
+    ProjectImportField::Sources,
+    ProjectImportField::StarterLibrary,
+];
+
+const PROJECT_IMPORT_ALLOWED_FIELDS: &str = "role, policy, packs, targets, extends-profile, defaults, artifact-policy, sources, starter-library";
+
 impl ProjectImportField {
     fn label(self) -> &'static str {
         match self {
@@ -212,6 +255,40 @@ impl ProjectImportField {
             Self::Sources => "sources",
             Self::StarterLibrary => "starter-library",
         }
+    }
+
+    fn aliases(self) -> &'static [&'static str] {
+        match self {
+            Self::Role => &[],
+            Self::Policy => &[],
+            Self::Packs => &["pack"],
+            Self::Targets => &["target"],
+            Self::ExtendsProfile => &["profile"],
+            Self::Defaults => &[],
+            Self::ArtifactPolicy => &["agent-artifact-policy"],
+            Self::Sources => &["source"],
+            Self::StarterLibrary => &["starter-libraries"],
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::Role => "Project role value.",
+            Self::Policy => "Project policy value.",
+            Self::Packs => "Configured pack ids.",
+            Self::Targets => "Configured target runtime ids.",
+            Self::ExtendsProfile => "Profile binding when the source config extends a profile.",
+            Self::Defaults => "Project default settings.",
+            Self::ArtifactPolicy => "Agent artifact policy metadata.",
+            Self::Sources => {
+                "Source records; public/private source flags still control copied records."
+            }
+            Self::StarterLibrary => "Starter library ids.",
+        }
+    }
+
+    fn is_default(self) -> bool {
+        PROJECT_IMPORT_DEFAULT_FIELDS.contains(&self)
     }
 
     fn parse(raw: &str) -> Option<Self> {
@@ -247,6 +324,7 @@ pub(super) fn cmd_project_import(
 ) -> std::result::Result<CommandOutput, CliError> {
     match command {
         ProjectImportCommand::List(args) => cmd_project_import_list(cli, args),
+        ProjectImportCommand::Fields(_) => cmd_project_import_fields(cli),
         ProjectImportCommand::Inspect(args) => cmd_project_import_inspect(cli, args),
         ProjectImportCommand::Plan(args) => {
             let options = ProjectImportPlanOptions {
@@ -306,15 +384,40 @@ fn cmd_project_import_list(
             "Next: pass --search-root /path/to/projects or configure linked_projects.".to_string(),
         );
     } else {
-        for candidate in &visible {
+        let display_count = project_import_display_count(visible.len(), args.limit);
+        lines.push(format!(
+            "Showing {} of {} importable projects:",
+            display_count,
+            visible.len()
+        ));
+        lines.push(project_import_list_header());
+        lines.push(project_import_list_rule());
+        for candidate in visible.iter().take(display_count) {
             lines.push(format!(
-                "  - {} ({}) [{}] {}",
-                candidate.name,
-                candidate.id,
-                candidate.status,
-                candidate.path.display()
+                "  {:<name_width$} {:<id_width$} {:<status_width$} {:<source_width$} {}",
+                truncate_project_import_cell(&candidate.name, PROJECT_IMPORT_NAME_WIDTH),
+                truncate_project_import_cell(&candidate.id, PROJECT_IMPORT_ID_WIDTH),
+                truncate_project_import_cell(candidate.status, PROJECT_IMPORT_STATUS_WIDTH),
+                truncate_project_import_cell(candidate.source, PROJECT_IMPORT_SOURCE_WIDTH),
+                truncate_project_import_path(
+                    &candidate.path.display().to_string(),
+                    PROJECT_IMPORT_PATH_WIDTH
+                ),
+                name_width = PROJECT_IMPORT_NAME_WIDTH,
+                id_width = PROJECT_IMPORT_ID_WIDTH,
+                status_width = PROJECT_IMPORT_STATUS_WIDTH,
+                source_width = PROJECT_IMPORT_SOURCE_WIDTH,
             ));
         }
+        if visible.len() > display_count {
+            lines.push(format!(
+                "  {} more not shown. Use --limit {} or --json for all matches.",
+                visible.len() - display_count,
+                visible.len()
+            ));
+        }
+        lines.push("Next: metactl project import inspect <id>".to_string());
+        lines.push("Next: metactl project import plan <id>".to_string());
     }
     Ok(CommandOutput {
         human: project_human_output(&project_root, lines.join("\n")),
@@ -325,8 +428,146 @@ fn cmd_project_import_list(
                 "action": "list",
                 "projects": visible.iter().map(project_import_candidate_json).collect::<Vec<_>>(),
                 "count": visible.len(),
+                "displayed_count": project_import_display_count(visible.len(), args.limit),
+                "limit": args.limit,
+                "next_commands": [
+                    "metactl project import inspect <id>",
+                    "metactl project import plan <id>",
+                    "metactl project import fields",
+                ],
             }),
         ),
+    })
+}
+
+fn cmd_project_import_fields(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let default_fields = PROJECT_IMPORT_DEFAULT_FIELDS
+        .iter()
+        .map(|field| field.label())
+        .collect::<Vec<_>>();
+    let mut lines = vec![
+        "Import fields:".to_string(),
+        format!("  Default: {}", default_fields.join(", ")),
+        format!("  Allowed: {}", PROJECT_IMPORT_ALLOWED_FIELDS),
+        String::new(),
+        format!("  {:<20} {:<8} Description", "Field", "Default"),
+        "  -------------------- -------- ----------------------------------------".to_string(),
+    ];
+    for field in PROJECT_IMPORT_ALL_FIELDS {
+        lines.push(format!(
+            "  {:<20} {:<8} {}",
+            field.label(),
+            if field.is_default() { "yes" } else { "no" },
+            field.description()
+        ));
+    }
+    lines.push(String::new());
+    lines.push("Sources are excluded by default; opt in with --include-public-sources or --include-private-sources.".to_string());
+    lines.push(
+        "Next: metactl project import plan <project> --fields role,packs,targets".to_string(),
+    );
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "project import",
+            Some(&project_root),
+            json!({
+                "action": "fields",
+                "default_fields": default_fields,
+                "allowed_fields": PROJECT_IMPORT_ALLOWED_FIELDS,
+                "fields": PROJECT_IMPORT_ALL_FIELDS
+                    .iter()
+                    .map(project_import_field_json)
+                    .collect::<Vec<_>>(),
+                "next_commands": [
+                    "metactl project import plan <project> --fields role,packs,targets",
+                    "metactl project import apply <project> --fields role,packs,targets --yes",
+                ],
+            }),
+        ),
+    })
+}
+
+fn project_import_display_count(total: usize, limit: usize) -> usize {
+    if limit == 0 {
+        total
+    } else {
+        total.min(limit)
+    }
+}
+
+fn project_import_list_header() -> String {
+    format!(
+        "  {:<name_width$} {:<id_width$} {:<status_width$} {:<source_width$} {}",
+        "Name",
+        "Id",
+        "Status",
+        "Source",
+        "Path",
+        name_width = PROJECT_IMPORT_NAME_WIDTH,
+        id_width = PROJECT_IMPORT_ID_WIDTH,
+        status_width = PROJECT_IMPORT_STATUS_WIDTH,
+        source_width = PROJECT_IMPORT_SOURCE_WIDTH,
+    )
+}
+
+fn project_import_list_rule() -> String {
+    format!(
+        "  {:<name_width$} {:<id_width$} {:<status_width$} {:<source_width$} {}",
+        "-".repeat(PROJECT_IMPORT_NAME_WIDTH),
+        "-".repeat(PROJECT_IMPORT_ID_WIDTH),
+        "-".repeat(PROJECT_IMPORT_STATUS_WIDTH),
+        "-".repeat(PROJECT_IMPORT_SOURCE_WIDTH),
+        "-".repeat(PROJECT_IMPORT_PATH_WIDTH),
+        name_width = PROJECT_IMPORT_NAME_WIDTH,
+        id_width = PROJECT_IMPORT_ID_WIDTH,
+        status_width = PROJECT_IMPORT_STATUS_WIDTH,
+        source_width = PROJECT_IMPORT_SOURCE_WIDTH,
+    )
+}
+
+fn truncate_project_import_cell(value: &str, width: usize) -> String {
+    truncate_project_import_text(value, width, false)
+}
+
+fn truncate_project_import_path(value: &str, width: usize) -> String {
+    truncate_project_import_text(value, width, true)
+}
+
+fn truncate_project_import_text(value: &str, width: usize, keep_tail: bool) -> String {
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+    let keep = width - 3;
+    if keep_tail {
+        let tail = value
+            .chars()
+            .rev()
+            .take(keep)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<String>();
+        format!("...{tail}")
+    } else {
+        let head = value.chars().take(keep).collect::<String>();
+        format!("{head}...")
+    }
+}
+
+fn project_import_field_json(field: &ProjectImportField) -> Value {
+    json!({
+        "name": field.label(),
+        "default": field.is_default(),
+        "aliases": field.aliases(),
+        "description": field.description(),
     })
 }
 

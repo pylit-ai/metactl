@@ -1877,6 +1877,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
                 ProjectImportCommand::Apply(_) => Some("project import apply"),
                 ProjectImportCommand::Browse(args) if args.apply => Some("project import browse"),
                 ProjectImportCommand::List(_)
+                | ProjectImportCommand::Fields(_)
                 | ProjectImportCommand::Inspect(_)
                 | ProjectImportCommand::Plan(_)
                 | ProjectImportCommand::Browse(_) => None,

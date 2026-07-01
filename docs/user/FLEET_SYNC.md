@@ -80,7 +80,19 @@ Discover importable projects:
 
 ```bash
 metactl project import list
+metactl project import list --limit 10
 metactl project import list --search-root /path/to/repos
+```
+
+The human list uses a compact table and shows the first 20 ready projects by default. Use
+`--limit 0` to show every row or `--json` when automation needs the complete project list
+without display truncation.
+
+Show the importable fields and aliases:
+
+```bash
+metactl project import fields
+metactl project import fields --json
 ```
 
 Preview and apply an import by project id, folder name, or direct path:

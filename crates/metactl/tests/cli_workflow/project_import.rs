@@ -314,6 +314,87 @@ fn project_import_list_discovers_projects_from_search_root() {
         .unwrap()
         .iter()
         .any(|project| { project["name"] == "source-app" && project["source"] == "search_root" }));
+    assert_eq!(json["displayed_count"], 1);
+    assert_eq!(json["limit"], 20);
+}
+
+#[test]
+fn project_import_list_uses_compact_human_table_with_limit() {
+    let root = TempDir::new().expect("root");
+    let target = TempDir::new().expect("target");
+    for index in 0..5 {
+        let source = root.path().join(format!("source-{index:02}"));
+        fs::create_dir_all(&source).expect("source dir");
+        write_source_project(&source, false);
+    }
+
+    let output = run_cli(
+        target.path(),
+        &[
+            "project",
+            "import",
+            "list",
+            "--search-root",
+            root.path().to_str().expect("root path"),
+            "--limit",
+            "3",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        text.contains("Showing 3 of 5 importable projects:"),
+        "{text}"
+    );
+    assert!(text.contains("Name"), "{text}");
+    assert!(text.contains("Status"), "{text}");
+    assert!(text.contains("source-00"), "{text}");
+    assert!(text.contains("source-02"), "{text}");
+    assert!(!text.contains("source-03"), "{text}");
+    assert!(
+        text.contains("2 more not shown. Use --limit 5 or --json"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Next: metactl project import inspect <id>"),
+        "{text}"
+    );
+}
+
+#[test]
+fn project_import_fields_reports_defaults_aliases_and_next_commands() {
+    let target = TempDir::new().expect("target");
+
+    let output = run_cli(target.path(), &["--json", "project", "import", "fields"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json = json_output(&output);
+    assert_json_contract(&json, "project import", Some(target.path()));
+    assert_eq!(json["action"], "fields");
+    assert!(json["default_fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|field| field == "role"));
+    assert!(json["fields"].as_array().unwrap().iter().any(|field| {
+        field["name"] == "sources"
+            && field["default"] == false
+            && field["aliases"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|alias| alias == "source")
+    }));
+    assert!(json["next_commands"][0]
+        .as_str()
+        .unwrap()
+        .contains("--fields role,packs,targets"));
+
+    let human = run_cli(target.path(), &["project", "import", "fields"]);
+    assert!(human.status.success(), "{}", stderr(&human));
+    let text = stdout(&human);
+    assert!(text.contains("Import fields:"), "{text}");
+    assert!(text.contains("starter-library"), "{text}");
+    assert!(text.contains("--include-private-sources"), "{text}");
 }
 
 #[test]
