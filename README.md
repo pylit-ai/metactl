@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current crate version: `0.1.20`
+Current crate version: `0.1.21`
 
 `metactl` lets an individual developer define agent instructions once, review the generated files, and work across supported coding agents without hand-copying prompt state.
 
@@ -57,9 +57,9 @@ Modern coding agents read different files, directories, skill formats, and rule 
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.20 --locked
+cargo install metactl --version 0.1.21 --locked
 metactl version
-# metactl 0.1.20 (metactl/v2alpha1)
+# metactl 0.1.21 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -115,7 +115,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.20 (metactl/v2alpha1)
+# metactl 0.1.21 (metactl/v2alpha1)
 ```
 
 </details>
@@ -126,9 +126,9 @@ metactl version
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.20 --locked
+cargo install metactld --version 0.1.21 --locked
 metactld --version
-# metactld 0.1.20
+# metactld 0.1.21
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -545,6 +545,7 @@ See [docs/security-checklist.md](https://github.com/pylit-ai/metactl/blob/main/d
 | Pack author | [docs/user/PACK_VISIBILITY.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/PACK_VISIBILITY.md) |
 | Integrator | [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) |
 | Maintainer | [docs/release-readiness.md](https://github.com/pylit-ai/metactl/blob/main/docs/release-readiness.md) |
+| Release reviewer | [CHANGELOG.md](https://github.com/pylit-ai/metactl/blob/main/CHANGELOG.md) |
 | Reviewer | [docs/v1/charter.md](https://github.com/pylit-ai/metactl/blob/main/docs/v1/charter.md) |
 
 <details>
@@ -624,7 +625,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.20` for both `metactl` and `metactld`.
+Current public crate version: `0.1.21` for both `metactl` and `metactld`.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 

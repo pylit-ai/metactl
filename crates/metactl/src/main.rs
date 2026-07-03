@@ -69,38 +69,27 @@ Quick start:
   metactl setup                  # human-friendly setup
   metactl setup --plan            # inspect equivalent commands without writing
   metactl setup -t codex-cli --artifact-policy portable-first -y
-  metactl init -t claude-code        # scaffold a project for Claude Code
-  metactl init -t all                # scaffold for every starter-supported target
-  metactl init --detect              # detect targets from existing repo surfaces
-  metactl profile set-default NAME   # machine default profile for init when no --profile
-  metactl init --bind-profile        # record the active machine default in metactl.yaml
-  metactl preview                    # compile and preview generated changes without applying
   metactl use python-refactor        # resolve, add, and sync a pack in one step
-  metactl add python-refactor        # import a pack from the library
-  metactl skills audit               # audit local and generated skill surfaces
-  metactl add <pack> --sync          # add (or already added) then sync in one step
   metactl demo create                # create a disposable brownfield sandbox
-  metactl target add cursor          # add another target without editing YAML
+  metactl sync --preview             # preview generated changes without applying
   metactl sync                       # compile + apply in one command
   metactl status                     # see what is configured and applied
-  metactl ignore install             # hide generated agent surfaces from local git status
+  metactl validate                   # check staged/applied outputs and drift
+  metactl doctor                     # run health checks
 
-Common workflow:
-  metactl init -t codex-cli  Create project config and layout (or use a default profile)
+Daily commands:
+  metactl setup       Plan or create a metactl project
   metactl use <pack>  Resolve, add, and sync a pack in one step
-  metactl add <pack>  Import packs from the starter library
   metactl sync        Compile + apply all targets in one step
-  metactl status      Show project config, targets, and readiness
+  metactl status      Show readiness, drift, and next actions
+  metactl validate    Check generated surfaces and policy
   metactl doctor      Run health checks
-  metactl revert      Remove applied outputs
+  metactl demo        Create or remove a disposable sandbox
 
-Expert primitives:
-  metactl search \"python refactor\"
-  metactl source add <path>          # infer source id, or pass <name> <path>
-  metactl explain
-  metactl compile
-  metactl apply
-  metactl validate
+Advanced commands:
+  Existing commands such as init, add, target, list, search, compile, apply,
+  revert, fleet, ignore, audit, source, profile, and hook remain callable for
+  scripts and expert workflows. Use `metactl help <command>` for command help.
 
 Exit codes:
   0  success or warnings
@@ -164,76 +153,105 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Create metactl.yaml, .metactl/, and starter layout in the project
+    #[command(hide = true)]
     Init(InitArgs),
     /// Guided first-run setup with plan-first and agent-safe paths
     Setup(SetupArgs),
     /// Manage the user-private library lifecycle
+    #[command(hide = true)]
     Library(LibraryArgs),
     /// Import, export, and verify portable Agent Skill folders as metactl packs
+    #[command(hide = true)]
     Pack(PackArgs),
     /// Manage repo-local and user-global Codex Agent Skill visibility
+    #[command(hide = true)]
     Skills(SkillsArgs),
     /// Project packs into local runtime plugin marketplace bundles
+    #[command(hide = true)]
     Plugin(PluginArgs),
     /// Create explicit public example or sanitized export records
+    #[command(hide = true)]
     Export(ExportArgs),
     /// Create and remove disposable brownfield demo sandboxes
     Demo(DemoArgs),
     /// Run the public/private boundary scanner for this project
+    #[command(hide = true)]
     CheckPublicBoundary,
     /// Link the current project to an explicit profile
+    #[command(hide = true)]
     Project(ProjectArgs),
     /// Activate a pack in the current project (resolve, add, and sync in one step)
     Use(UseArgs),
     /// Add packs from the starter library to the project config
+    #[command(hide = true)]
     Add(AddArgs),
     /// Remove packs from the project config
+    #[command(hide = true)]
     Remove(RemoveArgs),
     /// List, add, or remove configured targets
+    #[command(hide = true)]
     Target(TargetArgs),
     /// Preview and apply explicit sync across linked local projects
+    #[command(hide = true)]
     Fleet(FleetArgs),
     /// Show project config, targets, and sync readiness at a glance
     Status(StatusArgs),
     /// List roles, packs, policies, or targets from the library or project
+    #[command(hide = true)]
     List(ListArgs),
     /// Search the pack corpus for a natural-language or keyword query
+    #[command(hide = true)]
     Search(SearchArgs),
     /// Rebuild and inspect local surface usage stats
+    #[command(hide = true)]
     Stats(StatsArgs),
     /// Report and override automatic command/skill surface recommendations
+    #[command(hide = true)]
     Surface(SurfaceArgs),
     /// Install, inspect, and run report-only background surface refreshes
+    #[command(hide = true)]
     Background(BackgroundArgs),
     /// Show why packs and targets were selected for the current config
+    #[command(hide = true)]
     Explain(ExplainArgs),
     /// Alias for `metactl sync --preview`
+    #[command(hide = true)]
     Preview(SyncArgs),
     /// Compile + apply all targets in one step (the main workflow command)
     Sync(SyncArgs),
     /// Resolve and compile staged outputs under .metactl/generated/ (use `--apply` to materialize)
+    #[command(hide = true)]
     Compile(CompileArgs),
     /// Materialize staged outputs into the repo (symlink, copy, patch, …)
+    #[command(hide = true)]
     Apply(ApplyArgs),
     /// Remove applied outputs tracked for a target (or all targets)
+    #[command(hide = true)]
     Revert(RevertArgs),
     /// Check staged vs applied outputs, policy, and drift for a target
     Validate(ValidateCmdArgs),
     /// Alias for validate, with v1 strict-check wording
+    #[command(hide = true)]
     Check(ValidateCmdArgs),
     /// Run quick health checks (config, lock, starter library, …)
     Doctor(DoctorArgs),
     /// Audit source privacy and leak posture
+    #[command(hide = true)]
     Audit(AuditArgs),
     /// Manage ignore files for generated agent surfaces
+    #[command(hide = true)]
     Ignore(IgnoreArgs),
     /// Manage sync hooks (post-checkout, post-merge)
+    #[command(hide = true)]
     Hook(HookArgs),
     /// Manage pack sources (local paths and import roots)
+    #[command(hide = true)]
     Source(SourceArgs),
     /// Manage machine-local profiles and default profile selection
+    #[command(hide = true)]
     Profile(ProfileArgs),
     /// Print CLI and kernel API version
+    #[command(hide = true)]
     Version,
 }
 

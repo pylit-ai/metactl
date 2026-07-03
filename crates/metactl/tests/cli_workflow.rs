@@ -950,15 +950,19 @@ fn cli_help_and_parsing_main_help() {
         .expect("help");
     assert!(output.status.success(), "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains("metactl init"));
-    assert!(text.contains("metactl init --bind-profile"));
+    assert!(text.contains("metactl setup"));
+    assert!(text.contains("metactl use python-refactor"));
     assert!(text.contains("metactl sync"));
-    assert!(text.contains("metactl apply"));
-    assert!(text.contains("Common workflow"));
+    assert!(text.contains("metactl validate"));
+    assert!(text.contains("Daily commands"));
+    assert!(text.contains("Advanced commands"));
+    assert!(text.contains("metactl help <command>"));
+    assert!(!text.contains("metactl init --bind-profile"));
+    assert!(!text.contains("metactl apply\n"));
 }
 
 #[test]
-fn cli_help_subcommand_shows_add_usage() {
+fn cli_help_subcommand_shows_hidden_add_usage() {
     let output = Command::new(cli_bin())
         .args(["help", "add"])
         .output()

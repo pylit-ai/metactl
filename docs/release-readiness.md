@@ -1,16 +1,16 @@
 # Release Readiness
 
-Last local verification: 2026-07-01.
+Last local verification: 2026-07-03.
 
 ## Dependency And License Scan
 
 - `cargo metadata --locked --format-version 1`: passed.
 - `cargo tree -d`: passed with no duplicate dependency versions reported.
 - `cargo audit`: passed.
-- `cargo publish -p metactl --dry-run --locked`: run for `0.1.20` before publication.
-- `cargo publish -p metactld --dry-run --locked`: run after `metactl = 0.1.20` is published to crates.io.
-- `cargo search metactl --limit 5`: verify `metactl = "0.1.20"` after publication.
-- `cargo search metactld --limit 5`: verify `metactld = "0.1.20"` after publication.
+- `cargo publish -p metactl --dry-run --locked`: run for `0.1.21` before publication.
+- `cargo publish -p metactld --dry-run --locked`: run after `metactl = 0.1.21` is published to crates.io.
+- `cargo search metactl --limit 5`: verify `metactl = "0.1.21"` after publication.
+- `cargo search metactld --limit 5`: verify `metactld = "0.1.21"` after publication.
 
 License summary from Cargo metadata:
 
@@ -48,10 +48,12 @@ cargo run -p metactld -- --version
 Release artifacts should be created through `.github/workflows/release.yml`, which produces SHA-256 checksums and GitHub provenance attestations.
 The release workflow packages GitHub binary archives. crates.io publishing is run in dependency order because `metactld` depends on the matching published `metactl` crate version.
 
+Release notes for `0.1.21` are in [CHANGELOG.md](../CHANGELOG.md).
+
 Publish order for crates.io:
 
 1. Publish `metactl`.
-2. Wait for `metactl = 0.1.20` to appear in the crates.io index.
+2. Wait for `metactl = 0.1.21` to appear in the crates.io index.
 3. Run `cargo publish -p metactld --dry-run`.
 4. Publish `metactld`.
 

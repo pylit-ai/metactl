@@ -10,7 +10,8 @@ fn cli_help_surfaces_source_add_argument_shape() {
         .expect("main help");
     assert!(main_help.status.success(), "{}", stderr(&main_help));
     let main_text = stdout(&main_help);
-    assert!(main_text.contains("metactl source add <path>"));
+    assert!(!main_text.contains("metactl source add <path>"));
+    assert!(main_text.contains("Advanced commands"));
 
     let source_help = Command::new(cli_bin())
         .args(["help", "source", "add"])
