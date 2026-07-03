@@ -38,3 +38,12 @@ It is not an upstream standards dossier; use upstream vendor documentation for f
 ## OpenClaw
 
 - Root instruction document: `OPENCLAW.md`
+
+## OpenCode
+
+- Root instruction document: `AGENTS.md`
+- Project config: `opencode.json`
+- Commands: `.opencode/commands/<resource_name>`
+- Skills: `.opencode/skills/<surface_slug>/SKILL.md`
+- Pack resources referenced from config: `.opencode/packs/<pack_id>/<resource_name>`
+- Experimental evidence: `scripts/verify_opencode_target.sh` verifies generated OpenCode paths. OpenCode config, rules, commands, and Agent Skills docs were checked at `https://opencode.ai/docs/config/`, `https://opencode.ai/docs/rules/`, `https://opencode.ai/docs/commands/`, and `https://opencode.ai/docs/skills/` on 2026-07-03.

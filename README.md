@@ -361,6 +361,7 @@ Set `METACTL_DEMO_HOME` to isolate demos in CI or temporary test runs.
 | Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 1, conformance-covered |
 | Filesystem Agent | `AGENTS.md`, `.metactl/filesystem-agent/...` | Generic compatibility fixture |
 | Gemini CLI | `GEMINI.md`, `.gemini/extensions/...` | Tier 1, conformance-covered |
+| OpenCode | `AGENTS.md`, `opencode.json`, `.opencode/...` | Experimental |
 | OpenClaw | `OPENCLAW.md` | Target available; compatibility tier not yet claimed |
 
 See [docs/support-matrix.md](https://github.com/pylit-ai/metactl/blob/main/docs/support-matrix.md) and [docs/agent-surfaces.md](https://github.com/pylit-ai/metactl/blob/main/docs/agent-surfaces.md) for release-specific target notes.

@@ -1,0 +1,69 @@
+{
+  "kind": "target_capability_matrix",
+  "target_id": "opencode",
+  "aliases": ["open-code"],
+  "version": "2026.07.03",
+  "title": "OpenCode",
+  "capabilities": {
+    "layered_instructions": true,
+    "skill_folders": true,
+    "deterministic_hooks": false,
+    "subagents": true,
+    "mcp_servers": true,
+    "tool_allowlists": true,
+    "approval_policies": true,
+    "readonly_hints": false,
+    "local_scripts": true,
+    "scheduled_tasks": false,
+    "ui_surfaces": false
+  },
+  "runtime_template": {
+    "path": "targets/templates/opencode-config.json.tmpl",
+    "format": "json",
+    "destination_path": "opencode.json",
+    "output_kind": "runtime_json"
+  },
+  "compile_targets": [
+    {
+      "output_kind": "agents_md",
+      "path_template": "AGENTS.md",
+      "instruction_mode": "reference_index"
+    },
+    {
+      "output_kind": "codex_skill",
+      "path_template": ".opencode/skills/{surface_slug}/SKILL.md",
+      "surface_selection_mode": "minimal",
+      "supports_multi_surface_pack": true,
+      "supports_surface_assets": true,
+      "supports_surface_scripts": true,
+      "supports_surface_frontmatter": true,
+      "surface_merge_strategy": "optional"
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".opencode/commands/{resource_name}",
+      "resource_kinds": ["command"],
+      "command_adapter": {
+        "format": "markdown",
+        "inject_description": true
+      }
+    },
+    {
+      "output_kind": "pack_resource",
+      "path_template": ".opencode/packs/{pack_id}/{resource_name}",
+      "resource_kinds": ["instruction", "example", "rule"]
+    }
+  ],
+  "local_projection": {
+    "support": "degraded",
+    "local_surface": "AGENTS.local.md",
+    "notes": "OpenCode loads AGENTS.md directly and can combine configured instruction globs from opencode.json."
+  },
+  "metadata": {
+    "starter_status": "experimental",
+    "standards_ref": "docs/agent-surfaces.md#opencode",
+    "approval_surface": "opencode.json permission settings",
+    "filesystem_surface": "AGENTS.md, opencode.json, and .opencode/ commands, skills, and pack resources",
+    "advisory_surface": "AGENTS.md advisory guidance"
+  }
+}

@@ -9,6 +9,7 @@ Support tiers describe what this repository verifies today.
 | Cursor | Tier 1, conformance-covered | `cargo test -p metactl cursor_tier1_generates_project_rule_index_and_skill_bundle` verifies `.cursor/rules/*.mdc` frontmatter and `.cursor/skills/.../SKILL.md` surfaces against Cursor Rules docs checked 2026-07-03. |
 | Filesystem Agent | Experimental | Generic descriptor fixture for agents that read files from a project tree. |
 | Gemini CLI | Tier 1, conformance-covered | `cargo test -p metactl gemini_tier1_generates_extension_manifest_context_commands_and_skills` verifies `GEMINI.md`, `.gemini/extensions/.../gemini-extension.json`, commands, and Agent Skill folders against Gemini CLI extension/skills docs checked 2026-07-03. |
+| OpenCode | Experimental | `scripts/verify_opencode_target.sh` verifies `AGENTS.md`, `opencode.json`, `.opencode/commands/...`, `.opencode/skills/...`, and `.opencode/packs/...` generated surfaces against OpenCode docs checked 2026-07-03. |
 
 ## Tier Definitions
 
