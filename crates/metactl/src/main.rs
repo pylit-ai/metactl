@@ -42,6 +42,7 @@ use metactl::{
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+mod noise_report;
 mod project_import;
 mod setup;
 use project_import::{
@@ -4987,6 +4988,8 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     let codex_skill_visibility =
         codex_skill_visibility_json(&project_root).map_err(internal_error)?;
     let agent_artifact_policy = agent_artifact_policy_json(&context.config_file);
+    let instruction_noise =
+        noise_report::instruction_noise_report(&project_root).map_err(internal_error)?;
 
     let targets = if let Some(target_id) = args.target.as_ref() {
         select_locked_targets(&context.lock, Some(target_id.clone())).unwrap_or_default()
@@ -5221,6 +5224,14 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     }
 
     append_agent_artifact_policy_lines(&mut lines, &agent_artifact_policy);
+    if cli.verbose
+        || instruction_noise["finding_count"]
+            .as_u64()
+            .map(|count| count > 0)
+            .unwrap_or(false)
+    {
+        noise_report::append_instruction_noise_lines(&mut lines, &instruction_noise);
+    }
 
     if targets.is_empty() {
         lines.push("  Applied: (none — run `metactl sync` to compile and apply)".to_string());
@@ -5285,6 +5296,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 "source_state": source_state,
                 "skill_visibility": codex_skill_visibility,
                 "agent_artifact_policy": agent_artifact_policy,
+                "instruction_noise": instruction_noise,
                 "applied_targets": applied_targets,
                 "surface_mode_mismatches": surface_mode_mismatches,
                 "needs_sync": needs_sync,

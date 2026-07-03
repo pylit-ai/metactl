@@ -60,7 +60,7 @@
   },
   "metadata": {
     "starter_status": "stable",
-    "docs": "https://geminicli.com/docs/extensions/reference/",
+    "docs": "https://geminicli.com/docs/extensions/reference/ and https://geminicli.com/docs/cli/skills/ (verified 2026-07-03)",
     "standards_ref": "docs/agent-surfaces.md#gemini-cli",
     "approval_surface": "GEMINI.md + Gemini CLI policy hooks",
     "filesystem_surface": ".gemini/extensions/<pack>/skills bundles",

@@ -128,6 +128,69 @@ description: Portable release manager skill for verification handoffs.
 }
 
 #[test]
+fn status_verbose_reports_instruction_noise_findings() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(
+        project.path(),
+        &["init", "--target", "codex-cli", "--no-input", "-y"],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+    let add = run_cli(
+        project.path(),
+        &["add", "unit-test-loop", "--sync", "--no-input", "-y"],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+
+    let clean = run_cli(project.path(), &["--json", "status"]);
+    assert!(clean.status.success(), "{}", stderr(&clean));
+    let clean_json = json_output(&clean);
+    assert_eq!(
+        clean_json["instruction_noise"]["schema_version"],
+        json!("metactl.instruction_noise.v1")
+    );
+    assert_eq!(clean_json["instruction_noise"]["finding_count"], json!(0));
+
+    let clean_human = run_cli(project.path(), &["--verbose", "status"]);
+    assert!(clean_human.status.success(), "{}", stderr(&clean_human));
+    let clean_text = stdout(&clean_human);
+    assert!(clean_text.contains("Instruction noise: 0 finding(s)"));
+    assert!(
+        clean_text.lines().count() <= 30,
+        "clean verbose status should stay compact: {clean_text}"
+    );
+
+    let managed_skill = project
+        .path()
+        .join(".codex/skills/unit-test-loop/unit-test-loop/SKILL.md");
+    let mut drifted = fs::read_to_string(&managed_skill).expect("read managed skill");
+    drifted.push_str("\n# local drift\n");
+    fs::write(&managed_skill, drifted).expect("write drift");
+
+    let stray = project
+        .path()
+        .join(".codex/skills/stray-unit-test-loop/unit-test-loop/SKILL.md");
+    fs::create_dir_all(stray.parent().expect("stray parent")).expect("stray dir");
+    fs::copy(&managed_skill, &stray).expect("copy duplicate stray skill");
+
+    let noisy = run_cli(project.path(), &["--json", "--verbose", "status"]);
+    assert!(noisy.status.success(), "{}", stderr(&noisy));
+    let noisy_json = json_output(&noisy);
+    let findings = noisy_json["instruction_noise"]["findings"]
+        .as_array()
+        .expect("noise findings");
+    for kind in [
+        "stray_unmanaged_surface",
+        "drifted_managed_output",
+        "duplicate_trigger",
+    ] {
+        assert!(
+            findings.iter().any(|finding| finding["kind"] == kind),
+            "missing {kind} in {findings:#?}"
+        );
+    }
+}
+
+#[test]
 fn cli_lock_and_doctor_detects_stale_lock() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());

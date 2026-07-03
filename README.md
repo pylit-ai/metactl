@@ -8,21 +8,17 @@
 
 Current crate version: `0.1.20`
 
-`metactl` is a local control plane for agent instructions. It compiles reusable roles, packs, policies, and targets into reviewable tool-specific files for Codex CLI, Claude Code, Cursor, Gemini CLI, OpenClaw, filesystem agents, and local MCP/JSON-RPC clients.
+`metactl` lets an individual developer define agent instructions once, review the generated files, and work across supported coding agents without hand-copying prompt state.
 
-![metactl quickstart terminal demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/quickstart-hero.gif)
-
-[MP4](docs/assets/demos/quickstart-hero.mp4) / [WebM](docs/assets/demos/quickstart-hero.webm). More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md). Codex and Claude plugin marketplace export is covered in [docs/user/PLUGIN_MARKETPLACES.md](docs/user/PLUGIN_MARKETPLACES.md).
-
-<!-- TODO: Add public architecture diagram for CLI -> reference kernel -> target adapters once the API surface stabilizes. -->
+Try it in a disposable brownfield sandbox:
 
 ```bash
 metactl demo create --sync
 cd "$(metactl demo path)"
-metactl sync --adopt patch
-metactl validate
-metactl demo destroy --yes
+metactl sync --adopt patch && metactl validate
 ```
+
+## What You'll See
 
 > **Expected output**
 >
@@ -35,18 +31,23 @@ metactl demo destroy --yes
 > ...
 > Validation:
 >   codex-cli [pass]
-> Removed demo sandbox: /tmp/.../metactl-demo
 > ```
+
+Clean up with `metactl demo destroy --yes` when done.
+
+![metactl quickstart terminal demo](https://raw.githubusercontent.com/pylit-ai/metactl/main/docs/assets/demos/quickstart-hero.gif)
+
+[MP4](docs/assets/demos/quickstart-hero.mp4) / [WebM](docs/assets/demos/quickstart-hero.webm). More terminal walkthroughs live in [docs/cli-demos.md](docs/cli-demos.md). Codex and Claude plugin marketplace export is covered in [docs/user/PLUGIN_MARKETPLACES.md](docs/user/PLUGIN_MARKETPLACES.md).
 
 ## Why It Exists
 
-Modern coding agents read different files, directories, skill formats, and rule systems. `metactl` gives a repo one source of truth, then materializes the right surface for each tool without silently taking over unmanaged files.
+Modern coding agents read different files, directories, skill formats, and rule systems. `metactl` gives a repo one source of truth, then materializes the right surface for each supported tool without silently taking over unmanaged files.
 
 | Need | metactl behavior |
 | --- | --- |
 | One canonical agent setup | Compile from explicit `Role`, `Pack`, `Policy`, and `Target` inputs. |
 | Review before writing files | Stage output under `.metactl/generated/`, then apply deliberately. |
-| Multiple agent targets | Generate `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*.mdc`, skill folders, and generic filesystem surfaces. |
+| Multiple agent targets | Generate native files for conformance-covered targets, preview targets, and generic filesystem surfaces according to the support matrix. |
 | Brownfield safety | Detect unmanaged files and require explicit handling before overwrite. |
 | Automation | Emit stable JSON with `--json` and expose the reference kernel through `metactld`. |
 | Local multi-repo operations | Preview Fleet Sync before applying changes across linked projects. |
@@ -77,7 +78,7 @@ metactl setup --target codex-cli --yes
 metactl ignore fix --plan
 ```
 
-Run the built-in demo sandbox. It creates a disposable brownfield Python repo with an existing `AGENTS.md`, previews the metactl-generated Codex CLI surface, applies a patch adoption inside that sandbox, validates it, then removes only the sentinel-marked demo directory.
+Run the built-in demo sandbox when you want to learn the workflow before touching a real repo. It creates a disposable brownfield Python repo with an existing `AGENTS.md`, previews the metactl-generated Codex CLI surface, applies a patch adoption inside that sandbox, validates it, then removes only the sentinel-marked demo directory.
 
 ```bash
 metactl demo create --sync
@@ -103,6 +104,8 @@ metactl demo destroy --yes
 > ```
 
 No API keys or model-provider credentials are required for this path.
+
+By default, demo sandboxes live under the platform cache directory. On macOS that is usually `~/Library/Caches/metactl/demos`. Set `METACTL_DEMO_HOME` for a custom demo root, or set `XDG_CACHE_HOME` in automated tests when you need cache state isolated from your normal shell.
 
 <details>
 <summary>Install from a local checkout</summary>
@@ -134,28 +137,29 @@ Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/d
 
 ## Daily Workflow
 
-Use the high-level commands for normal repo work:
+Use these high-level commands for normal repo work:
 
 ```bash
-metactl init --detect --no-input
-metactl preview
-metactl list packs
+metactl setup --plan
 metactl use python-refactor
 metactl status
-metactl sync
+metactl sync --preview
 metactl validate
+metactl doctor
 ```
 
-Success signal: `status` reports `Execution readiness: ready`, `sync` compiles and applies configured targets, and `validate` reports each target as `[pass]`.
+Success signal: `status` reports `Execution readiness: ready`, `sync --preview` compiles configured targets without applying runtime files, and `validate` reports each target as `[pass]`.
+
+`[degraded]` is not a validation failure. It means the target used a conservative fallback surface, patch mode, or a reduced native surface for the current repo. The validation result is the separate `[pass]`, `[warn]`, or `[fail]` line.
 
 > **Expected output**
 >
 > ```text
-> Initialized /path/to/project.
+> Setup plan:
 > ...
 > Resolved "python-refactor" -> pack python-refactor
-> Sync complete.
->   codex-cli [ready] (symlink, surface: full, 4 files)
+> Preview sync completed; runtime files were not applied.
+>   codex-cli [degraded] (patch, surface: minimal, 3 files)
 > ...
 > Execution readiness: ready
 > Validation:
@@ -196,27 +200,38 @@ metactl validate
 
 | Command | Purpose |
 | --- | --- |
-| `metactl init --detect` | Detect targets from existing repo surfaces. |
-| `metactl init -t codex-cli --no-input` | Explicitly create `metactl.yaml`, `.metactl/`, and a Codex CLI target. |
-| `metactl setup` | Human-friendly setup with portable agent artifact stewardship enabled for new projects. |
+| `metactl setup` | Human-friendly project setup. |
 | `metactl setup --plan` | Show guided setup actions and equivalent raw commands without writing files. |
 | `metactl setup --target codex-cli --artifact-policy portable-first --yes` | Create project config for one explicit target without running `sync`. |
+| `metactl use <pack>` | Resolve, add, sync, and validate a pack-oriented workflow. |
+| `metactl sync --preview` | Compile generated surfaces without applying runtime files. |
+| `metactl status` | Show readiness, target state, drift posture, and next actions. |
+| `metactl validate` | Check generated and applied outputs against target validators. |
+| `metactl doctor` | Run local health checks. |
+| `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
+
+</details>
+
+<details>
+<summary>Advanced commands</summary>
+
+| Command | Purpose |
+| --- | --- |
+| `metactl init --detect` | Detect targets from existing repo surfaces. |
+| `metactl init -t codex-cli --no-input` | Explicitly create `metactl.yaml`, `.metactl/`, and a Codex CLI target. |
 | `metactl project import list --limit 10` | List importable projects from linked Fleet config or explicit search roots in a compact table. |
 | `metactl project import fields` | Show importable config fields, defaults, aliases, and source-copy caveats. |
 | `metactl project import plan <project-or-path>` | Preview a config import before writing the destination project. |
 | `metactl project import apply <project-or-path> --yes` | Create `metactl.yaml` from another project; source records are omitted unless explicitly included. |
 | `metactl setup --import-from <project-or-path> --yes` | First-run setup shortcut that imports another project's packs, policy, role, targets, defaults, and artifact policy. |
 | `metactl profile list` | Show user profiles and built-in templates such as `neutral`, `multi-agent`, `agent-ci`, and `solo-codex`. |
-| `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
 | `metactl preview` | Convenience alias for `metactl sync --preview`; stages output without applying runtime files. |
-| `metactl use <pack>` | Resolve, add, sync, and validate a pack-oriented workflow. |
 | `metactl pack use <pack>` | Object-oriented alias for project pack activation; Agent Skill import/export remains under `pack import-skill` and `pack export-skill`. |
 | `metactl skills list --scope repo` | Show repo-local Codex skills generated under `.codex/skills`. |
 | `metactl skills add <skill-path> --scope user` | Install a Codex skill folder into the user-global `~/.codex/skills` Personal picker source. |
 | `metactl add <pack> --sync` | Add a known pack and immediately materialize it. |
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
 | `metactl explain` | Show why packs and targets were selected. |
-| `metactl doctor` | Run local health checks. |
 | `metactl revert` | Remove applied outputs tracked by metactl. |
 | `metactl ignore install` | Hide generated agent surfaces from local git status. |
 | `metactl ignore status` | Check whether generated surfaces and private source state are protected. |
@@ -343,9 +358,9 @@ Set `METACTL_DEMO_HOME` to isolate demos in CI or temporary test runs.
 | --- | --- | --- |
 | Codex CLI | `AGENTS.md`, `.codex/skills/...` | Tier 1, conformance-covered. Repo-local skills are visible to Codex sessions opened in that repo; user-global Personal skills live under `~/.codex/skills`. |
 | Claude Code | `CLAUDE.md`, `.claude/skills/...` | Tier 1, conformance-covered |
-| Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 2, preview |
+| Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 1, conformance-covered |
 | Filesystem Agent | `AGENTS.md`, `.metactl/filesystem-agent/...` | Generic compatibility fixture |
-| Gemini CLI | `GEMINI.md`, `.gemini/extensions/...` | Tier 2, preview |
+| Gemini CLI | `GEMINI.md`, `.gemini/extensions/...` | Tier 1, conformance-covered |
 | OpenClaw | `OPENCLAW.md` | Target available; compatibility tier not yet claimed |
 
 See [docs/support-matrix.md](https://github.com/pylit-ai/metactl/blob/main/docs/support-matrix.md) and [docs/agent-surfaces.md](https://github.com/pylit-ai/metactl/blob/main/docs/agent-surfaces.md) for release-specific target notes.
@@ -454,6 +469,35 @@ metactl --project "$PROJECT" --agent validate
 >   "ok": true
 > }
 > ```
+
+`status` and preview `sync` include stable top-level fields for automation:
+
+```json
+{
+  "command": "status",
+  "ok": true,
+  "readiness": "ready",
+  "targets": [
+    { "id": "codex-cli", "status": "ready" }
+  ]
+}
+```
+
+```json
+{
+  "command": "sync",
+  "ok": true,
+  "preview": true,
+  "apply_preview": true,
+  "compile": {
+    "targets": [
+      { "target": "codex-cli" }
+    ]
+  }
+}
+```
+
+When diffing preview output, key off `compile.targets[*].target` rather than assuming every nested target object uses an `id` key.
 
 `skills audit` JSON reports include a run-specific `report.generated_at`
 timestamp. Normalize or ignore that field when diffing automation output.
