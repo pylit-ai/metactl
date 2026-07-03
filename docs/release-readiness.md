@@ -2,6 +2,17 @@
 
 Last local verification: 2026-07-03.
 
+## 0.1.21 Pre-Publication Status
+
+- `make verify`: passed locally on the `0.1.21` release-prep branch.
+- `cargo package -p metactl --list`: passed.
+- `cargo package -p metactld --list`: passed.
+- `cargo publish -p metactl --dry-run --locked`: passed.
+- `cargo run -p metactl -- --version`: reports `metactl 0.1.21`.
+- `cargo run -p metactld -- --version`: reports `metactld 0.1.21`.
+- `cargo search metactl --limit 5`: still reports the previous published versions before publication.
+- `cargo publish -p metactld --dry-run --locked`: intentionally deferred until `metactl = "0.1.21"` is visible in the crates.io index.
+
 ## Dependency And License Scan
 
 - `cargo metadata --locked --format-version 1`: passed.
