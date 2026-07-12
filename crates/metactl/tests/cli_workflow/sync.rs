@@ -2,6 +2,68 @@ use super::*;
 
 // Sync, apply, and generated-output workflow tests.
 
+fn copy_directory(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("create copy destination");
+    for entry in fs::read_dir(source).expect("read copy source") {
+        let entry = entry.expect("read copy entry");
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type().expect("copy file type").is_dir() {
+            copy_directory(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).expect("copy library file");
+        }
+    }
+}
+
+#[test]
+fn cli_compile_import_stub_uses_bundled_default_for_stale_library_target() {
+    let project = TempDir::new().expect("project");
+    let stale_library = TempDir::new().expect("stale library");
+    let starter_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/starter");
+    copy_directory(&starter_root, stale_library.path());
+
+    let target_path = stale_library.path().join("targets/claude-code.json");
+    let mut target: Value = serde_json::from_slice(&fs::read(&target_path).expect("read target"))
+        .expect("parse target");
+    target["compile_targets"]
+        .as_array_mut()
+        .expect("compile targets")
+        .iter_mut()
+        .find(|entry| entry["output_kind"] == "claude_md")
+        .expect("claude target")
+        .as_object_mut()
+        .expect("claude target object")
+        .remove("import_stub_path");
+    fs::write(
+        &target_path,
+        serde_json::to_vec_pretty(&target).expect("serialize stale target"),
+    )
+    .expect("write stale target");
+
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let config_path = project.path().join("metactl.yaml");
+    let config = fs::read_to_string(&config_path).expect("read project config");
+    fs::write(
+        &config_path,
+        format!(
+            "{config}\nstarter_library:\n  - {}\n",
+            stale_library.path().display()
+        ),
+    )
+    .expect("configure stale library");
+
+    let compile = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(compile.status.success(), "{}", stderr(&compile));
+    assert!(fs::read_to_string(project.path().join("CLAUDE.md"))
+        .expect("read generated stub")
+        .contains("@AGENTS.md"));
+}
+
 #[test]
 fn cli_compile_apply_import_stub_bridges_claude_to_agents_and_detects_drift() {
     let project = TempDir::new().expect("tempdir");

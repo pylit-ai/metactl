@@ -587,6 +587,35 @@ fn project_import_inspect_reports_source_summary() {
 }
 
 #[test]
+fn project_import_inspect_supports_ruler_sources_without_metactl_yaml() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    write_ruler_source(source.path());
+
+    let output = run_cli(
+        target.path(),
+        &[
+            "--json",
+            "project",
+            "import",
+            "inspect",
+            source.path().to_str().expect("source path"),
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json = json_output(&output);
+    assert_json_contract(&json, "project import", Some(target.path()));
+    assert_eq!(json["action"], "inspect");
+    assert_eq!(json["source"]["source"], "ruler");
+    assert_eq!(json["importer"], "ruler");
+    assert!(json["unmapped"]
+        .as_array()
+        .expect("unmapped entries")
+        .iter()
+        .any(|entry| entry["path"] == ".ruler/ruler.toml"));
+}
+
+#[test]
 fn project_import_browse_is_rejected_in_agent_safe_mode() {
     let target = TempDir::new().expect("target");
 

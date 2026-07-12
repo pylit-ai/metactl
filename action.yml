@@ -23,17 +23,21 @@ runs:
         METACTL_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        case "${RUNNER_OS}/${RUNNER_ARCH}" in
-          Linux/X64) target=x86_64-unknown-linux-gnu ;;
-          macOS/ARM64) target=aarch64-apple-darwin ;;
-          *) echo "No prebuilt metactl release for ${RUNNER_OS}/${RUNNER_ARCH}; using Cargo."; cargo install metactl --locked; echo "bin=$(command -v metactl)" >> "$GITHUB_OUTPUT"; exit 0 ;;
-        esac
         if [ "$METACTL_VERSION" = latest ]; then
           tag="$(curl --fail --silent --show-error https://api.github.com/repos/pylit-ai/metactl/releases/latest | jq -r .tag_name)"
         else
           tag="$METACTL_VERSION"
           case "$tag" in v*) ;; *) tag="v$tag" ;; esac
         fi
+        cargo_install_args=(install metactl --locked)
+        if [ "$METACTL_VERSION" != latest ]; then
+          cargo_install_args+=(--version "${tag#v}")
+        fi
+        case "${RUNNER_OS}/${RUNNER_ARCH}" in
+          Linux/X64) target=x86_64-unknown-linux-gnu ;;
+          macOS/ARM64) target=aarch64-apple-darwin ;;
+          *) echo "No prebuilt metactl release for ${RUNNER_OS}/${RUNNER_ARCH}; using Cargo."; cargo "${cargo_install_args[@]}"; echo "bin=$(command -v metactl)" >> "$GITHUB_OUTPUT"; exit 0 ;;
+        esac
         archive="metactl-${tag}-${target}.tar.gz"
         base="https://github.com/pylit-ai/metactl/releases/download/${tag}"
         workdir="$(mktemp -d)"
@@ -50,7 +54,7 @@ runs:
           echo "bin=$RUNNER_TEMP/metactl" >> "$GITHUB_OUTPUT"
         else
           echo "Prebuilt release unavailable; falling back to cargo install --locked."
-          cargo install metactl --locked
+          cargo "${cargo_install_args[@]}"
           echo "bin=$(command -v metactl)" >> "$GITHUB_OUTPUT"
         fi
     - name: Run drift gate

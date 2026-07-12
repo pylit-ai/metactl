@@ -14,6 +14,13 @@
 - Added an Experimental OpenCode target that generates `AGENTS.md`, `opencode.json`, `.opencode/commands/...`, `.opencode/skills/.../SKILL.md`, and `.opencode/packs/...` surfaces.
 - Added `scripts/verify_opencode_target.sh` to prove OpenCode target add, compile, and validation behavior without Rust source changes.
 - Added `status` instruction-noise reporting for drifted managed outputs, stray unmanaged agent surfaces, and duplicate trigger metadata.
+- Added a dirty-worktree warning that lets sync proceed while disclosing local changes.
+- Added `explain --capabilities` and the repository `llms.txt` capability-discovery reference.
+- Added import-stub bridge mode for managed Claude Code imports of `AGENTS.md`.
+- Added Ruler and AgentSync project importers.
+- Added fleet machine-contract parity for recoverable agent-mode failures.
+- Added the `metactl check` GitHub Action for verified CI drift checks.
+- Added binstall, Homebrew, and npm installation paths.
 
 ### Changed
 

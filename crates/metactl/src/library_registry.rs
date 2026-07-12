@@ -816,7 +816,8 @@ impl LibraryRegistry {
             self.register_policy(path, manifest)?;
         }
         for path in sorted_glob_json(&root.join("targets"))? {
-            let manifest: TargetCapabilityMatrix = load_json(path.clone())?;
+            let mut manifest: TargetCapabilityMatrix = load_json(path.clone())?;
+            Self::apply_bundled_compile_target_defaults(&mut manifest)?;
             self.register_target(path, manifest)?;
         }
         for path in sorted_glob_json(&root.join("knowledge_sources"))? {
@@ -842,6 +843,31 @@ impl LibraryRegistry {
         for path in sorted_imports(&root.join("imports"))? {
             let (manifest, provenance) = normalize_candidate(root, &path)?;
             self.register_pack(root, path, manifest, Some(provenance))?;
+        }
+        Ok(())
+    }
+
+    /// Fill compatibility-only optional compile-target fields from the embedded
+    /// definition. User-library values remain authoritative when present.
+    fn apply_bundled_compile_target_defaults(manifest: &mut TargetCapabilityMatrix) -> Result<()> {
+        let bundled_root = crate::project::ensure_bundled_starter_library_root()?;
+        let bundled_path = bundled_root
+            .join("targets")
+            .join(format!("{}.json", manifest.target_id));
+        if !bundled_path.exists() {
+            return Ok(());
+        }
+        let bundled: TargetCapabilityMatrix = load_json(bundled_path)?;
+        for compile_target in &mut manifest.compile_targets {
+            if compile_target.import_stub_path.is_some() {
+                continue;
+            }
+            if let Some(default) = bundled.compile_targets.iter().find(|candidate| {
+                candidate.output_kind == compile_target.output_kind
+                    && candidate.path_template == compile_target.path_template
+            }) {
+                compile_target.import_stub_path = default.import_stub_path.clone();
+            }
         }
         Ok(())
     }

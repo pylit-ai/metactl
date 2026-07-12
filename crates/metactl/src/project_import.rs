@@ -625,6 +625,39 @@ fn cmd_project_import_inspect(
             vec![format!("Check {}", candidate.config_path.display())],
         ));
     }
+    if let Some(importer) = candidate.importer {
+        let competitor = build_competitor_import(&project_root, &candidate, importer)?;
+        let command_selector = project_import_command_selector(&candidate);
+        let lines = [
+            format!("Source: {} ({})", candidate.name, candidate.id),
+            format!("Path: {}", candidate.path.display()),
+            format!("Importer: {}", importer.as_str()),
+            format!("Artifacts: {}", competitor.artifacts.len()),
+            format!("Unmapped: {}", competitor.unmapped.len()),
+            format!(
+                "Next: metactl project import apply {} --yes",
+                command_selector
+            ),
+        ];
+        return Ok(CommandOutput {
+            human: project_human_output(&project_root, lines.join("\n")),
+            json: success_json(
+                "project import",
+                Some(&project_root),
+                json!({
+                    "action": "inspect",
+                    "source": project_import_candidate_json(&candidate),
+                    "importer": importer.as_str(),
+                    "artifacts": competitor.artifacts,
+                    "unmapped": competitor.unmapped,
+                    "next_commands": [
+                        format!("metactl project import apply {} --yes", command_selector),
+                        "metactl sync --adopt preview".to_string(),
+                    ],
+                }),
+            ),
+        });
+    }
     let raw = load_partial_project_config(&candidate.config_path).map_err(state_error)?;
     let context_result =
         load_project_context(&candidate.path, None, candidate.profile.as_deref(), None);
