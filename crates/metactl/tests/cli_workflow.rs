@@ -1235,8 +1235,12 @@ fn cli_user_settings_respect_xdg_config_home() {
     assert!(init.status.success(), "{}", stderr(&init));
     let init_json = json_output(&init);
     assert_eq!(
-        init_json["profile_resolution"]["activation_source"],
-        json!("user_default")
+        init_json["profile_resolution"],
+        json!({
+            "profile": "xdg-p",
+            "source": "user-default",
+            "inherited": true,
+        })
     );
 }
 

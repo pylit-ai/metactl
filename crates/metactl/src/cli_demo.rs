@@ -55,6 +55,7 @@ fn cmd_demo_create(
         yes: cli.yes,
         project: Some(demo_root.clone()),
         profile: cli.profile.clone(),
+        no_profile: cli.no_profile,
         config: None,
         overlay: None,
         verbose: cli.verbose,

@@ -539,7 +539,7 @@ pub fn write_partial_project_config(path: &Path, config: &PartialProjectConfig) 
 pub fn read_project_config(path: &Path, profile: Option<&str>) -> Result<ProjectConfigFile> {
     let defaults = default_project_config();
     let project = load_partial_project_config(path)?;
-    let resolution = resolve_profile_cli_chain(profile, &project);
+    let resolution = resolve_profile_cli_chain(profile, &project, false);
     let profile_config = load_profile_partial(resolution.name.as_deref())?;
     Ok(merge_project_config(defaults, profile_config, project))
 }
@@ -857,6 +857,7 @@ fn builtin_profile_template(name: &str) -> Option<PartialProjectConfig> {
 pub fn resolve_profile_cli_chain(
     profile_cli: Option<&str>,
     project: &PartialProjectConfig,
+    ignore_user_default: bool,
 ) -> ProfileResolution {
     if let Some(name) = profile_cli.filter(|s| !s.is_empty()) {
         return ProfileResolution {
@@ -870,15 +871,17 @@ pub fn resolve_profile_cli_chain(
             source: Some(ProfileActivationSource::ProjectExtends),
         };
     }
-    if let Some(name) = load_user_settings()
-        .default_profile
-        .as_ref()
-        .filter(|s| !s.is_empty())
-    {
-        return ProfileResolution {
-            name: Some(name.clone()),
-            source: Some(ProfileActivationSource::UserDefault),
-        };
+    if !ignore_user_default {
+        if let Some(name) = load_user_settings()
+            .default_profile
+            .as_ref()
+            .filter(|s| !s.is_empty())
+        {
+            return ProfileResolution {
+                name: Some(name.clone()),
+                source: Some(ProfileActivationSource::UserDefault),
+            };
+        }
     }
     ProfileResolution {
         name: None,
@@ -887,22 +890,27 @@ pub fn resolve_profile_cli_chain(
 }
 
 /// Profile selection for `metactl init`: CLI/env, then machine `default_profile` (not project `extends_profile`).
-pub fn resolve_profile_name_for_init(profile_cli: Option<&str>) -> ProfileResolution {
+pub fn resolve_profile_name_for_init(
+    profile_cli: Option<&str>,
+    ignore_user_default: bool,
+) -> ProfileResolution {
     if let Some(name) = profile_cli.filter(|s| !s.is_empty()) {
         return ProfileResolution {
             name: Some(name.to_string()),
             source: Some(ProfileActivationSource::Cli),
         };
     }
-    if let Some(name) = load_user_settings()
-        .default_profile
-        .as_ref()
-        .filter(|s| !s.is_empty())
-    {
-        return ProfileResolution {
-            name: Some(name.clone()),
-            source: Some(ProfileActivationSource::UserDefault),
-        };
+    if !ignore_user_default {
+        if let Some(name) = load_user_settings()
+            .default_profile
+            .as_ref()
+            .filter(|s| !s.is_empty())
+        {
+            return ProfileResolution {
+                name: Some(name.clone()),
+                source: Some(ProfileActivationSource::UserDefault),
+            };
+        }
     }
     ProfileResolution {
         name: None,
@@ -914,7 +922,7 @@ pub fn resolve_profile_name(
     profile_cli: Option<&str>,
     project: &PartialProjectConfig,
 ) -> Option<String> {
-    resolve_profile_cli_chain(profile_cli, project).name
+    resolve_profile_cli_chain(profile_cli, project, false).name
 }
 
 pub fn profile_path(profile_name: &str) -> Option<PathBuf> {
@@ -958,9 +966,25 @@ pub fn load_project_context(
     profile: Option<&str>,
     overlay_path: Option<&Path>,
 ) -> Result<ProjectContext> {
+    load_project_context_with_profile_preferences(
+        project_root,
+        config_override,
+        profile,
+        overlay_path,
+        false,
+    )
+}
+
+pub fn load_project_context_with_profile_preferences(
+    project_root: &Path,
+    config_override: Option<&Path>,
+    profile: Option<&str>,
+    overlay_path: Option<&Path>,
+    ignore_user_default: bool,
+) -> Result<ProjectContext> {
     let config_path = project_config_path(project_root, config_override);
     let raw_config_file = load_partial_project_config(&config_path)?;
-    let resolution = resolve_profile_cli_chain(profile, &raw_config_file);
+    let resolution = resolve_profile_cli_chain(profile, &raw_config_file, ignore_user_default);
     let active_profile = build_active_profile_from_resolution(&resolution)?;
     let config_file = merge_project_config(
         default_project_config(),

@@ -320,9 +320,9 @@ fn cli_init_human_output_explains_machine_default_binding_choice() {
     );
     assert!(init.status.success(), "{}", stderr(&init));
     let text = stdout(&init);
-    assert!(text.contains("Applied machine default profile from user settings locally"));
-    assert!(text.contains("Leave it this way for a portable repo"));
-    assert!(text.contains("metactl init --bind-profile"));
+    assert!(text.contains("Using user-default profile \"team-profile\" (machine-level)."));
+    assert!(text.contains("metactl profile use team-profile --project"));
+    assert!(text.contains("disable with --no-profile"));
 }
 
 #[test]
@@ -351,8 +351,9 @@ fn cli_status_human_output_explains_machine_default_binding_choice() {
     );
     assert!(status.status.success(), "{}", stderr(&status));
     let text = stdout(&status);
-    assert!(text.contains("Machine default profile team-profile is active locally"));
-    assert!(text.contains("metactl init --bind-profile"));
+    assert!(text.contains("Using user-default profile \"team-profile\" (machine-level)."));
+    assert!(text.contains("metactl profile use team-profile --project"));
+    assert!(text.contains("disable with --no-profile"));
 }
 
 #[test]

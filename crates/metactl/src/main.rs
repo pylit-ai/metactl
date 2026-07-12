@@ -16,9 +16,9 @@ use metactl::project::{
     ensure_bundled_starter_library_root, ensure_gitignore_entries, ensure_project_layout,
     is_candidate_pack, list_user_profiles, load_compile_manifest, load_lock,
     load_partial_project_config, load_policy_report, load_profile_partial, load_project_context,
-    load_user_settings, metactl_user_config_dir, policy_report_path,
-    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
-    project_config_path, project_lock_path, resolve_profile_name_for_init,
+    load_project_context_with_profile_preferences, load_user_settings, metactl_user_config_dir,
+    policy_report_path, preferred_apply_mode_for_target, private_source_lock_path, profile_path,
+    profiles_directory, project_config_path, project_lock_path, resolve_profile_name_for_init,
     resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
     update_managed_files_index, user_settings_path, write_lock, write_lock_relaxed,
     write_partial_project_config, write_policy_report, write_policy_report_relaxed,
@@ -125,6 +125,9 @@ struct Cli {
     /// Merge defaults from `$XDG_CONFIG_HOME/metactl/profiles/<PROFILE>.yaml` (or `~/.config/...`; also `METACTL_PROFILE`). Overrides `extends_profile` and machine `default_profile` in `config.yaml`.
     #[arg(long, global = true, env = "METACTL_PROFILE")]
     profile: Option<String>,
+    /// Disable the machine user-default profile for this invocation
+    #[arg(long, global = true, conflicts_with = "profile")]
+    no_profile: bool,
     /// Override the config file path (default: metactl.yaml)
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
@@ -2542,7 +2545,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
     ensure_project_layout(&project_root).map_err(internal_error)?;
     ensure_gitignore_entries(&project_root).map_err(internal_error)?;
 
-    let init_resolution = resolve_profile_name_for_init(cli.profile.as_deref());
+    let init_resolution = resolve_profile_name_for_init(cli.profile.as_deref(), cli.no_profile);
     if args.bind_profile && init_resolution.name.is_none() {
         return Err(CliError::new(
             EXIT_STATE,
@@ -2774,10 +2777,11 @@ Restore from version control or a backup if that was unintended.",
         && !args.bind_profile
         && init_resolution.name.is_some()
     {
-        human.push_str(
-            "\n\nNote: Applied machine default profile from user settings locally (not written to metactl.yaml). \
-Leave it this way for a portable repo, or run `metactl init --bind-profile` if this repo should track that profile.",
-        );
+        human.push_str(&format!(
+            "\n\n{}",
+            profile_resolution_notice(&profile_resolution_from_resolution(&init_resolution))
+                .unwrap_or_default()
+        ));
     }
 
     Ok(CommandOutput {
@@ -2792,15 +2796,7 @@ Leave it this way for a portable repo, or run `metactl init --bind-profile` if t
                 "starter_library": config.starter_library,
                 "targets": config.targets,
                 "extends_profile": config.extends_profile,
-                "profile_resolution": {
-                    "name": init_resolution.name,
-                    "activation_source": match init_resolution.source {
-                        Some(ProfileActivationSource::Cli) => json!("cli"),
-                        Some(ProfileActivationSource::ProjectExtends) => json!("project_extends"),
-                        Some(ProfileActivationSource::UserDefault) => json!("user_default"),
-                        None => Value::Null,
-                    },
-                },
+                "profile_resolution": profile_resolution_from_resolution(&init_resolution),
                 "reinitialized": reinitialized,
             }),
         ),
@@ -4762,11 +4758,12 @@ fn load_required_context_for_path(
     cli: &Cli,
     project_root: &Path,
 ) -> std::result::Result<metactl::project::ProjectContext, CliError> {
-    load_project_context(
+    load_project_context_with_profile_preferences(
         project_root,
         cli.config.as_deref(),
         cli.profile.as_deref(),
         cli.overlay.as_deref(),
+        cli.no_profile,
     )
     .map_err(|error| {
         let message = error.to_string();
@@ -5086,6 +5083,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 Some(&project_root),
                 json!({
                     "initialized": false,
+                    "profile_resolution": profile_resolution_for_unconfigured_project(cli),
                 }),
             ),
         });
@@ -5095,6 +5093,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     let stale_reason = metactl::project::lock_stale_reason(&context).map_err(internal_error)?;
     let stale = stale_reason.is_some();
     let profile = profile_status_json(&context);
+    let profile_resolution = profile_resolution_json(cli, &context);
     let discoverability = discoverability_report(&context, &ConfigOverrides::default());
     let blocking_checks = discoverability.blocking_checks_json();
     let execution_readiness = if blocking_checks.is_empty() {
@@ -5294,6 +5293,9 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     };
     lines.push(format!("  Lock:    {}", lock_display));
     lines.push(format!("  Profile: {}", profile_status_message(&profile)));
+    if let Some(notice) = profile_resolution_notice(&profile_resolution) {
+        lines.push(format!("  {notice}"));
+    }
     lines.push(format!("  Execution readiness: {}", execution_readiness));
     if !blocking_checks.is_empty() {
         lines.push("  Blockers:".to_string());
@@ -5411,6 +5413,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 "lock_stale": stale,
                 "stale_reason": stale_reason,
                 "profile": profile,
+                "profile_resolution": profile_resolution,
                 "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
                 "layers": layers,
                 "hooks": installed_hooks,
@@ -7047,6 +7050,7 @@ fn cmd_surface_reset(
 fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
+    let profile_resolution = profile_resolution_json(cli, &context);
     if args.staged {
         let targets = select_locked_targets(&context.lock, args.target.clone())?;
         let mut items = Vec::new();
@@ -7070,6 +7074,7 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
                 json!({
                     "mode": "staged",
                     "targets": items,
+                    "profile_resolution": profile_resolution,
                 }),
             ),
         });
@@ -7154,7 +7159,7 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
     );
     let surface_usage_summary = surface_usage::surface_report_summary_json(&project_root);
     let surface_details = derived_surface_details;
-    Ok(explain_output(
+    let mut output = explain_output(
         &project_root,
         args.query.as_deref(),
         &explain,
@@ -7163,7 +7168,12 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         surface_details.as_deref(),
         pack_lifecycle.as_ref(),
         &pack_sources,
-    ))
+    );
+    if let Some(notice) = profile_resolution_notice(&profile_resolution) {
+        output.human.push_str(&format!("\n{notice}"));
+    }
+    output.json["profile_resolution"] = profile_resolution;
+    Ok(output)
 }
 
 fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -7295,6 +7305,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
     };
     let context = load_required_context(cli, &project_root)?;
     let profile = profile_status_json(&context);
+    let profile_resolution = profile_resolution_json(cli, &context);
     let shared_surface_rules = shared_surface_rules(
         context.registry.as_ref(),
         &context
@@ -7340,6 +7351,9 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         }
     }
     lines.push(format!("  Profile: {}", profile_status_message(&profile)));
+    if let Some(notice) = profile_resolution_notice(&profile_resolution) {
+        lines.push(notice);
+    }
     if !shared_surface_rules.is_empty() {
         lines.push("  Shared surfaces:".to_string());
         for rule in &shared_surface_rules {
@@ -7360,6 +7374,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
                 "apply": apply_out.json,
                 "validate": validate_out.map(|output| output.json),
                 "profile": profile,
+                "profile_resolution": profile_resolution,
                 "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
                 "targets": readiness,
                 "preview": apply_args.preview,
@@ -9177,6 +9192,61 @@ fn profile_status_json(context: &metactl::project::ProjectContext) -> Value {
     })
 }
 
+fn profile_resolution_from_resolution(resolution: &metactl::project::ProfileResolution) -> Value {
+    let (source, inherited) = match resolution.source {
+        Some(ProfileActivationSource::Cli) => ("flag", false),
+        Some(ProfileActivationSource::ProjectExtends) => ("project-config", false),
+        Some(ProfileActivationSource::UserDefault) => ("user-default", true),
+        None => ("none", false),
+    };
+    json!({
+        "profile": resolution.name,
+        "source": source,
+        "inherited": inherited,
+    })
+}
+
+fn profile_resolution_json(cli: &Cli, context: &metactl::project::ProjectContext) -> Value {
+    let resolution = metactl::project::resolve_profile_cli_chain(
+        cli.profile.as_deref(),
+        &context.raw_config_file,
+        cli.no_profile,
+    );
+    profile_resolution_from_resolution(&resolution)
+}
+
+fn profile_resolution_for_unconfigured_project(cli: &Cli) -> Value {
+    let resolution = metactl::project::resolve_profile_cli_chain(
+        cli.profile.as_deref(),
+        &metactl::project::PartialProjectConfig::default(),
+        cli.no_profile,
+    );
+    profile_resolution_from_resolution(&resolution)
+}
+
+fn profile_resolution_for_config(
+    cli: &Cli,
+    config: Option<&metactl::project::PartialProjectConfig>,
+) -> Value {
+    let resolution = metactl::project::resolve_profile_cli_chain(
+        cli.profile.as_deref(),
+        config.unwrap_or(&metactl::project::PartialProjectConfig::default()),
+        cli.no_profile,
+    );
+    profile_resolution_from_resolution(&resolution)
+}
+
+fn profile_resolution_notice(resolution: &Value) -> Option<String> {
+    (resolution["source"].as_str() == Some("user-default"))
+        .then(|| {
+            format!(
+                "Using user-default profile \"{}\" (machine-level). Pin with: metactl profile use {} --project, or disable with --no-profile.",
+                resolution["profile"].as_str().unwrap_or_default(),
+                resolution["profile"].as_str().unwrap_or_default(),
+            )
+        })
+}
+
 fn profile_override_fields(
     project: &metactl::project::PartialProjectConfig,
     profile: &metactl::project::PartialProjectConfig,
@@ -9214,9 +9284,7 @@ fn profile_status_message(profile: &Value) -> String {
         "none" => "No profile is active.".to_string(),
         "synced" => {
             if source == "user_default" && !yaml_binding {
-                format!(
-                    "Machine default profile {name} is active locally (not recorded in metactl.yaml); run `metactl init --bind-profile` if this repo should track it."
-                )
+                format!("User-default profile {name} is active.")
             } else {
                 format!("Bound profile {name} is in sync.")
             }

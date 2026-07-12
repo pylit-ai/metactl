@@ -212,14 +212,75 @@ fn cli_init_uses_machine_default_profile_without_extends_profile() {
     assert!(init.status.success(), "{}", stderr(&init));
     let init_json = json_output(&init);
     assert_eq!(
-        init_json["profile_resolution"]["activation_source"],
-        json!("user_default")
+        init_json["profile_resolution"],
+        json!({
+            "profile": "team-profile",
+            "source": "user-default",
+            "inherited": true,
+        })
     );
     let config = fs::read_to_string(project.path().join("metactl.yaml")).expect("read config");
     assert!(
         !config.contains("extends_profile"),
         "machine default should not auto-bind: {config}"
     );
+}
+
+#[test]
+fn cli_agent_status_discloses_user_default_and_no_profile_disables_it() {
+    let project = TempDir::new().expect("tempdir");
+    let home = TempDir::new().expect("home");
+    let xdg_config = home.path().join("xdg-config");
+    let metactl_config = xdg_config.join("metactl");
+    fs::create_dir_all(metactl_config.join("profiles")).expect("profiles dir");
+    fs::write(
+        metactl_config.join("profiles/private-team.yaml"),
+        format!(
+            "targets:\n  - codex-cli\nstarter_library:\n  - {}\npacks:\n  - private-pack\n",
+            starter_library_root()
+        ),
+    )
+    .expect("write profile");
+    fs::write(
+        metactl_config.join("config.yaml"),
+        "default_profile: private-team\n",
+    )
+    .expect("write user config");
+
+    let inherited = run_cli_env(
+        project.path(),
+        &["--agent", "status"],
+        &[("XDG_CONFIG_HOME", xdg_config.to_str().expect("xdg config"))],
+    );
+    assert!(inherited.status.success(), "{}", stderr(&inherited));
+    let inherited_json = json_output(&inherited);
+    assert_eq!(
+        inherited_json["profile_resolution"],
+        json!({
+            "profile": "private-team",
+            "source": "user-default",
+            "inherited": true,
+        })
+    );
+
+    let disabled = run_cli_env(
+        project.path(),
+        &["--agent", "--no-profile", "status"],
+        &[("XDG_CONFIG_HOME", xdg_config.to_str().expect("xdg config"))],
+    );
+    assert!(disabled.status.success(), "{}", stderr(&disabled));
+    let disabled_text = stdout(&disabled);
+    let disabled_json: Value = serde_json::from_str(&disabled_text).expect("json stdout");
+    assert_eq!(
+        disabled_json["profile_resolution"],
+        json!({
+            "profile": Value::Null,
+            "source": "none",
+            "inherited": false,
+        })
+    );
+    assert!(!disabled_text.contains("private-team"));
+    assert!(!disabled_text.contains("private-pack"));
 }
 
 #[test]
@@ -282,6 +343,14 @@ fn cli_profile_resolution_prefers_extends_over_default() {
     let profile = &status_json["profile"];
     assert_eq!(profile["name"], "wx-a");
     assert_eq!(profile["activation_source"], json!("project_extends"));
+    assert_eq!(
+        status_json["profile_resolution"],
+        json!({
+            "profile": "wx-a",
+            "source": "project-config",
+            "inherited": false,
+        })
+    );
 }
 
 #[test]
