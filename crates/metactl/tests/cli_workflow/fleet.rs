@@ -606,7 +606,7 @@ fn fleet_sync_apply_honors_linked_project_refuse_setting() {
 }
 
 #[test]
-fn fleet_sync_apply_refuses_dirty_git_project_by_default() {
+fn fleet_sync_apply_warns_for_dirty_git_project_and_proceeds() {
     let project = TempDir::new().expect("tempdir");
     let ready = TempDir::new().expect("ready");
     init_project(ready.path());
@@ -634,15 +634,18 @@ fn fleet_sync_apply_refuses_dirty_git_project_by_default() {
         project.path(),
         &["--json", "--yes", "--no-input", "fleet", "sync", "--apply"],
     );
-    assert_eq!(output.status.code(), Some(10), "{}", stdout(&output));
+    assert!(output.status.success(), "{}", stderr(&output));
     let json = json_output(&output);
-    assert_eq!(json["projects"][0]["status"], "failed");
-    assert_eq!(json["projects"][0]["result"], "dirty_worktree");
-    assert!(json["projects"][0]["message"]
-        .as_str()
-        .unwrap_or_default()
-        .contains("--allow-dirty"));
-    assert!(!ready.path().join("AGENTS.md").exists());
+    assert_eq!(json["worktree_dirty"], true);
+    assert!(json["warnings"]
+        .as_array()
+        .is_some_and(|warnings| !warnings.is_empty()));
+    assert_eq!(json["projects"][0]["status"], "applied");
+    assert_eq!(json["projects"][0]["worktree_dirty"], true);
+    assert!(json["projects"][0]["warnings"]
+        .as_array()
+        .is_some_and(|warnings| !warnings.is_empty()));
+    assert!(ready.path().join("AGENTS.md").exists());
 }
 
 #[test]

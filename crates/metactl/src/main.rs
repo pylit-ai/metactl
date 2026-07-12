@@ -1355,6 +1355,9 @@ struct SurfaceResetArgs {
 
 #[derive(Debug, Args)]
 struct ExplainArgs {
+    /// Describe the machine-readable command and target capability contract
+    #[arg(long)]
+    capabilities: bool,
     /// Optional query context to explain selections for
     #[arg(long)]
     query: Option<String>,
@@ -4542,14 +4545,9 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             results.push(result);
             continue;
         }
-        if !args.allow_dirty && git_worktree_dirty(&project.path).map_err(internal_error)? {
-            result["status"] = json!("failed");
-            result["result"] = json!("dirty_worktree");
-            result["message"] = json!(
-                "dirty Git worktree; review and commit/stash changes, or rerun with --allow-dirty"
-            );
-            results.push(result);
-            continue;
+        if git_worktree_dirty(&project.path) {
+            result["worktree_dirty"] = json!(true);
+            result["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
         }
         match run_project_sync(project, fleet_sync_adopt) {
             Ok(sync_json) => {
@@ -4583,6 +4581,9 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             item["status"].as_str().unwrap_or("?"),
             item["path"].as_str().unwrap_or("?")
         ));
+        if item["worktree_dirty"] == true {
+            lines.push(format!("    Warning: {DIRTY_WORKTREE_WARNING}"));
+        }
     }
     append_fleet_codex_skill_scope_note(&mut lines);
     let mut json_payload = success_json(
@@ -4596,6 +4597,10 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             "scope_note": CODEX_FLEET_SCOPE_NOTE,
         }),
     );
+    if results.iter().any(|item| item["worktree_dirty"] == true) {
+        json_payload["worktree_dirty"] = json!(true);
+        json_payload["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
+    }
     if failed {
         let details = fleet_sync_failure_details(&results);
         let mut err = CliError::new(EXIT_STATE, "one or more fleet projects failed");
@@ -4981,11 +4986,14 @@ fn linked_project_status_label(status: LinkedProjectStatus) -> &'static str {
     }
 }
 
-fn git_worktree_dirty(project_root: &Path) -> Result<bool> {
+const DIRTY_WORKTREE_WARNING: &str =
+    "Git worktree has uncommitted changes; sync may modify files alongside local edits.";
+
+fn git_worktree_dirty(project_root: &Path) -> bool {
     if !project_root.join(".git").exists() {
-        return Ok(false);
+        return false;
     }
-    let output = Command::new("git")
+    let Ok(output) = Command::new("git")
         .args([
             "-C",
             &project_root.to_string_lossy(),
@@ -4993,11 +5001,13 @@ fn git_worktree_dirty(project_root: &Path) -> Result<bool> {
             "--porcelain",
         ])
         .output()
-        .context("run git status --porcelain")?;
+    else {
+        return false;
+    };
     if !output.status.success() {
-        return Ok(true);
+        return false;
     }
-    Ok(!output.stdout.is_empty())
+    !output.stdout.is_empty()
 }
 
 fn run_project_sync(
@@ -7072,6 +7082,9 @@ fn cmd_surface_reset(
 }
 
 fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutput, CliError> {
+    if args.capabilities {
+        return cmd_explain_capabilities();
+    }
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
     let profile_resolution = profile_resolution_json(cli, &context);
@@ -7208,6 +7221,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         ));
     }
     let project_root = project_root(cli).map_err(internal_error)?;
+    let worktree_dirty = !args.preview && git_worktree_dirty(&project_root);
     let context = load_required_context(cli, &project_root)?;
     let source_audit_findings = source_audit_findings(&project_root)?;
     if !source_audit_findings.is_empty() {
@@ -7388,20 +7402,72 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         lines.push("Preview only; runtime files were not changed.".to_string());
     }
 
+    if worktree_dirty {
+        lines.insert(1, format!("Warning: {DIRTY_WORKTREE_WARNING}"));
+    }
+    let mut json = success_json(
+        "sync",
+        Some(&project_root),
+        json!({
+            "compile": compile_out.json,
+            "apply": apply_out.json,
+            "validate": validate_out.map(|output| output.json),
+            "profile": profile,
+            "profile_resolution": profile_resolution,
+            "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
+            "targets": readiness,
+            "preview": apply_args.preview,
+        }),
+    );
+    if worktree_dirty {
+        json["worktree_dirty"] = json!(true);
+        json["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
+    }
     Ok(CommandOutput {
         human: project_human_output(&project_root, lines.join("\n")),
+        json,
+    })
+}
+
+fn cmd_explain_capabilities() -> std::result::Result<CommandOutput, CliError> {
+    let registry = ensure_bundled_starter_library_root()
+        .and_then(|root| LibraryRegistry::load_from_roots(&[root]))
+        .map_err(internal_error)?;
+    let targets = registry.list_targets();
+    let target_ids = targets
+        .iter()
+        .map(|target| target.target_id.as_str())
+        .collect::<Vec<_>>();
+    Ok(CommandOutput {
+        human: format!(
+            "metactl capabilities (v{}):\n  Porcelain: setup, use, sync, status, validate, doctor, demo\n  Targets: {}\n  Machine contract: use --agent for JSON errors with recovery commands.\n  Details: metactl explain --capabilities --json",
+            env!("CARGO_PKG_VERSION"),
+            target_ids.join(", "),
+        ),
         json: success_json(
-            "sync",
-            Some(&project_root),
+            "explain",
+            None,
             json!({
-                "compile": compile_out.json,
-                "apply": apply_out.json,
-                "validate": validate_out.map(|output| output.json),
-                "profile": profile,
-                "profile_resolution": profile_resolution,
-                "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
-                "targets": readiness,
-                "preview": apply_args.preview,
+                "mode": "capabilities",
+                "tool_version": env!("CARGO_PKG_VERSION"),
+                "command_surface": {
+                    "porcelain": ["setup", "use", "sync", "status", "validate", "doctor", "demo"],
+                    "advanced": ["init", "library", "pack", "skills", "plugin", "export", "project", "add", "remove", "target", "fleet", "list", "search", "stats", "surface", "background", "explain", "preview", "compile", "apply", "revert", "check", "audit", "ignore", "hook", "source", "profile", "version"],
+                },
+                "global_flags": ["--agent", "--json", "--full", "--no-profile", "--project"],
+                "exit_codes": {
+                    "0": exit_code_label(EXIT_SUCCESS),
+                    "10": exit_code_label(EXIT_STATE),
+                    "11": exit_code_label(EXIT_STALE_LOCK),
+                    "12": exit_code_label(EXIT_CONFLICT),
+                    "13": exit_code_label(EXIT_VALIDATION),
+                },
+                "error_contract": {
+                    "envelope_fields": ["ok", "api_version", "command", "error_code", "message", "requires_operator", "risk_level", "next_commands", "findings"],
+                    "next_commands_guaranteed": true,
+                    "truncation_markers": ["<list>_truncated", "<list>_total_count"],
+                },
+                "targets": targets,
             }),
         ),
     })

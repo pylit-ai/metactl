@@ -3,6 +3,33 @@ use super::*;
 // Explain, status, and doctor workflow tests.
 
 #[test]
+fn explain_capabilities_is_machine_readable_without_a_project() {
+    let cwd = TempDir::new().expect("cwd");
+    let home = TempDir::new().expect("home");
+
+    let output = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "explain", "--capabilities"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "explain", None);
+    assert_eq!(value["mode"], "capabilities");
+    assert_eq!(value["exit_codes"]["0"], "success");
+    assert_eq!(value["exit_codes"]["13"], "validation");
+    assert!(value["targets"]
+        .as_array()
+        .is_some_and(|targets| !targets.is_empty()));
+    assert!(value["global_flags"]
+        .as_array()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "--agent")));
+    assert!(value["global_flags"]
+        .as_array()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "--project")));
+}
+
+#[test]
 fn agent_status_bounds_large_path_lists_unless_full_is_requested() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());

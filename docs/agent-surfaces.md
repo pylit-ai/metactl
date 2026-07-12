@@ -21,6 +21,10 @@ Consumers MUST check `<list>_truncated` before treating any array as complete; a
 
 Pass the global `--full` flag with `--agent` or `--json` to restore complete list enumeration. Human output is unchanged.
 
+## Capability discovery
+
+Run `metactl explain --capabilities --json` from any directory to obtain the stable machine manifest: command surface, supported global flags, exit-code labels, error-envelope contract, truncation markers, and target capability matrices. Human mode prints a compact listing. The command does not require a project root.
+
 ## Claude Code
 
 - Root instruction document: `CLAUDE.md`

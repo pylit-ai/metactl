@@ -3,6 +3,39 @@ use super::*;
 // Sync, apply, and generated-output workflow tests.
 
 #[test]
+fn sync_apply_warns_for_dirty_git_worktree_but_clean_sync_does_not() {
+    let dirty = TempDir::new().expect("dirty project");
+    init_project(dirty.path());
+    let git_init = Command::new("git")
+        .args([
+            "-C",
+            dirty.path().to_str().expect("dirty path"),
+            "init",
+            "--quiet",
+        ])
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "{}", stderr(&git_init));
+    fs::write(dirty.path().join("local-edit.txt"), "dirty\n").expect("dirty file");
+
+    let dirty_output = run_cli(dirty.path(), &["--json", "sync"]);
+    assert!(dirty_output.status.success(), "{}", stderr(&dirty_output));
+    let dirty_json = json_output(&dirty_output);
+    assert_eq!(dirty_json["worktree_dirty"], true);
+    assert!(dirty_json["warnings"]
+        .as_array()
+        .is_some_and(|warnings| !warnings.is_empty()));
+
+    let clean = TempDir::new().expect("clean project");
+    init_project(clean.path());
+    let clean_output = run_cli(clean.path(), &["--json", "sync"]);
+    assert!(clean_output.status.success(), "{}", stderr(&clean_output));
+    let clean_json = json_output(&clean_output);
+    assert!(clean_json.get("worktree_dirty").is_none());
+    assert!(clean_json.get("warnings").is_none());
+}
+
+#[test]
 fn agent_sync_preview_bounds_generated_paths_unless_full_is_requested() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
