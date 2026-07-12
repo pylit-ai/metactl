@@ -3,6 +3,16 @@
 This public reference names the target-owned surfaces metactl can materialize.
 It is not an upstream standards dossier; use upstream vendor documentation for full behavior.
 
+## Agent error contract
+
+`metactl --agent` makes every command failure machine-readable, including command-line usage errors that occur before a command handler runs. Each error is one JSON object on standard output with `ok: false`, `api_version`, `error_code`, `message`, and a non-empty `next_commands` array.
+
+- Usage and argument parsing failures use `error_code: "usage"` and exit code 10.
+- An explicit `--project` path that is missing or is not a directory uses `error_code: "project_not_found"` and exit code 10.
+- Validation and check failures include recovery commands; drifted output suggests `metactl sync --adopt preview` before `metactl sync --adopt patch`.
+
+Human-mode parse errors retain Clap's normal formatted help and diagnostics.
+
 ## Claude Code
 
 - Root instruction document: `CLAUDE.md`

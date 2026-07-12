@@ -1599,7 +1599,7 @@ fn agent_error_json(cli: &Cli, err: &CliError) -> Value {
         "command".to_string(),
         json!(command_contract_name(&cli.command)),
     );
-    obj.insert("error_code".to_string(), json!(exit_code_label(err.code)));
+    obj.insert("error_code".to_string(), json!(error_code_from_error(err)));
     obj.insert(
         "requires_operator".to_string(),
         json!(err.code == EXIT_INTERNAL),
@@ -1615,6 +1615,27 @@ fn agent_error_json(cli: &Cli, err: &CliError) -> Value {
     obj.insert("next_commands".to_string(), json!(next_commands));
     obj.insert("findings".to_string(), findings);
     value
+}
+
+fn parse_error_json(message: String) -> Value {
+    json!({
+        "ok": false,
+        "api_version": API_VERSION,
+        "command": "unknown",
+        "error_code": "usage",
+        "message": message,
+        "requires_operator": false,
+        "risk_level": "recoverable",
+        "next_commands": default_next_commands("usage"),
+        "findings": [],
+    })
+}
+
+fn error_code_from_error(err: &CliError) -> &str {
+    err.json
+        .get("error_code")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| exit_code_label(err.code))
 }
 
 fn next_commands_from_error(err: &CliError) -> Vec<String> {
@@ -1636,7 +1657,34 @@ fn next_commands_from_error(err: &CliError) -> Vec<String> {
     }
     commands.sort();
     commands.dedup();
+    if commands.is_empty() {
+        commands = default_next_commands(error_code_from_error(err));
+    }
     commands
+}
+
+fn default_next_commands(error_code: &str) -> Vec<String> {
+    match error_code {
+        "usage" => vec![
+            "metactl help --all".to_string(),
+            "metactl explain".to_string(),
+        ],
+        "project_not_found" => vec![
+            "metactl init --detect".to_string(),
+            "metactl --project <existing-project-path> status".to_string(),
+        ],
+        "validation" => vec![
+            "metactl sync --adopt preview".to_string(),
+            "metactl sync --adopt patch".to_string(),
+        ],
+        "stale_lock" => vec!["metactl compile".to_string(), "metactl doctor".to_string()],
+        "conflict" => vec![
+            "metactl sync --adopt preview".to_string(),
+            "metactl sync --adopt patch".to_string(),
+        ],
+        "internal" => vec!["metactl doctor".to_string(), "metactl explain".to_string()],
+        _ => vec!["metactl status".to_string(), "metactl doctor".to_string()],
+    }
 }
 
 fn findings_from_error_json(value: &Value) -> Value {
@@ -1749,7 +1797,26 @@ impl SharedSurfaceRule {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let raw_args = std::env::args_os().collect::<Vec<_>>();
+    let machine_requested = raw_args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg == "--agent"
+            || arg.starts_with("--agent=")
+            || arg == "--json"
+            || arg.starts_with("--json=")
+    });
+    let cli = match Cli::try_parse_from(&raw_args) {
+        Ok(cli) => cli,
+        Err(error) if machine_requested => {
+            println!(
+                "{}",
+                serde_json::to_string(&parse_error_json(error.to_string()))
+                    .unwrap_or_else(|_| "{}".to_string())
+            );
+            return ExitCode::from(EXIT_STATE);
+        }
+        Err(error) => error.exit(),
+    };
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
@@ -1785,6 +1852,7 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
+    validate_explicit_project_root(cli)?;
     let _operation_lock = if let Some(command) = mutating_operation_label(cli) {
         let project_root = operation_lock_project_root(cli)?;
         let lock = OperationLock::acquire(&project_root, command).map_err(operation_lock_error)?;
@@ -1849,6 +1917,39 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
             ),
         }),
     }
+}
+
+fn validate_explicit_project_root(cli: &Cli) -> std::result::Result<(), CliError> {
+    let Some(project_root) = cli.project.as_deref() else {
+        return Ok(());
+    };
+    if project_root.is_dir() || command_can_initialize_project_root(&cli.command) {
+        return Ok(());
+    }
+    let message = if project_root.exists() {
+        format!(
+            "Project path is not a directory: {}",
+            project_root.display()
+        )
+    } else {
+        format!(
+            "Project directory was not found: {}",
+            project_root.display()
+        )
+    };
+    let mut err = CliError::new(EXIT_STATE, message).with_details(vec![
+        "Next: metactl init --detect".to_string(),
+        "Next: metactl --project <existing-project-path> status".to_string(),
+    ]);
+    if let Some(obj) = err.json.as_object_mut() {
+        obj.insert("error_code".to_string(), json!("project_not_found"));
+        obj.insert("project_root".to_string(), json!(project_root));
+    }
+    Err(err)
+}
+
+fn command_can_initialize_project_root(command: &Commands) -> bool {
+    matches!(command, Commands::Init(_) | Commands::Setup(_))
 }
 
 fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {

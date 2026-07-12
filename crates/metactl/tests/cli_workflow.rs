@@ -7,6 +7,8 @@ use tempfile::TempDir;
 
 #[path = "cli_workflow/compile.rs"]
 mod compile_workflow;
+#[path = "cli_workflow/error_paths.rs"]
+mod error_paths_workflow;
 #[path = "cli_workflow/explain_status.rs"]
 mod explain_status_workflow;
 #[path = "cli_workflow/fleet.rs"]
