@@ -4,6 +4,7 @@
   "aliases": ["claude"],
   "version": "2026.03.26",
   "title": "Claude Code",
+  "apply_modes": ["copy", "symlink", "patch", "import_stub"],
   "capabilities": {
     "layered_instructions": true,
     "skill_folders": true,
@@ -27,6 +28,7 @@
     {
       "output_kind": "claude_md",
       "path_template": "CLAUDE.md",
+      "import_stub_path": "AGENTS.md",
       "instruction_mode": "reference_index"
     },
     {

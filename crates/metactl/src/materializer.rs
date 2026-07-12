@@ -821,7 +821,7 @@ fn plan_apply(
                             }));
                         }
                     }
-                    ApplyMode::Copy => {
+                    ApplyMode::Copy | ApplyMode::ImportStub => {
                         let kind = if managed_instruction_marker.is_some() {
                             ActionKind::PatchManaged
                         } else if merge_json {

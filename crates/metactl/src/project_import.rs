@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::anyhow;
 use clap::{Args, Subcommand, ValueEnum};
 use metactl::project::{
-    digest_path, ensure_gitignore_entries, ensure_project_layout, load_lock,
+    atomic_write, digest_path, ensure_gitignore_entries, ensure_project_layout, load_lock,
     load_partial_project_config, load_project_context, project_config_path, project_lock_path,
     write_lock, write_partial_project_config, PartialProjectConfig, ProjectConfigDefaults,
     ProjectConfigFile, SourceRecord, SourceVisibility,
@@ -169,6 +169,37 @@ struct ProjectImportCandidate {
     profile: Option<String>,
     status: &'static str,
     source: &'static str,
+    importer: Option<CompetitorImporter>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompetitorImporter {
+    Ruler,
+    AgentSync,
+}
+
+impl CompetitorImporter {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ruler => "ruler",
+            Self::AgentSync => "agentsync",
+        }
+    }
+
+    fn marker_dir(self) -> &'static str {
+        match self {
+            Self::Ruler => ".ruler",
+            Self::AgentSync => ".agents",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompetitorImport {
+    pack_id: String,
+    artifacts: Vec<Value>,
+    unmapped: Vec<Value>,
+    files: Vec<(PathBuf, Vec<u8>)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,6 +347,7 @@ struct ProjectImportPlan {
     equivalence: &'static str,
     warnings: Vec<Value>,
     source_summary: Value,
+    competitor: Option<CompetitorImport>,
 }
 
 pub(super) fn cmd_project_import(
@@ -783,6 +815,34 @@ fn build_project_import_plan(
             vec![format!("Check {}", candidate.config_path.display())],
         ));
     }
+    if let Some(importer) = candidate.importer {
+        let competitor = build_competitor_import(project_root, &candidate, importer)?;
+        let mut fields = BTreeSet::new();
+        fields.insert(ProjectImportField::Packs);
+        fields.insert(ProjectImportField::Sources);
+        return Ok(ProjectImportPlan {
+            candidate,
+            mode: ProjectImportResolvedMode::Explicit,
+            fields,
+            projected_config: PartialProjectConfig {
+                packs: vec![competitor.pack_id.clone()],
+                sources: vec![SourceRecord {
+                    id: format!("imported-{}", importer.as_str()),
+                    source_type: Default::default(),
+                    path: Some(format!("metactl-imports/{}", importer.as_str())),
+                    url: None,
+                    ref_: None,
+                    visibility: SourceVisibility::Private,
+                    lock_publicity: Default::default(),
+                }],
+                ..Default::default()
+            },
+            equivalence: "imported",
+            warnings: Vec::new(),
+            source_summary: json!({"importer": importer.as_str()}),
+            competitor: Some(competitor),
+        });
+    }
     let raw = load_partial_project_config(&candidate.config_path).map_err(state_error)?;
     let source_context =
         load_project_context(&candidate.path, None, candidate.profile.as_deref(), None);
@@ -840,6 +900,7 @@ fn build_project_import_plan(
         equivalence,
         warnings,
         source_summary,
+        competitor: None,
     })
 }
 
@@ -866,6 +927,12 @@ fn project_import_plan_output(
             ));
         }
     }
+    if let Some(competitor) = &plan.competitor {
+        lines.push(format!("  Artifacts: {}", competitor.artifacts.len()));
+        if !competitor.unmapped.is_empty() {
+            lines.push(format!("  Unmapped: {}", competitor.unmapped.len()));
+        }
+    }
     let command_selector = project_import_command_selector(&plan.candidate);
     lines.push(format!(
         "Next: metactl project import apply {} --yes",
@@ -885,9 +952,11 @@ fn project_import_plan_output(
                 "projected_config": plan.projected_config,
                 "source_summary": plan.source_summary,
                 "warnings": plan.warnings,
+                "artifacts": plan.competitor.as_ref().map(|item| item.artifacts.clone()).unwrap_or_default(),
+                "unmapped": plan.competitor.as_ref().map(|item| item.unmapped.clone()).unwrap_or_default(),
                 "next_commands": [
                     format!("metactl project import apply {} --yes", command_selector),
-                    "metactl sync --preview".to_string(),
+                    "metactl sync --adopt preview".to_string(),
                 ],
             }),
         ),
@@ -941,6 +1010,14 @@ fn apply_project_import_plan(
         (Some(_), ProjectImportApplyMode::Create) => unreachable!(),
     };
     write_partial_project_config(&config_path, &final_config).map_err(internal_error)?;
+    let created_artifacts = if let Some(competitor) = &plan.competitor {
+        for (path, contents) in &competitor.files {
+            atomic_write(path, contents).map_err(internal_error)?;
+        }
+        competitor.artifacts.clone()
+    } else {
+        Vec::new()
+    };
     write_project_import_lock(project_root, &config_path, &final_config)?;
     Ok(CommandOutput {
         human: project_human_output(
@@ -967,10 +1044,107 @@ fn apply_project_import_plan(
                 "source": project_import_candidate_json(&plan.candidate),
                 "fields": project_import_field_labels(&plan.fields),
                 "warnings": plan.warnings,
-                "next_commands": ["metactl sync --preview", "metactl status"],
+                "created_artifacts": created_artifacts,
+                "unmapped": plan.competitor.as_ref().map(|item| item.unmapped.clone()).unwrap_or_default(),
+                "next_commands": ["metactl sync --adopt preview", "metactl status"],
             }),
         ),
     })
+}
+
+fn build_competitor_import(
+    project_root: &Path,
+    candidate: &ProjectImportCandidate,
+    importer: CompetitorImporter,
+) -> std::result::Result<CompetitorImport, CliError> {
+    let source_root = candidate.path.join(importer.marker_dir());
+    let mut entries = Vec::new();
+    collect_competitor_files(&source_root, &source_root, &mut entries).map_err(internal_error)?;
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut instruction_parts = Vec::new();
+    let mut unmapped = Vec::new();
+    for (relative, path) in entries {
+        let is_markdown = path.extension().and_then(|item| item.to_str()) == Some("md");
+        if is_markdown {
+            let text = fs::read_to_string(&path).map_err(internal_error)?;
+            instruction_parts.push(format!(
+                "<!-- imported from {}/{} -->\n{}",
+                importer.marker_dir(),
+                relative,
+                text
+            ));
+        } else {
+            unmapped.push(json!({
+                "path": format!("{}/{}", importer.marker_dir(), relative),
+                "reason": "no_lossless_metactl_mapping",
+            }));
+        }
+    }
+    if instruction_parts.is_empty() {
+        return Err(project_import_error(
+            "no_importable_instructions",
+            format!(
+                "{} contains no Markdown instruction files.",
+                source_root.display()
+            ),
+            vec!["Add a Markdown instruction file or inspect the source layout.".to_string()],
+        ));
+    }
+    let kind = importer.as_str();
+    let destination = project_root.join("metactl-imports").join(kind);
+    let pack_id = format!("imported-{kind}");
+    let instruction_relative = format!("instructions/{kind}.md");
+    let manifest_relative = format!("packs/{pack_id}.json");
+    let manifest = json!({
+        "kind": "pack",
+        "id": pack_id,
+        "version": "0.1.0",
+        "title": format!("Imported {} instructions", if kind == "ruler" { "Ruler" } else { "AgentSync" }),
+        "description": format!("Read-only import from {}.", importer.marker_dir()),
+        "activation_class": "instruction",
+        "side_effect_class": "none",
+        "trust_tier": "external_unreviewed",
+        "requires_confirmation": false,
+        "resources": [{"path": instruction_relative, "kind": "instruction", "required": true}],
+        "imports": [{"ecosystem": "third_party", "origin": importer.marker_dir()}],
+        "visibility_scope": "private",
+    });
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(internal_error)?;
+    let instruction = instruction_parts.join("\n\n");
+    Ok(CompetitorImport {
+        pack_id,
+        artifacts: vec![json!({"kind": "instruction_pack", "path": destination.to_string_lossy()})],
+        unmapped,
+        files: vec![
+            (destination.join(manifest_relative), manifest_bytes),
+            (
+                destination.join(instruction_relative),
+                instruction.into_bytes(),
+            ),
+        ],
+    })
+}
+
+fn collect_competitor_files(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<(String, PathBuf)>,
+) -> std::io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_competitor_files(root, &path, entries)?;
+        } else if path.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            entries.push((relative, path));
+        }
+    }
+    Ok(())
 }
 
 fn project_import_apply_mode(
@@ -1090,6 +1264,7 @@ fn push_linked_project_candidates(
                 profile: project.profile.clone(),
                 status,
                 source,
+                importer: None,
             },
         );
     }
@@ -1106,7 +1281,8 @@ fn push_search_root_candidates(
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     while let Some((dir, depth)) = stack.pop() {
         let config_path = dir.join("metactl.yaml");
-        if config_path.exists() {
+        let importer = competitor_importer_for_path(&dir);
+        if config_path.exists() || importer.is_some() {
             let name = dir
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -1122,7 +1298,10 @@ fn push_search_root_candidates(
                     config_path,
                     profile: None,
                     status: "ready",
-                    source: "search_root",
+                    source: importer
+                        .map(CompetitorImporter::as_str)
+                        .unwrap_or("search_root"),
+                    importer,
                 },
             );
             continue;
@@ -1232,9 +1411,10 @@ fn direct_project_import_candidate(
         .and_then(|name| name.to_str())
         .unwrap_or("project")
         .to_string();
+    let importer = competitor_importer_for_path(&path);
     let status = if !path.exists() {
         "missing_path"
-    } else if !config_path.exists() {
+    } else if !config_path.exists() && importer.is_none() {
         "missing_config"
     } else {
         "ready"
@@ -1246,7 +1426,10 @@ fn direct_project_import_candidate(
         config_path,
         profile: None,
         status,
-        source: "direct_path",
+        source: importer
+            .map(CompetitorImporter::as_str)
+            .unwrap_or("direct_path"),
+        importer,
     })
 }
 
@@ -1273,6 +1456,16 @@ fn resolve_import_path(project_root: &Path, path: &Path) -> PathBuf {
         resolve_user_path(&path.to_string_lossy())
     } else {
         project_root.join(path)
+    }
+}
+
+fn competitor_importer_for_path(path: &Path) -> Option<CompetitorImporter> {
+    if path.join(".ruler").is_dir() {
+        Some(CompetitorImporter::Ruler)
+    } else if path.join(".agents").is_dir() {
+        Some(CompetitorImporter::AgentSync)
+    } else {
+        None
     }
 }
 
@@ -1745,9 +1938,10 @@ fn project_import_candidate_json(candidate: &ProjectImportCandidate) -> Value {
 }
 
 fn project_import_command_selector(candidate: &ProjectImportCandidate) -> String {
-    match candidate.source {
-        "direct_path" | "search_root" => candidate.path.to_string_lossy().to_string(),
-        _ => candidate.id.clone(),
+    if candidate.importer.is_some() || matches!(candidate.source, "direct_path" | "search_root") {
+        candidate.path.to_string_lossy().to_string()
+    } else {
+        candidate.id.clone()
     }
 }
 

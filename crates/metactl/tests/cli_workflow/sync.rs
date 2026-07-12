@@ -3,6 +3,114 @@ use super::*;
 // Sync, apply, and generated-output workflow tests.
 
 #[test]
+fn cli_compile_apply_import_stub_bridges_claude_to_agents_and_detects_drift() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let first = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+
+    let claude_path = project.path().join("CLAUDE.md");
+    let stub = fs::read_to_string(&claude_path).expect("read CLAUDE.md stub");
+    assert!(
+        stub.contains("metactl:begin"),
+        "missing managed marker: {stub}"
+    );
+    assert!(stub.contains("@AGENTS.md"), "missing Claude import: {stub}");
+    assert!(stub.contains("Do not edit"), "missing edit warning: {stub}");
+
+    let repeat = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(repeat.status.success(), "{}", stderr(&repeat));
+    assert_eq!(
+        fs::read_to_string(&claude_path).expect("read re-synced CLAUDE.md stub"),
+        stub
+    );
+
+    fs::write(&claude_path, "manual drift\n").expect("tamper stub");
+    let validate = run_cli(project.path(), &["validate"]);
+    assert!(
+        !validate.status.success(),
+        "tampered stub should fail validation"
+    );
+    assert!(
+        stderr(&validate).contains("drift") || stdout(&validate).contains("drift"),
+        "validate should report drift: {} {}",
+        stdout(&validate),
+        stderr(&validate)
+    );
+}
+
+#[test]
+fn cli_import_stub_preserves_brownfield_claude_guidance_after_adoption() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let claude_path = project.path().join("CLAUDE.md");
+    fs::write(
+        &claude_path,
+        "# Repository guidance\n\nkeep this guidance\n",
+    )
+    .expect("seed brownfield CLAUDE.md");
+    let adopt = run_cli(project.path(), &["sync", "--adopt", "patch"]);
+    assert!(adopt.status.success(), "{}", stderr(&adopt));
+
+    let bridge = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(bridge.status.success(), "{}", stderr(&bridge));
+    let contents = fs::read_to_string(&claude_path).expect("read adopted bridge stub");
+    assert!(contents.contains("keep this guidance"), "{contents}");
+    assert!(contents.contains("@AGENTS.md"), "{contents}");
+    assert_eq!(
+        contents.matches("metactl:begin claude-md").count(),
+        1,
+        "{contents}"
+    );
+}
+
+#[test]
+fn sync_apply_warns_for_dirty_git_worktree_but_clean_sync_does_not() {
+    let dirty = TempDir::new().expect("dirty project");
+    init_project(dirty.path());
+    let git_init = Command::new("git")
+        .args([
+            "-C",
+            dirty.path().to_str().expect("dirty path"),
+            "init",
+            "--quiet",
+        ])
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "{}", stderr(&git_init));
+    fs::write(dirty.path().join("local-edit.txt"), "dirty\n").expect("dirty file");
+
+    let dirty_output = run_cli(dirty.path(), &["--json", "sync"]);
+    assert!(dirty_output.status.success(), "{}", stderr(&dirty_output));
+    let dirty_json = json_output(&dirty_output);
+    assert_eq!(dirty_json["worktree_dirty"], true);
+    assert!(dirty_json["warnings"]
+        .as_array()
+        .is_some_and(|warnings| !warnings.is_empty()));
+
+    let clean = TempDir::new().expect("clean project");
+    init_project(clean.path());
+    let clean_output = run_cli(clean.path(), &["--json", "sync"]);
+    assert!(clean_output.status.success(), "{}", stderr(&clean_output));
+    let clean_json = json_output(&clean_output);
+    assert!(clean_json.get("worktree_dirty").is_none());
+    assert!(clean_json.get("warnings").is_none());
+}
+
+#[test]
 fn agent_sync_preview_bounds_generated_paths_unless_full_is_requested() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
