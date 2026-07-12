@@ -303,6 +303,7 @@ pub enum SurfaceRelevanceTier {
 pub enum ApplyMode {
     Symlink,
     Copy,
+    ImportStub,
     Patch,
     Takeover,
 }
@@ -690,6 +691,10 @@ pub struct CompileTarget {
     pub resource_kinds: Vec<ResourceKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instruction_mode: Option<InstructionProjectionMode>,
+    /// Relative instruction document imported when this target is materialized
+    /// with `import_stub`. The target adapter owns this syntax-specific path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub import_stub_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_selection_mode: Option<SurfaceSelectionMode>,
     #[serde(default)]

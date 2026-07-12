@@ -30,6 +30,8 @@ Run `metactl explain --capabilities --json` from any directory to obtain the sta
 - Root instruction document: `CLAUDE.md`
 - Skills: `.claude/skills/<pack_id>/<surface_slug>/SKILL.md`
 - Optional local-only document: `CLAUDE.local.md`
+- Root-document modes: `copy` writes the generated document, `symlink` links compatible generated output while preserving root instruction documents as regular files, and opt-in `import-stub` writes a managed `CLAUDE.md` containing `@AGENTS.md`.
+- Choose `import-stub` when `AGENTS.md` is the shared source of truth for both Codex and Claude Code. The stub is managed by metactl; edit `AGENTS.md`, not the stub.
 
 ## Codex CLI
 

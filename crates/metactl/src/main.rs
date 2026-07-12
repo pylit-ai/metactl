@@ -1454,6 +1454,7 @@ struct ApplyArgs {
 enum ApplyModeArg {
     Symlink,
     Copy,
+    ImportStub,
     Patch,
     Takeover,
 }
@@ -1484,6 +1485,7 @@ impl From<ApplyModeArg> for ApplyMode {
         match value {
             ApplyModeArg::Symlink => ApplyMode::Symlink,
             ApplyModeArg::Copy => ApplyMode::Copy,
+            ApplyModeArg::ImportStub => ApplyMode::ImportStub,
             ApplyModeArg::Patch => ApplyMode::Patch,
             ApplyModeArg::Takeover => ApplyMode::Takeover,
         }
@@ -7707,11 +7709,18 @@ fn cmd_compile_with_durable_writes(
             })
             .map_err(state_error)?;
         let preferred_apply_mode = preferred_apply_mode_for_target(&target, None);
+        let compile_apply_mode = if args.apply {
+            args.apply_mode
+                .map(ApplyMode::from)
+                .unwrap_or_else(|| preferred_apply_mode.clone())
+        } else {
+            preferred_apply_mode.clone()
+        };
         let mut compile = kernel
             .compile(CompileParams {
                 resolve_graph,
                 target_capability: target.clone(),
-                apply_mode: preferred_apply_mode.clone(),
+                apply_mode: compile_apply_mode,
                 surface_selection_mode,
                 emit_policy_report: true,
                 durable_staging: durable_writes,
