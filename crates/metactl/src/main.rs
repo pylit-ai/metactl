@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use anyhow::{anyhow, Context, Result};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use metactl::project::{
     append_history_entry, atomic_write, atomic_write_relaxed, brownfield_adoption_hint,
     builtin_profile_templates, bundled_starter_library_root, compile_manifest_path,
@@ -16,9 +16,9 @@ use metactl::project::{
     ensure_bundled_starter_library_root, ensure_gitignore_entries, ensure_project_layout,
     is_candidate_pack, list_user_profiles, load_compile_manifest, load_lock,
     load_partial_project_config, load_policy_report, load_profile_partial, load_project_context,
-    load_user_settings, metactl_user_config_dir, policy_report_path,
-    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
-    project_config_path, project_lock_path, resolve_profile_name_for_init,
+    load_project_context_with_profile_preferences, load_user_settings, metactl_user_config_dir,
+    policy_report_path, preferred_apply_mode_for_target, private_source_lock_path, profile_path,
+    profiles_directory, project_config_path, project_lock_path, resolve_profile_name_for_init,
     resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
     update_managed_files_index, user_settings_path, write_lock, write_lock_relaxed,
     write_partial_project_config, write_policy_report, write_policy_report_relaxed,
@@ -42,6 +42,7 @@ use metactl::{
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+mod noise_report;
 mod project_import;
 mod setup;
 use project_import::{
@@ -60,6 +61,7 @@ const EXIT_VALIDATION: u8 = 13;
 
 const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills under .codex/skills are visible to Codex sessions opened in that repository. User-global Personal skills live under ~/.codex/skills.";
 const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills.";
+const MACHINE_LIST_LIMIT: usize = 15;
 const AGENT_ARTIFACT_POLICY_METADATA_KEY: &str = "agent_artifact_policy";
 const AGENT_ARTIFACT_STEWARDSHIP_PACK: &str = "agentic-artifact-forge";
 
@@ -68,38 +70,30 @@ Quick start:
   metactl setup                  # human-friendly setup
   metactl setup --plan            # inspect equivalent commands without writing
   metactl setup -t codex-cli --artifact-policy portable-first -y
-  metactl init -t claude-code        # scaffold a project for Claude Code
-  metactl init -t all                # scaffold for every starter-supported target
-  metactl init --detect              # detect targets from existing repo surfaces
-  metactl profile set-default NAME   # machine default profile for init when no --profile
-  metactl init --bind-profile        # record the active machine default in metactl.yaml
-  metactl preview                    # compile and preview generated changes without applying
   metactl use python-refactor        # resolve, add, and sync a pack in one step
-  metactl add python-refactor        # import a pack from the library
-  metactl skills audit               # audit local and generated skill surfaces
-  metactl add <pack> --sync          # add (or already added) then sync in one step
   metactl demo create                # create a disposable brownfield sandbox
-  metactl target add cursor          # add another target without editing YAML
+  metactl sync --preview             # preview generated changes without applying
   metactl sync                       # compile + apply in one command
   metactl status                     # see what is configured and applied
-  metactl ignore install             # hide generated agent surfaces from local git status
+  metactl validate                   # check staged/applied outputs and drift
+  metactl verify                     # alias for validate
+  metactl doctor                     # run health checks
 
-Common workflow:
-  metactl init -t codex-cli  Create project config and layout (or use a default profile)
+Daily commands:
+  metactl setup       Plan or create a metactl project
   metactl use <pack>  Resolve, add, and sync a pack in one step
-  metactl add <pack>  Import packs from the starter library
   metactl sync        Compile + apply all targets in one step
-  metactl status      Show project config, targets, and readiness
+  metactl status      Show readiness, drift, and next actions
+  metactl validate    Check generated surfaces and policy
   metactl doctor      Run health checks
-  metactl revert      Remove applied outputs
+  metactl demo        Create or remove a disposable sandbox
 
-Expert primitives:
-  metactl search \"python refactor\"
-  metactl source add <path>          # infer source id, or pass <name> <path>
-  metactl explain
-  metactl compile
-  metactl apply
-  metactl validate
+Run 'metactl help --all' to list advanced commands.
+
+Advanced commands:
+  Existing commands such as init, add, target, list, search, compile, apply,
+  revert, fleet, ignore, audit, source, profile, and hook remain callable for
+  scripts and expert workflows. Use `metactl help <command>` for command help.
 
 Exit codes:
   0  success or warnings
@@ -134,6 +128,9 @@ struct Cli {
     /// Merge defaults from `$XDG_CONFIG_HOME/metactl/profiles/<PROFILE>.yaml` (or `~/.config/...`; also `METACTL_PROFILE`). Overrides `extends_profile` and machine `default_profile` in `config.yaml`.
     #[arg(long, global = true, env = "METACTL_PROFILE")]
     profile: Option<String>,
+    /// Disable the machine user-default profile for this invocation
+    #[arg(long, global = true, conflicts_with = "profile")]
+    no_profile: bool,
     /// Override the config file path (default: metactl.yaml)
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
@@ -143,6 +140,9 @@ struct Cli {
     /// Show additional detail (surface info, resolve graphs, etc.)
     #[arg(long, short = 'v', global = true)]
     verbose: bool,
+    /// Emit complete machine-readable lists instead of bounded previews
+    #[arg(long, global = true)]
+    full: bool,
     /// Suppress all human output (exit code only)
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
@@ -163,76 +163,106 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     /// Create metactl.yaml, .metactl/, and starter layout in the project
+    #[command(hide = true)]
     Init(InitArgs),
     /// Guided first-run setup with plan-first and agent-safe paths
     Setup(SetupArgs),
     /// Manage the user-private library lifecycle
+    #[command(hide = true)]
     Library(LibraryArgs),
     /// Import, export, and verify portable Agent Skill folders as metactl packs
+    #[command(hide = true)]
     Pack(PackArgs),
     /// Manage repo-local and user-global Codex Agent Skill visibility
+    #[command(hide = true)]
     Skills(SkillsArgs),
     /// Project packs into local runtime plugin marketplace bundles
+    #[command(hide = true)]
     Plugin(PluginArgs),
     /// Create explicit public example or sanitized export records
+    #[command(hide = true)]
     Export(ExportArgs),
     /// Create and remove disposable brownfield demo sandboxes
     Demo(DemoArgs),
     /// Run the public/private boundary scanner for this project
+    #[command(hide = true)]
     CheckPublicBoundary,
     /// Link the current project to an explicit profile
+    #[command(hide = true)]
     Project(ProjectArgs),
     /// Activate a pack in the current project (resolve, add, and sync in one step)
     Use(UseArgs),
     /// Add packs from the starter library to the project config
+    #[command(hide = true)]
     Add(AddArgs),
     /// Remove packs from the project config
+    #[command(hide = true)]
     Remove(RemoveArgs),
     /// List, add, or remove configured targets
+    #[command(hide = true)]
     Target(TargetArgs),
     /// Preview and apply explicit sync across linked local projects
+    #[command(hide = true)]
     Fleet(FleetArgs),
     /// Show project config, targets, and sync readiness at a glance
     Status(StatusArgs),
     /// List roles, packs, policies, or targets from the library or project
+    #[command(hide = true)]
     List(ListArgs),
     /// Search the pack corpus for a natural-language or keyword query
+    #[command(hide = true)]
     Search(SearchArgs),
     /// Rebuild and inspect local surface usage stats
+    #[command(hide = true)]
     Stats(StatsArgs),
     /// Report and override automatic command/skill surface recommendations
+    #[command(hide = true)]
     Surface(SurfaceArgs),
     /// Install, inspect, and run report-only background surface refreshes
+    #[command(hide = true)]
     Background(BackgroundArgs),
     /// Show why packs and targets were selected for the current config
+    #[command(hide = true)]
     Explain(ExplainArgs),
     /// Alias for `metactl sync --preview`
+    #[command(hide = true)]
     Preview(SyncArgs),
     /// Compile + apply all targets in one step (the main workflow command)
     Sync(SyncArgs),
     /// Resolve and compile staged outputs under .metactl/generated/ (use `--apply` to materialize)
+    #[command(hide = true)]
     Compile(CompileArgs),
     /// Materialize staged outputs into the repo (symlink, copy, patch, …)
+    #[command(hide = true)]
     Apply(ApplyArgs),
     /// Remove applied outputs tracked for a target (or all targets)
+    #[command(hide = true)]
     Revert(RevertArgs),
     /// Check staged vs applied outputs, policy, and drift for a target
+    #[command(alias = "verify")]
     Validate(ValidateCmdArgs),
     /// Alias for validate, with v1 strict-check wording
+    #[command(hide = true)]
     Check(ValidateCmdArgs),
     /// Run quick health checks (config, lock, starter library, …)
     Doctor(DoctorArgs),
     /// Audit source privacy and leak posture
+    #[command(hide = true)]
     Audit(AuditArgs),
     /// Manage ignore files for generated agent surfaces
+    #[command(hide = true)]
     Ignore(IgnoreArgs),
     /// Manage sync hooks (post-checkout, post-merge)
+    #[command(hide = true)]
     Hook(HookArgs),
     /// Manage pack sources (local paths and import roots)
+    #[command(hide = true)]
     Source(SourceArgs),
     /// Manage machine-local profiles and default profile selection
+    #[command(hide = true)]
     Profile(ProfileArgs),
     /// Print CLI and kernel API version
+    #[command(hide = true)]
     Version,
 }
 
@@ -1325,6 +1355,9 @@ struct SurfaceResetArgs {
 
 #[derive(Debug, Args)]
 struct ExplainArgs {
+    /// Describe the machine-readable command and target capability contract
+    #[arg(long)]
+    capabilities: bool,
     /// Optional query context to explain selections for
     #[arg(long)]
     query: Option<String>,
@@ -1421,6 +1454,7 @@ struct ApplyArgs {
 enum ApplyModeArg {
     Symlink,
     Copy,
+    ImportStub,
     Patch,
     Takeover,
 }
@@ -1451,6 +1485,7 @@ impl From<ApplyModeArg> for ApplyMode {
         match value {
             ApplyModeArg::Symlink => ApplyMode::Symlink,
             ApplyModeArg::Copy => ApplyMode::Copy,
+            ApplyModeArg::ImportStub => ApplyMode::ImportStub,
             ApplyModeArg::Patch => ApplyMode::Patch,
             ApplyModeArg::Takeover => ApplyMode::Takeover,
         }
@@ -1580,7 +1615,7 @@ fn agent_error_json(cli: &Cli, err: &CliError) -> Value {
         "command".to_string(),
         json!(command_contract_name(&cli.command)),
     );
-    obj.insert("error_code".to_string(), json!(exit_code_label(err.code)));
+    obj.insert("error_code".to_string(), json!(error_code_from_error(err)));
     obj.insert(
         "requires_operator".to_string(),
         json!(err.code == EXIT_INTERNAL),
@@ -1596,6 +1631,27 @@ fn agent_error_json(cli: &Cli, err: &CliError) -> Value {
     obj.insert("next_commands".to_string(), json!(next_commands));
     obj.insert("findings".to_string(), findings);
     value
+}
+
+fn parse_error_json(message: String) -> Value {
+    json!({
+        "ok": false,
+        "api_version": API_VERSION,
+        "command": "unknown",
+        "error_code": "usage",
+        "message": message,
+        "requires_operator": false,
+        "risk_level": "recoverable",
+        "next_commands": default_next_commands("usage"),
+        "findings": [],
+    })
+}
+
+fn error_code_from_error(err: &CliError) -> &str {
+    err.json
+        .get("error_code")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| exit_code_label(err.code))
 }
 
 fn next_commands_from_error(err: &CliError) -> Vec<String> {
@@ -1617,7 +1673,34 @@ fn next_commands_from_error(err: &CliError) -> Vec<String> {
     }
     commands.sort();
     commands.dedup();
+    if commands.is_empty() {
+        commands = default_next_commands(error_code_from_error(err));
+    }
     commands
+}
+
+fn default_next_commands(error_code: &str) -> Vec<String> {
+    match error_code {
+        "usage" => vec![
+            "metactl help --all".to_string(),
+            "metactl explain".to_string(),
+        ],
+        "project_not_found" => vec![
+            "metactl init --detect".to_string(),
+            "metactl --project <existing-project-path> status".to_string(),
+        ],
+        "validation" => vec![
+            "metactl sync --adopt preview".to_string(),
+            "metactl sync --adopt patch".to_string(),
+        ],
+        "stale_lock" => vec!["metactl compile".to_string(), "metactl doctor".to_string()],
+        "conflict" => vec![
+            "metactl sync --adopt preview".to_string(),
+            "metactl sync --adopt patch".to_string(),
+        ],
+        "internal" => vec!["metactl doctor".to_string(), "metactl explain".to_string()],
+        _ => vec!["metactl status".to_string(), "metactl doctor".to_string()],
+    }
 }
 
 fn findings_from_error_json(value: &Value) -> Value {
@@ -1730,13 +1813,37 @@ impl SharedSurfaceRule {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let raw_args = std::env::args_os().collect::<Vec<_>>();
+    if wants_full_help(&raw_args) {
+        println!("{}", full_help());
+        return ExitCode::SUCCESS;
+    }
+    let machine_requested = raw_args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg == "--agent"
+            || arg.starts_with("--agent=")
+            || arg == "--json"
+            || arg.starts_with("--json=")
+    });
+    let cli = match Cli::try_parse_from(&raw_args) {
+        Ok(cli) => cli,
+        Err(error) if machine_requested => {
+            println!(
+                "{}",
+                serde_json::to_string(&parse_error_json(error.to_string()))
+                    .unwrap_or_else(|_| "{}".to_string())
+            );
+            return ExitCode::from(EXIT_STATE);
+        }
+        Err(error) => error.exit(),
+    };
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
+                let json = bounded_machine_json(output.json, cli.full);
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&output.json).unwrap_or_else(|_| "{}".to_string())
+                    serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
                 );
             } else if !cli.quiet {
                 println!("{}", output.human);
@@ -1745,11 +1852,12 @@ fn main() -> ExitCode {
         }
         Err(err) => {
             if cli.machine_output() {
-                let json = if cli.agent {
+                let json = if cli.agent || matches!(&cli.command, Commands::Fleet(_)) {
                     agent_error_json(&cli, &err)
                 } else {
                     err.json.clone()
                 };
+                let json = bounded_machine_json(json, cli.full);
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
@@ -1765,7 +1873,24 @@ fn main() -> ExitCode {
     }
 }
 
+fn wants_full_help(args: &[std::ffi::OsString]) -> bool {
+    let has_all = args.iter().any(|arg| arg == "--all");
+    if !has_all {
+        return false;
+    }
+    args.iter().any(|arg| arg == "help") || args.iter().any(|arg| arg == "--help")
+}
+
+fn full_help() -> String {
+    let mut command = Cli::command();
+    command.get_subcommands_mut().for_each(|subcommand| {
+        *subcommand = subcommand.clone().hide(false);
+    });
+    command.render_long_help().to_string()
+}
+
 fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
+    validate_explicit_project_root(cli)?;
     let _operation_lock = if let Some(command) = mutating_operation_label(cli) {
         let project_root = operation_lock_project_root(cli)?;
         let lock = OperationLock::acquire(&project_root, command).map_err(operation_lock_error)?;
@@ -1830,6 +1955,39 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
             ),
         }),
     }
+}
+
+fn validate_explicit_project_root(cli: &Cli) -> std::result::Result<(), CliError> {
+    let Some(project_root) = cli.project.as_deref() else {
+        return Ok(());
+    };
+    if project_root.is_dir() || command_can_initialize_project_root(&cli.command) {
+        return Ok(());
+    }
+    let message = if project_root.exists() {
+        format!(
+            "Project path is not a directory: {}",
+            project_root.display()
+        )
+    } else {
+        format!(
+            "Project directory was not found: {}",
+            project_root.display()
+        )
+    };
+    let mut err = CliError::new(EXIT_STATE, message).with_details(vec![
+        "Next: metactl init --detect".to_string(),
+        "Next: metactl --project <existing-project-path> status".to_string(),
+    ]);
+    if let Some(obj) = err.json.as_object_mut() {
+        obj.insert("error_code".to_string(), json!("project_not_found"));
+        obj.insert("project_root".to_string(), json!(project_root));
+    }
+    Err(err)
+}
+
+fn command_can_initialize_project_root(command: &Commands) -> bool {
+    matches!(command, Commands::Init(_) | Commands::Setup(_))
 }
 
 fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
@@ -2416,7 +2574,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
     ensure_project_layout(&project_root).map_err(internal_error)?;
     ensure_gitignore_entries(&project_root).map_err(internal_error)?;
 
-    let init_resolution = resolve_profile_name_for_init(cli.profile.as_deref());
+    let init_resolution = resolve_profile_name_for_init(cli.profile.as_deref(), cli.no_profile);
     if args.bind_profile && init_resolution.name.is_none() {
         return Err(CliError::new(
             EXIT_STATE,
@@ -2648,10 +2806,11 @@ Restore from version control or a backup if that was unintended.",
         && !args.bind_profile
         && init_resolution.name.is_some()
     {
-        human.push_str(
-            "\n\nNote: Applied machine default profile from user settings locally (not written to metactl.yaml). \
-Leave it this way for a portable repo, or run `metactl init --bind-profile` if this repo should track that profile.",
-        );
+        human.push_str(&format!(
+            "\n\n{}",
+            profile_resolution_notice(&profile_resolution_from_resolution(&init_resolution))
+                .unwrap_or_default()
+        ));
     }
 
     Ok(CommandOutput {
@@ -2666,15 +2825,7 @@ Leave it this way for a portable repo, or run `metactl init --bind-profile` if t
                 "starter_library": config.starter_library,
                 "targets": config.targets,
                 "extends_profile": config.extends_profile,
-                "profile_resolution": {
-                    "name": init_resolution.name,
-                    "activation_source": match init_resolution.source {
-                        Some(ProfileActivationSource::Cli) => json!("cli"),
-                        Some(ProfileActivationSource::ProjectExtends) => json!("project_extends"),
-                        Some(ProfileActivationSource::UserDefault) => json!("user_default"),
-                        None => Value::Null,
-                    },
-                },
+                "profile_resolution": profile_resolution_from_resolution(&init_resolution),
                 "reinitialized": reinitialized,
             }),
         ),
@@ -4396,14 +4547,9 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             results.push(result);
             continue;
         }
-        if !args.allow_dirty && git_worktree_dirty(&project.path).map_err(internal_error)? {
-            result["status"] = json!("failed");
-            result["result"] = json!("dirty_worktree");
-            result["message"] = json!(
-                "dirty Git worktree; review and commit/stash changes, or rerun with --allow-dirty"
-            );
-            results.push(result);
-            continue;
+        if git_worktree_dirty(&project.path) {
+            result["worktree_dirty"] = json!(true);
+            result["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
         }
         match run_project_sync(project, fleet_sync_adopt) {
             Ok(sync_json) => {
@@ -4437,6 +4583,9 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             item["status"].as_str().unwrap_or("?"),
             item["path"].as_str().unwrap_or("?")
         ));
+        if item["worktree_dirty"] == true {
+            lines.push(format!("    Warning: {DIRTY_WORKTREE_WARNING}"));
+        }
     }
     append_fleet_codex_skill_scope_note(&mut lines);
     let mut json_payload = success_json(
@@ -4450,6 +4599,10 @@ fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<Comman
             "scope_note": CODEX_FLEET_SCOPE_NOTE,
         }),
     );
+    if results.iter().any(|item| item["worktree_dirty"] == true) {
+        json_payload["worktree_dirty"] = json!(true);
+        json_payload["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
+    }
     if failed {
         let details = fleet_sync_failure_details(&results);
         let mut err = CliError::new(EXIT_STATE, "one or more fleet projects failed");
@@ -4636,11 +4789,12 @@ fn load_required_context_for_path(
     cli: &Cli,
     project_root: &Path,
 ) -> std::result::Result<metactl::project::ProjectContext, CliError> {
-    load_project_context(
+    load_project_context_with_profile_preferences(
         project_root,
         cli.config.as_deref(),
         cli.profile.as_deref(),
         cli.overlay.as_deref(),
+        cli.no_profile,
     )
     .map_err(|error| {
         let message = error.to_string();
@@ -4834,11 +4988,14 @@ fn linked_project_status_label(status: LinkedProjectStatus) -> &'static str {
     }
 }
 
-fn git_worktree_dirty(project_root: &Path) -> Result<bool> {
+const DIRTY_WORKTREE_WARNING: &str =
+    "Git worktree has uncommitted changes; sync may modify files alongside local edits.";
+
+fn git_worktree_dirty(project_root: &Path) -> bool {
     if !project_root.join(".git").exists() {
-        return Ok(false);
+        return false;
     }
-    let output = Command::new("git")
+    let Ok(output) = Command::new("git")
         .args([
             "-C",
             &project_root.to_string_lossy(),
@@ -4846,11 +5003,13 @@ fn git_worktree_dirty(project_root: &Path) -> Result<bool> {
             "--porcelain",
         ])
         .output()
-        .context("run git status --porcelain")?;
+    else {
+        return false;
+    };
     if !output.status.success() {
-        return Ok(true);
+        return false;
     }
-    Ok(!output.stdout.is_empty())
+    !output.stdout.is_empty()
 }
 
 fn run_project_sync(
@@ -4960,6 +5119,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 Some(&project_root),
                 json!({
                     "initialized": false,
+                    "profile_resolution": profile_resolution_for_unconfigured_project(cli),
                 }),
             ),
         });
@@ -4969,6 +5129,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     let stale_reason = metactl::project::lock_stale_reason(&context).map_err(internal_error)?;
     let stale = stale_reason.is_some();
     let profile = profile_status_json(&context);
+    let profile_resolution = profile_resolution_json(cli, &context);
     let discoverability = discoverability_report(&context, &ConfigOverrides::default());
     let blocking_checks = discoverability.blocking_checks_json();
     let execution_readiness = if blocking_checks.is_empty() {
@@ -4987,6 +5148,8 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     let codex_skill_visibility =
         codex_skill_visibility_json(&project_root).map_err(internal_error)?;
     let agent_artifact_policy = agent_artifact_policy_json(&context.config_file);
+    let instruction_noise =
+        noise_report::instruction_noise_report(&project_root).map_err(internal_error)?;
 
     let targets = if let Some(target_id) = args.target.as_ref() {
         select_locked_targets(&context.lock, Some(target_id.clone())).unwrap_or_default()
@@ -5166,6 +5329,9 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     };
     lines.push(format!("  Lock:    {}", lock_display));
     lines.push(format!("  Profile: {}", profile_status_message(&profile)));
+    if let Some(notice) = profile_resolution_notice(&profile_resolution) {
+        lines.push(format!("  {notice}"));
+    }
     lines.push(format!("  Execution readiness: {}", execution_readiness));
     if !blocking_checks.is_empty() {
         lines.push("  Blockers:".to_string());
@@ -5221,6 +5387,14 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     }
 
     append_agent_artifact_policy_lines(&mut lines, &agent_artifact_policy);
+    if cli.verbose
+        || instruction_noise["finding_count"]
+            .as_u64()
+            .map(|count| count > 0)
+            .unwrap_or(false)
+    {
+        noise_report::append_instruction_noise_lines(&mut lines, &instruction_noise);
+    }
 
     if targets.is_empty() {
         lines.push("  Applied: (none — run `metactl sync` to compile and apply)".to_string());
@@ -5275,6 +5449,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 "lock_stale": stale,
                 "stale_reason": stale_reason,
                 "profile": profile,
+                "profile_resolution": profile_resolution,
                 "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
                 "layers": layers,
                 "hooks": installed_hooks,
@@ -5285,6 +5460,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                 "source_state": source_state,
                 "skill_visibility": codex_skill_visibility,
                 "agent_artifact_policy": agent_artifact_policy,
+                "instruction_noise": instruction_noise,
                 "applied_targets": applied_targets,
                 "surface_mode_mismatches": surface_mode_mismatches,
                 "needs_sync": needs_sync,
@@ -6908,8 +7084,12 @@ fn cmd_surface_reset(
 }
 
 fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutput, CliError> {
+    if args.capabilities {
+        return cmd_explain_capabilities();
+    }
     let project_root = project_root(cli).map_err(internal_error)?;
     let context = load_required_context(cli, &project_root)?;
+    let profile_resolution = profile_resolution_json(cli, &context);
     if args.staged {
         let targets = select_locked_targets(&context.lock, args.target.clone())?;
         let mut items = Vec::new();
@@ -6933,6 +7113,7 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
                 json!({
                     "mode": "staged",
                     "targets": items,
+                    "profile_resolution": profile_resolution,
                 }),
             ),
         });
@@ -7017,7 +7198,7 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
     );
     let surface_usage_summary = surface_usage::surface_report_summary_json(&project_root);
     let surface_details = derived_surface_details;
-    Ok(explain_output(
+    let mut output = explain_output(
         &project_root,
         args.query.as_deref(),
         &explain,
@@ -7026,7 +7207,12 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         surface_details.as_deref(),
         pack_lifecycle.as_ref(),
         &pack_sources,
-    ))
+    );
+    if let Some(notice) = profile_resolution_notice(&profile_resolution) {
+        output.human.push_str(&format!("\n{notice}"));
+    }
+    output.json["profile_resolution"] = profile_resolution;
+    Ok(output)
 }
 
 fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -7037,6 +7223,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         ));
     }
     let project_root = project_root(cli).map_err(internal_error)?;
+    let worktree_dirty = !args.preview && git_worktree_dirty(&project_root);
     let context = load_required_context(cli, &project_root)?;
     let source_audit_findings = source_audit_findings(&project_root)?;
     if !source_audit_findings.is_empty() {
@@ -7158,6 +7345,7 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
     };
     let context = load_required_context(cli, &project_root)?;
     let profile = profile_status_json(&context);
+    let profile_resolution = profile_resolution_json(cli, &context);
     let shared_surface_rules = shared_surface_rules(
         context.registry.as_ref(),
         &context
@@ -7203,6 +7391,9 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         }
     }
     lines.push(format!("  Profile: {}", profile_status_message(&profile)));
+    if let Some(notice) = profile_resolution_notice(&profile_resolution) {
+        lines.push(notice);
+    }
     if !shared_surface_rules.is_empty() {
         lines.push("  Shared surfaces:".to_string());
         for rule in &shared_surface_rules {
@@ -7213,19 +7404,72 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
         lines.push("Preview only; runtime files were not changed.".to_string());
     }
 
+    if worktree_dirty {
+        lines.insert(1, format!("Warning: {DIRTY_WORKTREE_WARNING}"));
+    }
+    let mut json = success_json(
+        "sync",
+        Some(&project_root),
+        json!({
+            "compile": compile_out.json,
+            "apply": apply_out.json,
+            "validate": validate_out.map(|output| output.json),
+            "profile": profile,
+            "profile_resolution": profile_resolution,
+            "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
+            "targets": readiness,
+            "preview": apply_args.preview,
+        }),
+    );
+    if worktree_dirty {
+        json["worktree_dirty"] = json!(true);
+        json["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
+    }
     Ok(CommandOutput {
         human: project_human_output(&project_root, lines.join("\n")),
+        json,
+    })
+}
+
+fn cmd_explain_capabilities() -> std::result::Result<CommandOutput, CliError> {
+    let registry = ensure_bundled_starter_library_root()
+        .and_then(|root| LibraryRegistry::load_from_roots(&[root]))
+        .map_err(internal_error)?;
+    let targets = registry.list_targets();
+    let target_ids = targets
+        .iter()
+        .map(|target| target.target_id.as_str())
+        .collect::<Vec<_>>();
+    Ok(CommandOutput {
+        human: format!(
+            "metactl capabilities (v{}):\n  Porcelain: setup, use, sync, status, validate, doctor, demo\n  Targets: {}\n  Machine contract: use --agent for JSON errors with recovery commands.\n  Details: metactl explain --capabilities --json",
+            env!("CARGO_PKG_VERSION"),
+            target_ids.join(", "),
+        ),
         json: success_json(
-            "sync",
-            Some(&project_root),
+            "explain",
+            None,
             json!({
-                "compile": compile_out.json,
-                "apply": apply_out.json,
-                "validate": validate_out.map(|output| output.json),
-                "profile": profile,
-                "shared_surface_rules": shared_surface_rules.iter().map(SharedSurfaceRule::to_json).collect::<Vec<_>>(),
-                "targets": readiness,
-                "preview": apply_args.preview,
+                "mode": "capabilities",
+                "tool_version": env!("CARGO_PKG_VERSION"),
+                "command_surface": {
+                    "porcelain": ["setup", "use", "sync", "status", "validate", "doctor", "demo"],
+                    "advanced": ["init", "library", "pack", "skills", "plugin", "export", "project", "add", "remove", "target", "fleet", "list", "search", "stats", "surface", "background", "explain", "preview", "compile", "apply", "revert", "check", "audit", "ignore", "hook", "source", "profile", "version"],
+                },
+                "global_flags": ["--agent", "--json", "--full", "--no-profile", "--project"],
+                "exit_codes": {
+                    "0": exit_code_label(EXIT_SUCCESS),
+                    "10": exit_code_label(EXIT_STATE),
+                    "11": exit_code_label(EXIT_STALE_LOCK),
+                    "12": exit_code_label(EXIT_CONFLICT),
+                    "13": exit_code_label(EXIT_VALIDATION),
+                },
+                "error_contract": {
+                    "envelope_fields": ["ok", "api_version", "command", "error_code", "message", "requires_operator", "risk_level", "next_commands", "findings"],
+                    "next_commands_guaranteed": true,
+                    "truncation_markers": ["<list>_truncated", "<list>_total_count"],
+                },
+                "targets": targets,
             }),
         ),
     })
@@ -7465,11 +7709,18 @@ fn cmd_compile_with_durable_writes(
             })
             .map_err(state_error)?;
         let preferred_apply_mode = preferred_apply_mode_for_target(&target, None);
+        let compile_apply_mode = if args.apply {
+            args.apply_mode
+                .map(ApplyMode::from)
+                .unwrap_or_else(|| preferred_apply_mode.clone())
+        } else {
+            preferred_apply_mode.clone()
+        };
         let mut compile = kernel
             .compile(CompileParams {
                 resolve_graph,
                 target_capability: target.clone(),
-                apply_mode: preferred_apply_mode.clone(),
+                apply_mode: compile_apply_mode,
                 surface_selection_mode,
                 emit_policy_report: true,
                 durable_staging: durable_writes,
@@ -9040,6 +9291,61 @@ fn profile_status_json(context: &metactl::project::ProjectContext) -> Value {
     })
 }
 
+fn profile_resolution_from_resolution(resolution: &metactl::project::ProfileResolution) -> Value {
+    let (source, inherited) = match resolution.source {
+        Some(ProfileActivationSource::Cli) => ("flag", false),
+        Some(ProfileActivationSource::ProjectExtends) => ("project-config", false),
+        Some(ProfileActivationSource::UserDefault) => ("user-default", true),
+        None => ("none", false),
+    };
+    json!({
+        "profile": resolution.name,
+        "source": source,
+        "inherited": inherited,
+    })
+}
+
+fn profile_resolution_json(cli: &Cli, context: &metactl::project::ProjectContext) -> Value {
+    let resolution = metactl::project::resolve_profile_cli_chain(
+        cli.profile.as_deref(),
+        &context.raw_config_file,
+        cli.no_profile,
+    );
+    profile_resolution_from_resolution(&resolution)
+}
+
+fn profile_resolution_for_unconfigured_project(cli: &Cli) -> Value {
+    let resolution = metactl::project::resolve_profile_cli_chain(
+        cli.profile.as_deref(),
+        &metactl::project::PartialProjectConfig::default(),
+        cli.no_profile,
+    );
+    profile_resolution_from_resolution(&resolution)
+}
+
+fn profile_resolution_for_config(
+    cli: &Cli,
+    config: Option<&metactl::project::PartialProjectConfig>,
+) -> Value {
+    let resolution = metactl::project::resolve_profile_cli_chain(
+        cli.profile.as_deref(),
+        config.unwrap_or(&metactl::project::PartialProjectConfig::default()),
+        cli.no_profile,
+    );
+    profile_resolution_from_resolution(&resolution)
+}
+
+fn profile_resolution_notice(resolution: &Value) -> Option<String> {
+    (resolution["source"].as_str() == Some("user-default"))
+        .then(|| {
+            format!(
+                "Using user-default profile \"{}\" (machine-level). Pin with: metactl project link {}, or disable with --no-profile.",
+                resolution["profile"].as_str().unwrap_or_default(),
+                resolution["profile"].as_str().unwrap_or_default(),
+            )
+        })
+}
+
 fn profile_override_fields(
     project: &metactl::project::PartialProjectConfig,
     profile: &metactl::project::PartialProjectConfig,
@@ -9077,9 +9383,7 @@ fn profile_status_message(profile: &Value) -> String {
         "none" => "No profile is active.".to_string(),
         "synced" => {
             if source == "user_default" && !yaml_binding {
-                format!(
-                    "Machine default profile {name} is active locally (not recorded in metactl.yaml); run `metactl init --bind-profile` if this repo should track it."
-                )
+                format!("User-default profile {name} is active.")
             } else {
                 format!("Bound profile {name} is in sync.")
             }
@@ -9918,6 +10222,61 @@ fn success_json(command: &str, project_root: Option<&Path>, extra: Value) -> Val
         payload.extend(extra);
     }
     Value::Object(payload)
+}
+
+fn bounded_machine_json(mut value: Value, full: bool) -> Value {
+    bound_machine_lists(&mut value, full);
+    value
+}
+
+fn bound_machine_lists(value: &mut Value, full: bool) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                bound_machine_lists(item, full);
+            }
+        }
+        Value::Object(object) => {
+            for item in object.values_mut() {
+                bound_machine_lists(item, full);
+            }
+            let array_keys = object
+                .iter()
+                .filter(|(_, value)| value.is_array())
+                .map(|(key, _)| key.clone())
+                .collect::<Vec<_>>();
+            for key in array_keys {
+                let Some(Value::Array(items)) = object.remove(&key) else {
+                    continue;
+                };
+                let (items, metadata) = bounded_list_json(items, full);
+                object.insert(key.clone(), Value::Array(items));
+                if let Some(metadata) = metadata {
+                    object.insert(format!("{key}_truncated"), Value::Bool(true));
+                    object.insert(
+                        format!("{key}_total_count"),
+                        Value::Number(metadata.total_count.into()),
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+struct BoundedListMetadata {
+    total_count: usize,
+}
+
+fn bounded_list_json(items: Vec<Value>, full: bool) -> (Vec<Value>, Option<BoundedListMetadata>) {
+    if full || items.len() <= MACHINE_LIST_LIMIT {
+        return (items, None);
+    }
+    let total_count = items.len();
+    (
+        items.into_iter().take(MACHINE_LIST_LIMIT).collect(),
+        Some(BoundedListMetadata { total_count }),
+    )
 }
 
 fn project_human_output(project_root: &Path, body: String) -> String {

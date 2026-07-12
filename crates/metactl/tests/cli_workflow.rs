@@ -7,6 +7,8 @@ use tempfile::TempDir;
 
 #[path = "cli_workflow/compile.rs"]
 mod compile_workflow;
+#[path = "cli_workflow/error_paths.rs"]
+mod error_paths_workflow;
 #[path = "cli_workflow/explain_status.rs"]
 mod explain_status_workflow;
 #[path = "cli_workflow/fleet.rs"]
@@ -950,15 +952,19 @@ fn cli_help_and_parsing_main_help() {
         .expect("help");
     assert!(output.status.success(), "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains("metactl init"));
-    assert!(text.contains("metactl init --bind-profile"));
+    assert!(text.contains("metactl setup"));
+    assert!(text.contains("metactl use python-refactor"));
     assert!(text.contains("metactl sync"));
-    assert!(text.contains("metactl apply"));
-    assert!(text.contains("Common workflow"));
+    assert!(text.contains("metactl validate"));
+    assert!(text.contains("Daily commands"));
+    assert!(text.contains("Advanced commands"));
+    assert!(text.contains("metactl help <command>"));
+    assert!(!text.contains("metactl init --bind-profile"));
+    assert!(!text.contains("metactl apply\n"));
 }
 
 #[test]
-fn cli_help_subcommand_shows_add_usage() {
+fn cli_help_subcommand_shows_hidden_add_usage() {
     let output = Command::new(cli_bin())
         .args(["help", "add"])
         .output()
@@ -1229,8 +1235,12 @@ fn cli_user_settings_respect_xdg_config_home() {
     assert!(init.status.success(), "{}", stderr(&init));
     let init_json = json_output(&init);
     assert_eq!(
-        init_json["profile_resolution"]["activation_source"],
-        json!("user_default")
+        init_json["profile_resolution"],
+        json!({
+            "profile": "xdg-p",
+            "source": "user-default",
+            "inherited": true,
+        })
     );
 }
 

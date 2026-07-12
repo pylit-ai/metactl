@@ -2,6 +2,248 @@ use super::*;
 
 // Sync, apply, and generated-output workflow tests.
 
+fn copy_directory(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("create copy destination");
+    for entry in fs::read_dir(source).expect("read copy source") {
+        let entry = entry.expect("read copy entry");
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type().expect("copy file type").is_dir() {
+            copy_directory(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).expect("copy library file");
+        }
+    }
+}
+
+#[test]
+fn cli_compile_import_stub_uses_bundled_default_for_stale_library_target() {
+    let project = TempDir::new().expect("project");
+    let stale_library = TempDir::new().expect("stale library");
+    let starter_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/starter");
+    copy_directory(&starter_root, stale_library.path());
+
+    let target_path = stale_library.path().join("targets/claude-code.json");
+    let mut target: Value = serde_json::from_slice(&fs::read(&target_path).expect("read target"))
+        .expect("parse target");
+    target["compile_targets"]
+        .as_array_mut()
+        .expect("compile targets")
+        .iter_mut()
+        .find(|entry| entry["output_kind"] == "claude_md")
+        .expect("claude target")
+        .as_object_mut()
+        .expect("claude target object")
+        .remove("import_stub_path");
+    fs::write(
+        &target_path,
+        serde_json::to_vec_pretty(&target).expect("serialize stale target"),
+    )
+    .expect("write stale target");
+
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let config_path = project.path().join("metactl.yaml");
+    let config = fs::read_to_string(&config_path).expect("read project config");
+    fs::write(
+        &config_path,
+        format!(
+            "{config}\nstarter_library:\n  - {}\n",
+            stale_library.path().display()
+        ),
+    )
+    .expect("configure stale library");
+
+    let compile = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(compile.status.success(), "{}", stderr(&compile));
+    assert!(fs::read_to_string(project.path().join("CLAUDE.md"))
+        .expect("read generated stub")
+        .contains("@AGENTS.md"));
+}
+
+#[test]
+fn cli_compile_apply_import_stub_bridges_claude_to_agents_and_detects_drift() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let first = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+
+    let claude_path = project.path().join("CLAUDE.md");
+    let stub = fs::read_to_string(&claude_path).expect("read CLAUDE.md stub");
+    assert!(
+        stub.contains("metactl:begin"),
+        "missing managed marker: {stub}"
+    );
+    assert!(stub.contains("@AGENTS.md"), "missing Claude import: {stub}");
+    assert!(stub.contains("Do not edit"), "missing edit warning: {stub}");
+
+    let repeat = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(repeat.status.success(), "{}", stderr(&repeat));
+    assert_eq!(
+        fs::read_to_string(&claude_path).expect("read re-synced CLAUDE.md stub"),
+        stub
+    );
+
+    fs::write(&claude_path, "manual drift\n").expect("tamper stub");
+    let validate = run_cli(project.path(), &["validate"]);
+    assert!(
+        !validate.status.success(),
+        "tampered stub should fail validation"
+    );
+    assert!(
+        stderr(&validate).contains("drift") || stdout(&validate).contains("drift"),
+        "validate should report drift: {} {}",
+        stdout(&validate),
+        stderr(&validate)
+    );
+}
+
+#[test]
+fn cli_import_stub_preserves_brownfield_claude_guidance_after_adoption() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let claude_path = project.path().join("CLAUDE.md");
+    fs::write(
+        &claude_path,
+        "# Repository guidance\n\nkeep this guidance\n",
+    )
+    .expect("seed brownfield CLAUDE.md");
+    let adopt = run_cli(project.path(), &["sync", "--adopt", "patch"]);
+    assert!(adopt.status.success(), "{}", stderr(&adopt));
+
+    let bridge = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(bridge.status.success(), "{}", stderr(&bridge));
+    let contents = fs::read_to_string(&claude_path).expect("read adopted bridge stub");
+    assert!(contents.contains("keep this guidance"), "{contents}");
+    assert!(contents.contains("@AGENTS.md"), "{contents}");
+    assert_eq!(
+        contents.matches("metactl:begin claude-md").count(),
+        1,
+        "{contents}"
+    );
+}
+
+#[test]
+fn sync_apply_warns_for_dirty_git_worktree_but_clean_sync_does_not() {
+    let dirty = TempDir::new().expect("dirty project");
+    init_project(dirty.path());
+    let git_init = Command::new("git")
+        .args([
+            "-C",
+            dirty.path().to_str().expect("dirty path"),
+            "init",
+            "--quiet",
+        ])
+        .output()
+        .expect("git init");
+    assert!(git_init.status.success(), "{}", stderr(&git_init));
+    fs::write(dirty.path().join("local-edit.txt"), "dirty\n").expect("dirty file");
+
+    let dirty_output = run_cli(dirty.path(), &["--json", "sync"]);
+    assert!(dirty_output.status.success(), "{}", stderr(&dirty_output));
+    let dirty_json = json_output(&dirty_output);
+    assert_eq!(dirty_json["worktree_dirty"], true);
+    assert!(dirty_json["warnings"]
+        .as_array()
+        .is_some_and(|warnings| !warnings.is_empty()));
+
+    let clean = TempDir::new().expect("clean project");
+    init_project(clean.path());
+    let clean_output = run_cli(clean.path(), &["--json", "sync"]);
+    assert!(clean_output.status.success(), "{}", stderr(&clean_output));
+    let clean_json = json_output(&clean_output);
+    assert!(clean_json.get("worktree_dirty").is_none());
+    assert!(clean_json.get("warnings").is_none());
+}
+
+#[test]
+fn agent_sync_preview_bounds_generated_paths_unless_full_is_requested() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let packs = [
+        "agent-candidate-library-installer",
+        "agentic-artifact-forge",
+        "library-organization-guide",
+        "local-only-example",
+        "metactl-library-diagnostics",
+        "metactl-project-onboarding",
+        "metactl-skill-improvement",
+        "migration-guard",
+        "python-refactor",
+        "unit-test-loop",
+    ];
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&config_path).expect("config"))
+            .expect("parse config");
+    config.as_mapping_mut().expect("config mapping").insert(
+        serde_yaml::Value::String("packs".to_string()),
+        serde_yaml::Value::Sequence(
+            packs
+                .iter()
+                .map(|pack| serde_yaml::Value::String((*pack).to_string()))
+                .collect(),
+        ),
+    );
+    fs::write(
+        &config_path,
+        serde_yaml::to_string(&config).expect("serialize config"),
+    )
+    .expect("updated config");
+
+    let bounded = run_cli(project.path(), &["--agent", "sync", "--adopt", "preview"]);
+    assert!(
+        bounded.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&bounded),
+        stderr(&bounded)
+    );
+    assert!(stdout(&bounded).len() < 20_000, "{}", stdout(&bounded));
+    let bounded_json = json_output(&bounded);
+    let outputs = bounded_json["compile"]["targets"][0]["generated_outputs"]
+        .as_array()
+        .expect("bounded generated outputs");
+    assert_eq!(outputs.len(), 15);
+    assert_eq!(
+        bounded_json["compile"]["targets"][0]["generated_outputs_truncated"],
+        true
+    );
+    let total = bounded_json["compile"]["targets"][0]["generated_outputs_total_count"]
+        .as_u64()
+        .expect("total count");
+    assert!(total > 15, "expected more than the bounded threshold");
+
+    let full = run_cli(
+        project.path(),
+        &["--agent", "--full", "sync", "--adopt", "preview"],
+    );
+    assert!(full.status.success(), "{}", stderr(&full));
+    let full_json = json_output(&full);
+    assert_eq!(
+        full_json["compile"]["targets"][0]["generated_outputs"]
+            .as_array()
+            .expect("full generated outputs")
+            .len() as u64,
+        total
+    );
+}
+
 #[test]
 fn setup_yes_with_explicit_target_creates_config_without_sync() {
     let project = TempDir::new().expect("tempdir");

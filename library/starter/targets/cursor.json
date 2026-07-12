@@ -49,7 +49,7 @@
   },
   "metadata": {
     "starter_status": "stable",
-    "docs": "https://cursor.com/docs (project rules + native skills + AGENTS.md)",
+    "docs": "https://cursor.com/docs/rules (project rules with .mdc frontmatter, AGENTS.md alternative; verified 2026-07-03)",
     "shared_root_document_owner": "codex-cli",
     "shared_root_document_path": "AGENTS.md",
     "shared_agents_md": "Root AGENTS.md is owned by the codex-cli target when both are enabled; Cursor reads it from the repo.",

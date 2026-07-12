@@ -634,6 +634,7 @@ impl LibraryRegistry {
             &params.resolve_graph,
             &params.target_capability,
             &self.roots,
+            &params.apply_mode,
             effective_surface_selection_mode.clone(),
         )?;
         degradations.extend(surface_degradations);
@@ -815,7 +816,8 @@ impl LibraryRegistry {
             self.register_policy(path, manifest)?;
         }
         for path in sorted_glob_json(&root.join("targets"))? {
-            let manifest: TargetCapabilityMatrix = load_json(path.clone())?;
+            let mut manifest: TargetCapabilityMatrix = load_json(path.clone())?;
+            Self::apply_bundled_compile_target_defaults(&mut manifest)?;
             self.register_target(path, manifest)?;
         }
         for path in sorted_glob_json(&root.join("knowledge_sources"))? {
@@ -841,6 +843,31 @@ impl LibraryRegistry {
         for path in sorted_imports(&root.join("imports"))? {
             let (manifest, provenance) = normalize_candidate(root, &path)?;
             self.register_pack(root, path, manifest, Some(provenance))?;
+        }
+        Ok(())
+    }
+
+    /// Fill compatibility-only optional compile-target fields from the embedded
+    /// definition. User-library values remain authoritative when present.
+    fn apply_bundled_compile_target_defaults(manifest: &mut TargetCapabilityMatrix) -> Result<()> {
+        let bundled_root = crate::project::ensure_bundled_starter_library_root()?;
+        let bundled_path = bundled_root
+            .join("targets")
+            .join(format!("{}.json", manifest.target_id));
+        if !bundled_path.exists() {
+            return Ok(());
+        }
+        let bundled: TargetCapabilityMatrix = load_json(bundled_path)?;
+        for compile_target in &mut manifest.compile_targets {
+            if compile_target.import_stub_path.is_some() {
+                continue;
+            }
+            if let Some(default) = bundled.compile_targets.iter().find(|candidate| {
+                candidate.output_kind == compile_target.output_kind
+                    && candidate.path_template == compile_target.path_template
+            }) {
+                compile_target.import_stub_path = default.import_stub_path.clone();
+            }
         }
         Ok(())
     }
@@ -1059,6 +1086,7 @@ fn synthesize_outputs(
     resolve_graph: &ResolveGraph,
     target: &TargetCapabilityMatrix,
     library_roots: &[PathBuf],
+    apply_mode: &ApplyMode,
     surface_selection_override: Option<SurfaceSelectionMode>,
 ) -> Result<(
     Vec<StagedOutputInput>,
@@ -1098,6 +1126,14 @@ fn synthesize_outputs(
                     compile_target,
                 )?;
                 let document = instruction_document(role, policy, &plan, resolve_graph, target)?;
+                let contents = if matches!(apply_mode, ApplyMode::ImportStub) {
+                    import_stub_contents(compile_target)?
+                } else {
+                    wrap_with_frontmatter(
+                        document.content.as_bytes(),
+                        &compile_target.instruction_frontmatter,
+                    )?
+                };
                 let mut degradation_codes = plan.degradation_codes;
                 if document.truncated {
                     degradation_codes.push("instruction_index_truncated".to_string());
@@ -1106,10 +1142,7 @@ fn synthesize_outputs(
                     id: Some(document_id_for_target(target)),
                     destination_path: destination,
                     kind: GeneratedOutputKind::InstructionFile,
-                    contents: wrap_with_frontmatter(
-                        document.content.as_bytes(),
-                        &compile_target.instruction_frontmatter,
-                    )?,
+                    contents,
                     instruction_mode: Some(plan.mode),
                     pack_ref: None,
                     surface_id: None,
@@ -1563,6 +1596,19 @@ fn supported_apply_modes(target: &TargetCapabilityMatrix) -> Vec<ApplyMode> {
         modes.push(ApplyMode::Symlink);
     }
     modes
+}
+
+fn import_stub_contents(compile_target: &crate::types::CompileTarget) -> Result<Vec<u8>> {
+    let import_path = compile_target.import_stub_path.as_deref().ok_or_else(|| {
+        anyhow!(
+            "target compile entry '{}' does not declare import_stub_path",
+            compile_target.path_template
+        )
+    })?;
+    Ok(format!(
+        "<!-- metactl:begin import-stub -->\n@{import_path}\n<!-- Do not edit: metactl manages this import stub. -->\n<!-- metactl:end import-stub -->\n"
+    )
+    .into_bytes())
 }
 
 fn instruction_mode_label(mode: &InstructionProjectionMode) -> &'static str {

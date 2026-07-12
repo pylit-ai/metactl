@@ -19,7 +19,8 @@
   "compatible_targets": [
     "codex-cli",
     "cursor",
-    "gemini-cli"
+    "gemini-cli",
+    "opencode"
   ],
   "resources": [
     {
@@ -57,7 +58,8 @@
     "verified_targets": [
       "codex-cli",
       "cursor",
-      "gemini-cli"
+      "gemini-cli",
+      "opencode"
     ],
     "last_verified_at": "2026-04-22T12:00:00Z",
     "evidence_refs": [

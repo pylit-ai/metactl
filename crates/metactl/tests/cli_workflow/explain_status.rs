@@ -3,6 +3,80 @@ use super::*;
 // Explain, status, and doctor workflow tests.
 
 #[test]
+fn explain_capabilities_is_machine_readable_without_a_project() {
+    let cwd = TempDir::new().expect("cwd");
+    let home = TempDir::new().expect("home");
+
+    let output = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "explain", "--capabilities"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "explain", None);
+    assert_eq!(value["mode"], "capabilities");
+    assert_eq!(value["exit_codes"]["0"], "success");
+    assert_eq!(value["exit_codes"]["13"], "validation");
+    assert!(value["targets"]
+        .as_array()
+        .is_some_and(|targets| !targets.is_empty()));
+    assert!(value["global_flags"]
+        .as_array()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "--agent")));
+    assert!(value["global_flags"]
+        .as_array()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "--project")));
+}
+
+#[test]
+fn agent_status_bounds_large_path_lists_unless_full_is_requested() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let skills_root = project.path().join(".codex/skills");
+    for index in 0..25 {
+        let skill_dir = skills_root.join(format!("generated-skill-{index:02}"));
+        fs::create_dir_all(&skill_dir).expect("skill dir");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: generated-skill-{index:02}\ndescription: test skill\n---\n"),
+        )
+        .expect("skill");
+    }
+
+    let bounded = run_cli(project.path(), &["--agent", "status"]);
+    assert!(bounded.status.success(), "{}", stderr(&bounded));
+    assert!(stdout(&bounded).len() < 20_000, "{}", stdout(&bounded));
+    let bounded_json = json_output(&bounded);
+    let skills = bounded_json["skill_visibility"]["repo_local_skills"]
+        .as_array()
+        .expect("bounded skills");
+    assert_eq!(skills.len(), 15);
+    assert_eq!(
+        bounded_json["skill_visibility"]["repo_local_skills_truncated"],
+        true
+    );
+    assert_eq!(
+        bounded_json["skill_visibility"]["repo_local_skills_total_count"],
+        25
+    );
+
+    let full = run_cli(project.path(), &["--agent", "--full", "status"]);
+    assert!(full.status.success(), "{}", stderr(&full));
+    let full_json = json_output(&full);
+    assert_eq!(
+        full_json["skill_visibility"]["repo_local_skills"]
+            .as_array()
+            .expect("full skills")
+            .len(),
+        25
+    );
+    assert!(full_json["skill_visibility"]
+        .get("repo_local_skills_truncated")
+        .is_none());
+}
+
+#[test]
 fn surface_overrides_and_auto_explain_are_machine_readable() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
@@ -128,6 +202,69 @@ description: Portable release manager skill for verification handoffs.
 }
 
 #[test]
+fn status_verbose_reports_instruction_noise_findings() {
+    let project = TempDir::new().expect("tempdir");
+    let init = run_cli(
+        project.path(),
+        &["init", "--target", "codex-cli", "--no-input", "-y"],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+    let add = run_cli(
+        project.path(),
+        &["add", "unit-test-loop", "--sync", "--no-input", "-y"],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+
+    let clean = run_cli(project.path(), &["--json", "status"]);
+    assert!(clean.status.success(), "{}", stderr(&clean));
+    let clean_json = json_output(&clean);
+    assert_eq!(
+        clean_json["instruction_noise"]["schema_version"],
+        json!("metactl.instruction_noise.v1")
+    );
+    assert_eq!(clean_json["instruction_noise"]["finding_count"], json!(0));
+
+    let clean_human = run_cli(project.path(), &["--verbose", "status"]);
+    assert!(clean_human.status.success(), "{}", stderr(&clean_human));
+    let clean_text = stdout(&clean_human);
+    assert!(clean_text.contains("Instruction noise: 0 finding(s)"));
+    assert!(
+        clean_text.lines().count() <= 30,
+        "clean verbose status should stay compact: {clean_text}"
+    );
+
+    let managed_skill = project
+        .path()
+        .join(".codex/skills/unit-test-loop/unit-test-loop/SKILL.md");
+    let mut drifted = fs::read_to_string(&managed_skill).expect("read managed skill");
+    drifted.push_str("\n# local drift\n");
+    fs::write(&managed_skill, drifted).expect("write drift");
+
+    let stray = project
+        .path()
+        .join(".codex/skills/stray-unit-test-loop/unit-test-loop/SKILL.md");
+    fs::create_dir_all(stray.parent().expect("stray parent")).expect("stray dir");
+    fs::copy(&managed_skill, &stray).expect("copy duplicate stray skill");
+
+    let noisy = run_cli(project.path(), &["--json", "--verbose", "status"]);
+    assert!(noisy.status.success(), "{}", stderr(&noisy));
+    let noisy_json = json_output(&noisy);
+    let findings = noisy_json["instruction_noise"]["findings"]
+        .as_array()
+        .expect("noise findings");
+    for kind in [
+        "stray_unmanaged_surface",
+        "drifted_managed_output",
+        "duplicate_trigger",
+    ] {
+        assert!(
+            findings.iter().any(|finding| finding["kind"] == kind),
+            "missing {kind} in {findings:#?}"
+        );
+    }
+}
+
+#[test]
 fn cli_lock_and_doctor_detects_stale_lock() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
@@ -210,9 +347,15 @@ fn cli_init_human_output_explains_machine_default_binding_choice() {
     );
     assert!(init.status.success(), "{}", stderr(&init));
     let text = stdout(&init);
-    assert!(text.contains("Applied machine default profile from user settings locally"));
-    assert!(text.contains("Leave it this way for a portable repo"));
-    assert!(text.contains("metactl init --bind-profile"));
+    assert!(text.contains("Using user-default profile \"team-profile\" (machine-level)."));
+    assert!(text.contains("metactl project link team-profile"));
+    let link_help = run_cli_env(
+        project.path(),
+        &["project", "link", "--help"],
+        &[("HOME", home.path().to_str().expect("home path"))],
+    );
+    assert!(link_help.status.success(), "{}", stderr(&link_help));
+    assert!(text.contains("disable with --no-profile"));
 }
 
 #[test]
@@ -241,8 +384,9 @@ fn cli_status_human_output_explains_machine_default_binding_choice() {
     );
     assert!(status.status.success(), "{}", stderr(&status));
     let text = stdout(&status);
-    assert!(text.contains("Machine default profile team-profile is active locally"));
-    assert!(text.contains("metactl init --bind-profile"));
+    assert!(text.contains("Using user-default profile \"team-profile\" (machine-level)."));
+    assert!(text.contains("metactl project link team-profile"));
+    assert!(text.contains("disable with --no-profile"));
 }
 
 #[test]
