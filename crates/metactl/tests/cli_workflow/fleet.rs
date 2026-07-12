@@ -435,6 +435,10 @@ fn fleet_sync_preview_reports_invalid_linked_project_config_per_project() {
     let json = json_output(&output);
     assert_eq!(json["ok"], false);
     assert_eq!(json["command"], "fleet");
+    assert_eq!(json["error_code"], "state");
+    assert!(json["next_commands"]
+        .as_array()
+        .is_some_and(|commands| !commands.is_empty()));
     assert_eq!(json["preview"], true);
     assert_eq!(json["projects"][0]["id"], "linked");
     assert_eq!(json["projects"][0]["status"], "failed");
@@ -649,7 +653,7 @@ fn fleet_sync_apply_warns_for_dirty_git_project_and_proceeds() {
 }
 
 #[test]
-fn fleet_sync_apply_human_error_reports_failed_projects() {
+fn fleet_sync_apply_human_output_reports_dirty_projects() {
     let project = TempDir::new().expect("tempdir");
     let ready = TempDir::new().expect("ready");
     init_project(ready.path());
@@ -677,22 +681,19 @@ fn fleet_sync_apply_human_error_reports_failed_projects() {
         project.path(),
         &["--yes", "--no-input", "fleet", "sync", "--apply"],
     );
-    let err = stderr(&output);
-    assert_eq!(
-        output.status.code(),
-        Some(10),
-        "stdout:\n{}\nstderr:\n{}",
-        stdout(&output),
-        err
-    );
-    assert!(err.contains("one or more fleet projects failed"), "{err}");
-    assert!(err.contains("ready"), "{err}");
+    assert!(output.status.success(), "{}", stderr(&output));
+    let human = stdout(&output);
+    assert!(human.contains("Fleet sync applied"), "{human}");
+    assert!(human.contains("ready"), "{human}");
     assert!(
-        err.contains(ready.path().to_str().expect("ready path")),
-        "{err}"
+        human.contains(ready.path().to_str().expect("ready path")),
+        "{human}"
     );
-    assert!(err.contains("dirty_worktree"), "{err}");
-    assert!(err.contains("--allow-dirty"), "{err}");
+    assert!(
+        human.contains("Git worktree has uncommitted changes"),
+        "{human}"
+    );
+    assert!(ready.path().join("AGENTS.md").exists());
 }
 
 #[test]
@@ -727,12 +728,13 @@ fn fleet_sync_apply_returns_nonzero_for_mixed_project_failure() {
         project.path(),
         &["--json", "--yes", "--no-input", "fleet", "sync", "--apply"],
     );
-    assert_eq!(output.status.code(), Some(10), "{}", stdout(&output));
+    assert!(output.status.success(), "{}", stderr(&output));
     let json = json_output(&output);
     assert_eq!(json["projects"][0]["id"], "clean");
     assert_eq!(json["projects"][0]["status"], "applied");
     assert_eq!(json["projects"][1]["id"], "dirty");
-    assert_eq!(json["projects"][1]["result"], "dirty_worktree");
+    assert_eq!(json["projects"][1]["status"], "applied");
+    assert_eq!(json["projects"][1]["worktree_dirty"], true);
     assert!(clean.path().join("AGENTS.md").exists());
-    assert!(!dirty.path().join("AGENTS.md").exists());
+    assert!(dirty.path().join("AGENTS.md").exists());
 }

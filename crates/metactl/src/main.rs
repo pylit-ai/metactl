@@ -1852,7 +1852,7 @@ fn main() -> ExitCode {
         }
         Err(err) => {
             if cli.machine_output() {
-                let json = if cli.agent {
+                let json = if cli.agent || matches!(&cli.command, Commands::Fleet(_)) {
                     agent_error_json(&cli, &err)
                 } else {
                     err.json.clone()
