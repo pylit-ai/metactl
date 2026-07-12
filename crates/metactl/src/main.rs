@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use anyhow::{anyhow, Context, Result};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use metactl::project::{
     append_history_entry, atomic_write, atomic_write_relaxed, brownfield_adoption_hint,
     builtin_profile_templates, bundled_starter_library_root, compile_manifest_path,
@@ -76,6 +76,7 @@ Quick start:
   metactl sync                       # compile + apply in one command
   metactl status                     # see what is configured and applied
   metactl validate                   # check staged/applied outputs and drift
+  metactl verify                     # alias for validate
   metactl doctor                     # run health checks
 
 Daily commands:
@@ -86,6 +87,8 @@ Daily commands:
   metactl validate    Check generated surfaces and policy
   metactl doctor      Run health checks
   metactl demo        Create or remove a disposable sandbox
+
+Run 'metactl help --all' to list advanced commands.
 
 Advanced commands:
   Existing commands such as init, add, target, list, search, compile, apply,
@@ -236,6 +239,7 @@ enum Commands {
     #[command(hide = true)]
     Revert(RevertArgs),
     /// Check staged vs applied outputs, policy, and drift for a target
+    #[command(alias = "verify")]
     Validate(ValidateCmdArgs),
     /// Alias for validate, with v1 strict-check wording
     #[command(hide = true)]
@@ -1805,6 +1809,10 @@ impl SharedSurfaceRule {
 
 fn main() -> ExitCode {
     let raw_args = std::env::args_os().collect::<Vec<_>>();
+    if wants_full_help(&raw_args) {
+        println!("{}", full_help());
+        return ExitCode::SUCCESS;
+    }
     let machine_requested = raw_args.iter().any(|arg| {
         let arg = arg.to_string_lossy();
         arg == "--agent"
@@ -1858,6 +1866,22 @@ fn main() -> ExitCode {
             ExitCode::from(err.code)
         }
     }
+}
+
+fn wants_full_help(args: &[std::ffi::OsString]) -> bool {
+    let has_all = args.iter().any(|arg| arg == "--all");
+    if !has_all {
+        return false;
+    }
+    args.iter().any(|arg| arg == "help") || args.iter().any(|arg| arg == "--help")
+}
+
+fn full_help() -> String {
+    let mut command = Cli::command();
+    command.get_subcommands_mut().for_each(|subcommand| {
+        *subcommand = subcommand.clone().hide(false);
+    });
+    command.render_long_help().to_string()
 }
 
 fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {

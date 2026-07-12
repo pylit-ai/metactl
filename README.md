@@ -70,7 +70,8 @@ For a real repo, humans can start with one guided command:
 metactl setup
 ```
 
-For agents or CI, keep the same flow explicit and non-interactive:
+In a non-TTY environment (for example, CI), setup needs an explicit target and
+confirmation flag. For agents or CI, use:
 
 ```bash
 metactl setup --plan

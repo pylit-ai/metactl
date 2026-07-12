@@ -88,7 +88,9 @@ metactl demo destroy --yes
 `demo destroy` only removes directories with a `.metactl-demo/manifest.json`
 sentinel created by metactl.
 
-For a real repo, humans can use one guided setup command:
+For a real repo, humans can use one guided setup command. In a non-TTY
+environment, provide an explicit target and `--yes` because setup cannot ask
+interactive questions:
 
 ```bash
 metactl --project /path/to/project setup

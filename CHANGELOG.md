@@ -4,6 +4,11 @@
 
 ### Added
 
+- Added a working `metactl help --all` command that lists hidden advanced commands.
+- Added `verify` as an alias for `validate`.
+- Added a total agent error envelope with stable `project_not_found` and `next_commands` fields.
+- Added bounded-by-default agent output with `--full` for complete lists.
+- Added `profile_resolution` disclosure and `--no-profile` to control profile inheritance.
 - Added Cursor Tier-1 conformance coverage for generated `.cursor/rules/*.mdc` and `.cursor/skills/.../SKILL.md` surfaces.
 - Added Gemini CLI Tier-1 conformance coverage for `GEMINI.md`, `.gemini/extensions/.../gemini-extension.json`, command files, and Agent Skill folders.
 - Added an Experimental OpenCode target that generates `AGENTS.md`, `opencode.json`, `.opencode/commands/...`, `.opencode/skills/.../SKILL.md`, and `.opencode/packs/...` surfaces.
