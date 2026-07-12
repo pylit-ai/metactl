@@ -17,6 +17,8 @@ Human-mode parse errors retain Clap's normal formatted help and diagnostics.
 
 Machine output (`--agent` or `--json`) bounds long lists by default so a command response remains safe to place in agent context. Lists longer than 15 entries retain the first 15 values and add sibling fields named `<list>_truncated: true` and `<list>_total_count: N`; the original list field remains present so consumers can detect the shortened response without a schema-version change.
 
+Consumers MUST check `<list>_truncated` before treating any array as complete; arrays without the sibling marker are complete.
+
 Pass the global `--full` flag with `--agent` or `--json` to restore complete list enumeration. Human output is unchanged.
 
 ## Claude Code

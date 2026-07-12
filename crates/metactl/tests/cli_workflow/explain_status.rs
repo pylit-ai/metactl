@@ -321,7 +321,13 @@ fn cli_init_human_output_explains_machine_default_binding_choice() {
     assert!(init.status.success(), "{}", stderr(&init));
     let text = stdout(&init);
     assert!(text.contains("Using user-default profile \"team-profile\" (machine-level)."));
-    assert!(text.contains("metactl profile use team-profile --project"));
+    assert!(text.contains("metactl project link team-profile"));
+    let link_help = run_cli_env(
+        project.path(),
+        &["project", "link", "--help"],
+        &[("HOME", home.path().to_str().expect("home path"))],
+    );
+    assert!(link_help.status.success(), "{}", stderr(&link_help));
     assert!(text.contains("disable with --no-profile"));
 }
 
@@ -352,7 +358,7 @@ fn cli_status_human_output_explains_machine_default_binding_choice() {
     assert!(status.status.success(), "{}", stderr(&status));
     let text = stdout(&status);
     assert!(text.contains("Using user-default profile \"team-profile\" (machine-level)."));
-    assert!(text.contains("metactl profile use team-profile --project"));
+    assert!(text.contains("metactl project link team-profile"));
     assert!(text.contains("disable with --no-profile"));
 }
 

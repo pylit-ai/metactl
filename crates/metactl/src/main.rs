@@ -9264,7 +9264,7 @@ fn profile_resolution_notice(resolution: &Value) -> Option<String> {
     (resolution["source"].as_str() == Some("user-default"))
         .then(|| {
             format!(
-                "Using user-default profile \"{}\" (machine-level). Pin with: metactl profile use {} --project, or disable with --no-profile.",
+                "Using user-default profile \"{}\" (machine-level). Pin with: metactl project link {}, or disable with --no-profile.",
                 resolution["profile"].as_str().unwrap_or_default(),
                 resolution["profile"].as_str().unwrap_or_default(),
             )
