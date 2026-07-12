@@ -1,0 +1,22 @@
+{
+  "name": "@pylit-ai/metactl",
+  "version": "0.1.21",
+  "description": "Verified release-binary installer for metactl",
+  "license": "Apache-2.0",
+  "private": false,
+  "repository": "https://github.com/pylit-ai/metactl",
+  "bin": {
+    "metactl": "bin/metactl.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "vendor"
+  ]
+}

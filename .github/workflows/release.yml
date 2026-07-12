@@ -21,9 +21,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +50,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          name="metactl-${GITHUB_REF_NAME:-manual}-${RUNNER_OS}-${RUNNER_ARCH}"
+          name="metactl-${GITHUB_REF_NAME:-manual}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           cp target/release/metactl "dist/$name/"
           cp target/release/metactld "dist/$name/"

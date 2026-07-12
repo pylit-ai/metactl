@@ -52,6 +52,18 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Automation | Emit stable JSON with `--json` and expose the reference kernel through `metactld`. |
 | Local multi-repo operations | Preview Fleet Sync before applying changes across linked projects. |
 
+## Install
+
+| Method | Command | Best for |
+| --- | --- | --- |
+| Prebuilt release | `cargo binstall metactl` | Fast, verified native install on Linux x86_64 or Apple Silicon. |
+| Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
+| npm shim | `npm install -g @pylit-ai/metactl` | JavaScript toolchains; downloads and verifies the matching release archive. |
+| crates.io | `cargo install metactl --version 0.1.21 --locked` | Portable source build. |
+| GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
+
+All prebuilt paths verify the release SHA-256 checksum before use. `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
+
 ## Quickstart
 
 Install the CLI from crates.io:
