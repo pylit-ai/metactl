@@ -42,6 +42,170 @@ metadata:
     .expect("write source metactl.yaml");
 }
 
+fn write_ruler_source(project: &Path) {
+    let ruler = project.join(".ruler");
+    fs::create_dir_all(&ruler).expect("ruler dir");
+    fs::write(
+        ruler.join("AGENTS.md"),
+        "# Ruler\n\nUse checked commands.\n",
+    )
+    .expect("ruler agents");
+    fs::write(ruler.join("style.md"), "# Style\n\nKeep diffs small.\n").expect("ruler rule");
+    fs::write(ruler.join("ruler.toml"), "[agents]\nenabled = true\n").expect("ruler config");
+}
+
+fn write_agentsync_source(project: &Path) {
+    let agents = project.join(".agents");
+    fs::create_dir_all(&agents).expect("agents dir");
+    fs::write(agents.join("codex.md"), "# Codex\n\nRun tests first.\n").expect("agents markdown");
+    fs::write(
+        agents.join("cursor.json"),
+        "{\"rules\": [\"keep it safe\"]}\n",
+    )
+    .expect("agents config");
+}
+
+#[test]
+fn project_import_ruler_plan_and_apply_preserve_source_and_report_unmapped_config() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    write_ruler_source(source.path());
+    let before = fs::read(source.path().join(".ruler/ruler.toml")).expect("source snapshot");
+
+    let plan = run_cli(
+        target.path(),
+        &[
+            "--json",
+            "project",
+            "import",
+            "plan",
+            source.path().to_str().expect("source path"),
+        ],
+    );
+    assert!(plan.status.success(), "{}", stderr(&plan));
+    let plan_json = json_output(&plan);
+    assert_eq!(plan_json["source"]["source"], "ruler");
+    assert_eq!(plan_json["artifacts"][0]["kind"], "instruction_pack");
+    assert!(plan_json["unmapped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == ".ruler/ruler.toml"));
+    assert!(plan_json["next_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry.as_str().unwrap().contains("sync --adopt preview")));
+    assert!(plan_json["next_commands"][0]
+        .as_str()
+        .unwrap()
+        .contains(source.path().to_str().unwrap()));
+    assert!(
+        !target.path().join("metactl-imports/ruler").exists(),
+        "plan must not write"
+    );
+
+    let apply = run_cli(
+        target.path(),
+        &[
+            "--json",
+            "project",
+            "import",
+            "apply",
+            source.path().to_str().expect("source path"),
+            "--yes",
+        ],
+    );
+    assert!(apply.status.success(), "{}", stderr(&apply));
+    let apply_json = json_output(&apply);
+    assert_eq!(
+        apply_json["created_artifacts"][0]["kind"],
+        "instruction_pack"
+    );
+    let imported = target.path().join("metactl-imports/ruler");
+    assert!(imported.join("packs/imported-ruler.json").exists());
+    let instruction =
+        fs::read_to_string(imported.join("instructions/ruler.md")).expect("imported instruction");
+    assert!(instruction.contains("Use checked commands."));
+    assert!(instruction.contains("Keep diffs small."));
+    assert_eq!(
+        fs::read(source.path().join(".ruler/ruler.toml")).expect("source after"),
+        before
+    );
+}
+
+#[test]
+fn project_import_agentsync_discovers_markdown_and_keeps_json_unmapped() {
+    let source = TempDir::new().expect("source");
+    let target = TempDir::new().expect("target");
+    write_agentsync_source(source.path());
+    let before = fs::read(source.path().join(".agents/cursor.json")).expect("source snapshot");
+
+    let output = run_cli(
+        target.path(),
+        &[
+            "--json",
+            "project",
+            "import",
+            "apply",
+            source.path().to_str().expect("source path"),
+            "--yes",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let json = json_output(&output);
+    assert_eq!(json["source"]["source"], "agentsync");
+    assert!(json["unmapped"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == ".agents/cursor.json"));
+    let imported = target.path().join("metactl-imports/agentsync");
+    assert!(
+        fs::read_to_string(imported.join("instructions/agentsync.md"))
+            .expect("instruction")
+            .contains("Run tests first.")
+    );
+    assert_eq!(
+        fs::read(source.path().join(".agents/cursor.json")).expect("source after"),
+        before
+    );
+}
+
+#[test]
+fn project_import_list_discovers_ruler_and_agentsync_candidates() {
+    let root = TempDir::new().expect("root");
+    let ruler = root.path().join("ruler-project");
+    let agentsync = root.path().join("agentsync-project");
+    fs::create_dir_all(&ruler).expect("ruler project");
+    fs::create_dir_all(&agentsync).expect("agentsync project");
+    write_ruler_source(&ruler);
+    write_agentsync_source(&agentsync);
+    let target = TempDir::new().expect("target");
+    let output = run_cli(
+        target.path(),
+        &[
+            "--json",
+            "project",
+            "import",
+            "list",
+            "--search-root",
+            root.path().to_str().expect("root path"),
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let projects = json_output(&output)["projects"]
+        .as_array()
+        .expect("projects")
+        .clone();
+    assert!(projects
+        .iter()
+        .any(|project| project["name"] == "ruler-project" && project["source"] == "ruler"));
+    assert!(projects
+        .iter()
+        .any(|project| project["name"] == "agentsync-project" && project["source"] == "agentsync"));
+}
+
 #[test]
 fn project_import_plan_accepts_direct_path_and_omits_sources_by_default() {
     let source = TempDir::new().expect("source");

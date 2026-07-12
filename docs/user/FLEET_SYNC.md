@@ -2,6 +2,23 @@
 
 Fleet Sync previews or applies `metactl sync` across explicitly linked local projects. It stays local-first: there is no hosted control plane, no filesystem auto-discovery, and no background mutation.
 
+## Importing Ruler and AgentSync projects
+
+`metactl project import list --search-root /path/to/projects` also discovers projects with a
+`.ruler/` or `.agents/` directory. Review its non-writing plan before applying it:
+
+```bash
+metactl project import plan /path/to/project --json
+metactl project import apply /path/to/project --yes --json
+metactl sync --adopt preview
+```
+
+Ruler Markdown rules (`.ruler/AGENTS.md`, legacy `instructions.md`, and other Markdown files)
+and AgentSync Markdown files become a private project-local instruction pack under
+`metactl-imports/`. The source directories are read only. Config files with no lossless metactl
+mapping are returned as `unmapped` in JSON; inspect those entries before recreating their
+tool-specific behavior.
+
 ## Controller Model
 
 A Fleet controller is a normal metactl project whose `metactl.yaml` contains the canonical `linked_projects` registry. The machine-local user config may store a pointer to that controller so Fleet commands work from any directory.
