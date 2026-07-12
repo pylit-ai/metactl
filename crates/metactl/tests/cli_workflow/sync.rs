@@ -1073,6 +1073,18 @@ fn cli_sync_claude_settings_is_regular_file_not_symlink() {
         !settings_path.is_symlink(),
         "shared Claude settings should be materialized as a regular file, not a symlink"
     );
+    let settings: Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read Claude settings"))
+            .expect("parse Claude settings");
+    assert_eq!(
+        settings["permissions"],
+        json!({
+            "allow": ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit"],
+            "ask": ["Bash", "WebFetch"],
+            "deny": ["Bash(rm -rf:*)"],
+            "defaultMode": "acceptEdits"
+        })
+    );
 }
 
 #[test]
