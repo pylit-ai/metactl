@@ -3,6 +3,53 @@ use super::*;
 // Explain, status, and doctor workflow tests.
 
 #[test]
+fn agent_status_bounds_large_path_lists_unless_full_is_requested() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let skills_root = project.path().join(".codex/skills");
+    for index in 0..25 {
+        let skill_dir = skills_root.join(format!("generated-skill-{index:02}"));
+        fs::create_dir_all(&skill_dir).expect("skill dir");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: generated-skill-{index:02}\ndescription: test skill\n---\n"),
+        )
+        .expect("skill");
+    }
+
+    let bounded = run_cli(project.path(), &["--agent", "status"]);
+    assert!(bounded.status.success(), "{}", stderr(&bounded));
+    assert!(stdout(&bounded).len() < 20_000, "{}", stdout(&bounded));
+    let bounded_json = json_output(&bounded);
+    let skills = bounded_json["skill_visibility"]["repo_local_skills"]
+        .as_array()
+        .expect("bounded skills");
+    assert_eq!(skills.len(), 15);
+    assert_eq!(
+        bounded_json["skill_visibility"]["repo_local_skills_truncated"],
+        true
+    );
+    assert_eq!(
+        bounded_json["skill_visibility"]["repo_local_skills_total_count"],
+        25
+    );
+
+    let full = run_cli(project.path(), &["--agent", "--full", "status"]);
+    assert!(full.status.success(), "{}", stderr(&full));
+    let full_json = json_output(&full);
+    assert_eq!(
+        full_json["skill_visibility"]["repo_local_skills"]
+            .as_array()
+            .expect("full skills")
+            .len(),
+        25
+    );
+    assert!(full_json["skill_visibility"]
+        .get("repo_local_skills_truncated")
+        .is_none());
+}
+
+#[test]
 fn surface_overrides_and_auto_explain_are_machine_readable() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());

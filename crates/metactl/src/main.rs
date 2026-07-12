@@ -61,6 +61,7 @@ const EXIT_VALIDATION: u8 = 13;
 
 const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills under .codex/skills are visible to Codex sessions opened in that repository. User-global Personal skills live under ~/.codex/skills.";
 const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills.";
+const MACHINE_LIST_LIMIT: usize = 15;
 const AGENT_ARTIFACT_POLICY_METADATA_KEY: &str = "agent_artifact_policy";
 const AGENT_ARTIFACT_STEWARDSHIP_PACK: &str = "agentic-artifact-forge";
 
@@ -133,6 +134,9 @@ struct Cli {
     /// Show additional detail (surface info, resolve graphs, etc.)
     #[arg(long, short = 'v', global = true)]
     verbose: bool,
+    /// Emit complete machine-readable lists instead of bounded previews
+    #[arg(long, global = true)]
+    full: bool,
     /// Suppress all human output (exit code only)
     #[arg(long, short = 'q', global = true)]
     quiet: bool,
@@ -1820,9 +1824,10 @@ fn main() -> ExitCode {
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
+                let json = bounded_machine_json(output.json, cli.full);
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&output.json).unwrap_or_else(|_| "{}".to_string())
+                    serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
                 );
             } else if !cli.quiet {
                 println!("{}", output.human);
@@ -1836,6 +1841,7 @@ fn main() -> ExitCode {
                 } else {
                     err.json.clone()
                 };
+                let json = bounded_machine_json(json, cli.full);
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
@@ -10049,6 +10055,61 @@ fn success_json(command: &str, project_root: Option<&Path>, extra: Value) -> Val
         payload.extend(extra);
     }
     Value::Object(payload)
+}
+
+fn bounded_machine_json(mut value: Value, full: bool) -> Value {
+    bound_machine_lists(&mut value, full);
+    value
+}
+
+fn bound_machine_lists(value: &mut Value, full: bool) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                bound_machine_lists(item, full);
+            }
+        }
+        Value::Object(object) => {
+            for item in object.values_mut() {
+                bound_machine_lists(item, full);
+            }
+            let array_keys = object
+                .iter()
+                .filter(|(_, value)| value.is_array())
+                .map(|(key, _)| key.clone())
+                .collect::<Vec<_>>();
+            for key in array_keys {
+                let Some(Value::Array(items)) = object.remove(&key) else {
+                    continue;
+                };
+                let (items, metadata) = bounded_list_json(items, full);
+                object.insert(key.clone(), Value::Array(items));
+                if let Some(metadata) = metadata {
+                    object.insert(format!("{key}_truncated"), Value::Bool(true));
+                    object.insert(
+                        format!("{key}_total_count"),
+                        Value::Number(metadata.total_count.into()),
+                    );
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+struct BoundedListMetadata {
+    total_count: usize,
+}
+
+fn bounded_list_json(items: Vec<Value>, full: bool) -> (Vec<Value>, Option<BoundedListMetadata>) {
+    if full || items.len() <= MACHINE_LIST_LIMIT {
+        return (items, None);
+    }
+    let total_count = items.len();
+    (
+        items.into_iter().take(MACHINE_LIST_LIMIT).collect(),
+        Some(BoundedListMetadata { total_count }),
+    )
 }
 
 fn project_human_output(project_root: &Path, body: String) -> String {

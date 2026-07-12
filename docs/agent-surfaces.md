@@ -13,6 +13,12 @@ It is not an upstream standards dossier; use upstream vendor documentation for f
 
 Human-mode parse errors retain Clap's normal formatted help and diagnostics.
 
+## Bounded machine output
+
+Machine output (`--agent` or `--json`) bounds long lists by default so a command response remains safe to place in agent context. Lists longer than 15 entries retain the first 15 values and add sibling fields named `<list>_truncated: true` and `<list>_total_count: N`; the original list field remains present so consumers can detect the shortened response without a schema-version change.
+
+Pass the global `--full` flag with `--agent` or `--json` to restore complete list enumeration. Human output is unchanged.
+
 ## Claude Code
 
 - Root instruction document: `CLAUDE.md`

@@ -58,6 +58,7 @@ fn cmd_demo_create(
         config: None,
         overlay: None,
         verbose: cli.verbose,
+        full: cli.full,
         quiet: cli.quiet,
         command: Commands::Version,
     };

@@ -3,6 +3,78 @@ use super::*;
 // Sync, apply, and generated-output workflow tests.
 
 #[test]
+fn agent_sync_preview_bounds_generated_paths_unless_full_is_requested() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let packs = [
+        "agent-candidate-library-installer",
+        "agentic-artifact-forge",
+        "library-organization-guide",
+        "local-only-example",
+        "metactl-library-diagnostics",
+        "metactl-project-onboarding",
+        "metactl-skill-improvement",
+        "migration-guard",
+        "python-refactor",
+        "unit-test-loop",
+    ];
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_str(&fs::read_to_string(&config_path).expect("config"))
+            .expect("parse config");
+    config.as_mapping_mut().expect("config mapping").insert(
+        serde_yaml::Value::String("packs".to_string()),
+        serde_yaml::Value::Sequence(
+            packs
+                .iter()
+                .map(|pack| serde_yaml::Value::String((*pack).to_string()))
+                .collect(),
+        ),
+    );
+    fs::write(
+        &config_path,
+        serde_yaml::to_string(&config).expect("serialize config"),
+    )
+    .expect("updated config");
+
+    let bounded = run_cli(project.path(), &["--agent", "sync", "--adopt", "preview"]);
+    assert!(
+        bounded.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&bounded),
+        stderr(&bounded)
+    );
+    assert!(stdout(&bounded).len() < 20_000, "{}", stdout(&bounded));
+    let bounded_json = json_output(&bounded);
+    let outputs = bounded_json["compile"]["targets"][0]["generated_outputs"]
+        .as_array()
+        .expect("bounded generated outputs");
+    assert_eq!(outputs.len(), 15);
+    assert_eq!(
+        bounded_json["compile"]["targets"][0]["generated_outputs_truncated"],
+        true
+    );
+    let total = bounded_json["compile"]["targets"][0]["generated_outputs_total_count"]
+        .as_u64()
+        .expect("total count");
+    assert!(total > 15, "expected more than the bounded threshold");
+
+    let full = run_cli(
+        project.path(),
+        &["--agent", "--full", "sync", "--adopt", "preview"],
+    );
+    assert!(full.status.success(), "{}", stderr(&full));
+    let full_json = json_output(&full);
+    assert_eq!(
+        full_json["compile"]["targets"][0]["generated_outputs"]
+            .as_array()
+            .expect("full generated outputs")
+            .len() as u64,
+        total
+    );
+}
+
+#[test]
 fn setup_yes_with_explicit_target_creates_config_without_sync() {
     let project = TempDir::new().expect("tempdir");
     let output = run_cli(
