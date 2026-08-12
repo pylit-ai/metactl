@@ -134,6 +134,17 @@ pub(crate) fn stage_outputs(
         .join("generated")
         .join(&target.id);
     fs::create_dir_all(&stage_root).with_context(|| format!("create {}", stage_root.display()))?;
+    let manifest_path = stage_root.join("compile.manifest.json");
+    let previous_manifest = load_compile_manifest_if_present(&manifest_path)?;
+    if let Some(previous) = &previous_manifest {
+        if previous.target != *target {
+            return Err(anyhow!(
+                "previous compile manifest target {} does not match staging target {}",
+                previous.target.id,
+                target.id
+            ));
+        }
+    }
 
     let mut outputs = Vec::new();
     let mut seen_destinations = BTreeSet::new();
@@ -174,10 +185,22 @@ pub(crate) fn stage_outputs(
         });
     }
 
+    let expected_paths = outputs
+        .iter()
+        .map(|output| output.path.clone())
+        .collect::<BTreeSet<_>>();
+    let pruned_outputs = prune_stale_outputs(
+        project_root,
+        &stage_root,
+        previous_manifest.as_ref(),
+        &expected_paths,
+    )?;
+
     let manifest = CompileManifest {
         api_version: crate::types::API_VERSION.to_string(),
         target: target.clone(),
         generated_outputs: outputs,
+        pruned_outputs,
         surface_selection_mode,
         surface_selection,
         apply_modes_supported,
@@ -185,7 +208,6 @@ pub(crate) fn stage_outputs(
         degradations,
     };
 
-    let manifest_path = stage_root.join("compile.manifest.json");
     atomic_write(
         &manifest_path,
         &serde_json::to_vec_pretty(&manifest).context("serialize compile manifest")?,
@@ -193,6 +215,99 @@ pub(crate) fn stage_outputs(
     .with_context(|| format!("write {}", manifest_path.display()))?;
 
     Ok(manifest)
+}
+
+fn load_compile_manifest_if_present(path: &Path) -> Result<Option<CompileManifest>> {
+    match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes)
+            .with_context(|| format!("parse previous compile manifest {}", path.display()))
+            .map(Some),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err).with_context(|| format!("read {}", path.display())),
+    }
+}
+
+fn prune_stale_outputs(
+    project_root: &Path,
+    stage_root: &Path,
+    previous_manifest: Option<&CompileManifest>,
+    expected_paths: &BTreeSet<String>,
+) -> Result<Vec<String>> {
+    let Some(previous_manifest) = previous_manifest else {
+        return Ok(Vec::new());
+    };
+    let mut pruned = Vec::new();
+    for output in &previous_manifest.generated_outputs {
+        if expected_paths.contains(&output.path) {
+            continue;
+        }
+        let stale_path = safe_staged_output_path(project_root, stage_root, &output.path)?;
+        match fs::symlink_metadata(&stale_path) {
+            Ok(metadata) if metadata.file_type().is_dir() => {
+                return Err(anyhow!(
+                    "refusing to prune directory recorded as generated output: {}",
+                    stale_path.display()
+                ));
+            }
+            Ok(_) => {
+                fs::remove_file(&stale_path)
+                    .with_context(|| format!("prune stale output {}", stale_path.display()))?;
+                pruned.push(output.path.clone());
+                prune_empty_staging_parents(stale_path.parent(), stage_root)?;
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("stat stale output {}", stale_path.display()));
+            }
+        }
+    }
+    pruned.sort();
+    pruned.dedup();
+    Ok(pruned)
+}
+
+fn safe_staged_output_path(
+    project_root: &Path,
+    stage_root: &Path,
+    output_path: &str,
+) -> Result<PathBuf> {
+    let relative = Path::new(output_path);
+    if relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(anyhow!(
+            "refusing to prune unsafe generated output path '{}'",
+            output_path
+        ));
+    }
+    let absolute = project_root.join(relative);
+    if absolute == stage_root || !absolute.starts_with(stage_root) {
+        return Err(anyhow!(
+            "refusing to prune generated output outside target staging root: {}",
+            absolute.display()
+        ));
+    }
+    Ok(absolute)
+}
+
+fn prune_empty_staging_parents(mut parent: Option<&Path>, stage_root: &Path) -> Result<()> {
+    while let Some(directory) = parent {
+        if directory == stage_root || !directory.starts_with(stage_root) {
+            break;
+        }
+        let mut entries = fs::read_dir(directory)
+            .with_context(|| format!("inspect staging directory {}", directory.display()))?;
+        if entries.next().transpose()?.is_some() {
+            break;
+        }
+        fs::remove_dir(directory)
+            .with_context(|| format!("remove empty staging directory {}", directory.display()))?;
+        parent = directory.parent();
+    }
+    Ok(())
 }
 
 fn write_staged_if_changed(path: &Path, contents: &[u8], durable: bool) -> Result<()> {
@@ -1333,6 +1448,20 @@ mod tests {
     }
 
     #[test]
+    fn stale_output_pruning_rejects_paths_outside_target_stage_root() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let stage_root = project.path().join(".metactl/generated/codex-cli");
+        std::fs::create_dir_all(&stage_root).expect("create stage root");
+
+        for unsafe_path in ["../outside.md", ".metactl/generated/claude-code/CLAUDE.md"] {
+            assert!(
+                safe_staged_output_path(project.path(), &stage_root, unsafe_path).is_err(),
+                "unsafe prune path was accepted: {unsafe_path}"
+            );
+        }
+    }
+
+    #[test]
     fn noop_apply_preserves_patch_managed_file_digest() {
         let project = tempfile::tempdir().expect("tempdir");
         let project_root = project.path();
@@ -1358,6 +1487,7 @@ mod tests {
             api_version: "metactl/v2alpha1".to_string(),
             target: target.clone(),
             generated_outputs: vec![output],
+            pruned_outputs: Vec::new(),
             surface_selection_mode: None,
             surface_selection: Vec::new(),
             apply_modes_supported: vec![ApplyMode::Patch],

@@ -1046,6 +1046,8 @@ pub struct CompileManifest {
     pub api_version: String,
     pub target: Ref,
     pub generated_outputs: Vec<GeneratedOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pruned_outputs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_selection_mode: Option<SurfaceSelectionMode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
