@@ -43,10 +43,11 @@ use library_hooks::{
 };
 use library_instruction::{
     derive_skill_surfaces, effective_surface_selection_mode, emit_pack_extension_manifests,
-    emit_pack_resource_outputs, expand_runtime_template, expand_skill_path, frontmatter_name,
-    instruction_document, instruction_document_plan, merged_skill_document,
-    semantic_carrier_parent_slug, should_emit_separate_surfaces, skill_compile_target_for,
-    skill_surface_document, slugify_surface_candidate, surface_selection_decisions,
+    emit_pack_resource_outputs, emit_skill_package_resources, expand_runtime_template,
+    expand_skill_path, frontmatter_name, instruction_document, instruction_document_plan,
+    merged_skill_document, semantic_carrier_parent_slug, should_emit_separate_surfaces,
+    skill_compile_target_for, skill_surface_document, slugify_surface_candidate,
+    surface_selection_decisions,
 };
 use library_validation::{validate_skill_frontmatter_text, validate_staged_outputs};
 
@@ -1260,7 +1261,7 @@ fn synthesize_outputs(
                                     "skill-{}-{}",
                                     pack.manifest.id, surface.surface_slug
                                 )),
-                                destination_path: destination,
+                                destination_path: destination.clone(),
                                 kind: GeneratedOutputKind::SkillFolder,
                                 contents: skill_surface_document(
                                     pack,
@@ -1281,6 +1282,12 @@ fn synthesize_outputs(
                                 materialize_as_regular_file: compile_target
                                     .materialize_as_regular_file,
                             });
+                            outputs.extend(emit_skill_package_resources(
+                                compile_target,
+                                pack,
+                                surface,
+                                &destination,
+                            )?);
                         }
                     } else {
                         let destination = expand_skill_path(
@@ -1306,7 +1313,7 @@ fn synthesize_outputs(
                         };
                         outputs.push(StagedOutputInput {
                             id: Some(format!("skill-{}", pack.manifest.id)),
-                            destination_path: destination,
+                            destination_path: destination.clone(),
                             kind: GeneratedOutputKind::SkillFolder,
                             contents: merged_skill_document(pack)?,
                             instruction_mode: None,
@@ -1342,6 +1349,14 @@ fn synthesize_outputs(
                             )),
                             materialize_as_regular_file: compile_target.materialize_as_regular_file,
                         });
+                        for surface in &emitted_surfaces {
+                            outputs.extend(emit_skill_package_resources(
+                                compile_target,
+                                pack,
+                                surface,
+                                &destination,
+                            )?);
+                        }
                     }
                 }
             }

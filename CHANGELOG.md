@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Project declared Agent Skill companion resources from `references/`, `scripts/`, `templates/`, and `assets/` beside each generated `SKILL.md`, with package-relative paths and per-resource source and ownership receipts.
+- Record stale generated paths removed during recompilation in `compile.manifest.json` and CLI compile output.
+- Add multi-target package-closure, missing-resource, managed-only pruning, and path-confinement regression coverage.
+
+### Changed
+
+- Fail skill compilation when a declared package companion is missing instead of synthesizing placeholder content.
+- Prune only outputs owned by the previous target compile manifest, retaining unmanaged neighboring files and removing empty managed directories.
+- Aligned the target capability schema with the existing `import_stub` mode and
+  `import_stub_path` compile-target field.
+
 ## 0.1.21 - 2026-07-03
 
 ### Added
