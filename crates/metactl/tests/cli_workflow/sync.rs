@@ -2,6 +2,68 @@ use super::*;
 
 // Sync, apply, and generated-output workflow tests.
 
+fn copy_directory(source: &Path, destination: &Path) {
+    fs::create_dir_all(destination).expect("create copy destination");
+    for entry in fs::read_dir(source).expect("read copy source") {
+        let entry = entry.expect("read copy entry");
+        let source_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+        if entry.file_type().expect("copy file type").is_dir() {
+            copy_directory(&source_path, &destination_path);
+        } else {
+            fs::copy(&source_path, &destination_path).expect("copy library file");
+        }
+    }
+}
+
+#[test]
+fn cli_compile_import_stub_uses_bundled_default_for_stale_library_target() {
+    let project = TempDir::new().expect("project");
+    let stale_library = TempDir::new().expect("stale library");
+    let starter_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/starter");
+    copy_directory(&starter_root, stale_library.path());
+
+    let target_path = stale_library.path().join("targets/claude-code.json");
+    let mut target: Value = serde_json::from_slice(&fs::read(&target_path).expect("read target"))
+        .expect("parse target");
+    target["compile_targets"]
+        .as_array_mut()
+        .expect("compile targets")
+        .iter_mut()
+        .find(|entry| entry["output_kind"] == "claude_md")
+        .expect("claude target")
+        .as_object_mut()
+        .expect("claude target object")
+        .remove("import_stub_path");
+    fs::write(
+        &target_path,
+        serde_json::to_vec_pretty(&target).expect("serialize stale target"),
+    )
+    .expect("write stale target");
+
+    let init = run_cli(project.path(), &["init", "--target", "claude-code"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let config_path = project.path().join("metactl.yaml");
+    let config = fs::read_to_string(&config_path).expect("read project config");
+    fs::write(
+        &config_path,
+        format!(
+            "{config}\nstarter_library:\n  - {}\n",
+            stale_library.path().display()
+        ),
+    )
+    .expect("configure stale library");
+
+    let compile = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "import-stub"],
+    );
+    assert!(compile.status.success(), "{}", stderr(&compile));
+    assert!(fs::read_to_string(project.path().join("CLAUDE.md"))
+        .expect("read generated stub")
+        .contains("@AGENTS.md"));
+}
+
 #[test]
 fn cli_compile_apply_import_stub_bridges_claude_to_agents_and_detects_drift() {
     let project = TempDir::new().expect("tempdir");
@@ -237,7 +299,7 @@ fn cli_sync_greenfield_workflow() {
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md")
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
         .exists());
 }
 
@@ -251,7 +313,7 @@ fn cli_sync_codex_skill_outputs_are_regular_files() {
 
     let skill_path = project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md");
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md");
     let metadata = fs::symlink_metadata(&skill_path).expect("skill metadata");
     assert!(
         metadata.file_type().is_file(),
@@ -286,7 +348,7 @@ fn cli_sync_root_instruction_outputs_are_regular_files_under_symlink_apply() {
 
     let skill_path = project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md");
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md");
     let skill_metadata = fs::symlink_metadata(&skill_path).expect("skill metadata");
     assert!(
         skill_metadata.file_type().is_file() && !skill_metadata.file_type().is_symlink(),
@@ -598,7 +660,7 @@ fn cli_sync_patch_adopts_identical_unmanaged_skill_outputs() {
     let compile = run_cli(project.path(), &["compile"]);
     assert!(compile.status.success(), "{}", stderr(&compile));
 
-    let skill_path = ".codex/skills/python-refactor/python-refactor/SKILL.md";
+    let skill_path = ".agents/skills/python-refactor/python-refactor/SKILL.md";
     let staged = project
         .path()
         .join(".metactl/generated/codex-cli")
@@ -623,7 +685,7 @@ fn cli_sync_patch_backs_up_conflicting_unmanaged_skill_outputs() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
 
-    let skill_path = ".codex/skills/python-refactor/python-refactor/SKILL.md";
+    let skill_path = ".agents/skills/python-refactor/python-refactor/SKILL.md";
     let destination = project.path().join(skill_path);
     fs::create_dir_all(destination.parent().expect("skill parent")).expect("skill dir");
     fs::write(&destination, "local unmanaged skill body").expect("seed conflicting skill");
@@ -1010,6 +1072,18 @@ fn cli_sync_claude_settings_is_regular_file_not_symlink() {
     assert!(
         !settings_path.is_symlink(),
         "shared Claude settings should be materialized as a regular file, not a symlink"
+    );
+    let settings: Value =
+        serde_json::from_str(&fs::read_to_string(&settings_path).expect("read Claude settings"))
+            .expect("parse Claude settings");
+    assert_eq!(
+        settings["permissions"],
+        json!({
+            "allow": ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit"],
+            "ask": ["Bash", "WebFetch"],
+            "deny": ["Bash(rm -rf:*)"],
+            "defaultMode": "acceptEdits"
+        })
     );
 }
 

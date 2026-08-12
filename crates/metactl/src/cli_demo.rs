@@ -79,6 +79,7 @@ fn cmd_demo_create(
         Some(cmd_sync(
             &demo_cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,

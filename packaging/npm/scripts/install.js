@@ -11,8 +11,9 @@ const targets = {
   "darwin-arm64": "aarch64-apple-darwin"
 };
 const target = targets[`${process.platform}-${process.arch}`];
+const requestedVersion = process.env.METACTL_VERSION || pkg.version;
 if (!target) {
-  throw new Error(`No prebuilt metactl release for ${process.platform}-${process.arch}; use cargo install metactl --locked.`);
+  throw new Error(`No prebuilt metactl release for ${process.platform}-${process.arch}; use cargo install metactl --version ${requestedVersion} --locked.`);
 }
 
 function warnUnverifiedAttestation(archive, warn = console.warn) {
@@ -28,7 +29,12 @@ function get(url) {
     https.get(url, { headers: { "User-Agent": "metactl-npm-installer" } }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
         response.resume();
-        resolve(get(response.headers.location));
+        const redirect = new URL(response.headers.location, url);
+        if (redirect.protocol !== "https:") {
+          reject(new Error(`Refusing non-HTTPS redirect for ${url}`));
+          return;
+        }
+        resolve(get(redirect));
         return;
       }
       if (response.statusCode !== 200) {
@@ -44,7 +50,7 @@ function get(url) {
 }
 
 async function install() {
-  const tag = `v${process.env.METACTL_VERSION || pkg.version}`;
+  const tag = `v${requestedVersion}`;
   const archive = `metactl-${tag}-${target}.tar.gz`;
   const base = `https://github.com/pylit-ai/metactl/releases/download/${tag}`;
   const [archiveBytes, checksumBytes] = await Promise.all([get(`${base}/${archive}`), get(`${base}/${archive}.sha256`)]);

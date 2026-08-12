@@ -88,7 +88,7 @@ fn fleet_sync_preview_does_not_mutate_linked_project() {
     assert_eq!(json["projects"][0]["status"], "planned");
     assert_eq!(
         json["scope_note"],
-        "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills."
+        "Fleet sync writes repo-local .agents/skills in linked projects, reads legacy .codex/skills only for safe reconciliation, and does not install user-global Personal skills under ~/.codex/skills."
     );
     assert_eq!(
         json["projects"][0]["skill_visibility"]["target"],
@@ -102,7 +102,7 @@ fn fleet_sync_preview_does_not_mutate_linked_project() {
 
     let human = run_cli(project.path(), &["fleet", "sync", "--preview"]);
     assert!(human.status.success(), "{}", stderr(&human));
-    assert!(stdout(&human).contains("Fleet sync updates repo-local .codex/skills"));
+    assert!(stdout(&human).contains("Fleet sync writes repo-local .agents/skills"));
 }
 
 #[test]

@@ -248,7 +248,7 @@ pub(super) fn resolve_skill_source_dir(project_root: &Path, input: &Path) -> Res
 
     let name = input.to_string_lossy();
     validate_skill_name(&name)?;
-    let repo_root = project_root.join(".codex").join("skills");
+    let repo_root = project_root.join(".agents").join("skills");
     let matches = discover_codex_skill_entries(&repo_root)?
         .into_iter()
         .filter(|entry| entry.name == name)

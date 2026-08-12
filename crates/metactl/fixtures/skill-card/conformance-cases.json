@@ -1,0 +1,86 @@
+{
+  "schema_version": "1",
+  "cases": [
+    {
+      "id": "legacy-v1",
+      "expected": "accept",
+      "expected_canonical_hash": "sha256:442ba369af68aaf9807d3672567367b946b4ddd7f7369c2301cbd2b622f4a5d0",
+      "frontmatter": {"name": "legacy", "description": "Legacy card"},
+      "card": {"schema_version": "0.1", "name": "legacy"}
+    },
+    {
+      "id": "valid-v2",
+      "expected": "accept",
+      "expected_canonical_hash": "sha256:5a82798960616000b34db0820ac64d3fa9421724292f8aca516de772e18edc15",
+      "frontmatter": {"name": "valid", "description": "Valid card"},
+      "card": {
+        "schema_version": "2alpha1",
+        "name": "valid",
+        "version": "1.0.0",
+        "summary": "Valid",
+        "aliases": ["valid alias"],
+        "intents": {"positive": ["do valid work"], "negative": []},
+        "facets": {"mode": ["read-only"]},
+        "reviewed_relations": [],
+        "host_compatibility": {"targets": ["codex-cli"]},
+        "provenance": {"source_kind": "first_party", "reviewed_by": "fixture-owner", "reviewed_at": "2026-08-12"}
+      }
+    },
+    {
+      "id": "malformed-v2",
+      "expected": "reject",
+      "expected_canonical_hash": null,
+      "frontmatter": {"name": "malformed", "description": "Malformed card"},
+      "card": {
+        "schema_version": "2alpha1",
+        "name": "malformed",
+        "version": "1.0.0",
+        "summary": "Malformed",
+        "aliases": ["duplicate", "Duplicate"],
+        "intents": {"positive": ["do work"], "negative": []},
+        "facets": {},
+        "reviewed_relations": [],
+        "host_compatibility": {"targets": ["codex-cli"]},
+        "provenance": {"source_kind": "first_party", "reviewed_by": "fixture-owner", "reviewed_at": "2026-08-12"}
+      }
+    },
+    {
+      "id": "unknown-optional-v2",
+      "expected": "degrade",
+      "expected_canonical_hash": "sha256:f595cf894a3c53167a1d2821ebebefe2b733bd57487043524a762ae55c9fbb63",
+      "frontmatter": {"name": "future-optional", "description": "Future optional card"},
+      "card": {
+        "schema_version": "2alpha1",
+        "name": "future-optional",
+        "version": "1.0.0",
+        "summary": "Future optional",
+        "aliases": [],
+        "intents": {"positive": ["do future optional work"], "negative": []},
+        "facets": {},
+        "reviewed_relations": [],
+        "host_compatibility": {"targets": ["codex-cli"]},
+        "provenance": {"source_kind": "first_party", "reviewed_by": "fixture-owner", "reviewed_at": "2026-08-12"},
+        "future_hint": {"enabled": true}
+      }
+    },
+    {
+      "id": "unknown-required-v2",
+      "expected": "reject",
+      "expected_canonical_hash": null,
+      "frontmatter": {"name": "future-required", "description": "Future required card"},
+      "card": {
+        "schema_version": "2alpha1",
+        "name": "future-required",
+        "version": "1.0.0",
+        "summary": "Future required",
+        "aliases": [],
+        "intents": {"positive": ["do future required work"], "negative": []},
+        "facets": {},
+        "reviewed_relations": [],
+        "host_compatibility": {"targets": ["codex-cli"]},
+        "provenance": {"source_kind": "first_party", "reviewed_by": "fixture-owner", "reviewed_at": "2026-08-12"},
+        "requires_features": ["future-semantic"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "kind": "pack",
+  "id": "package-closure",
+  "version": "1.0.0",
+  "title": "Package Closure",
+  "description": "Regression fixture for complete Agent Skill package projection.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "org_validated",
+  "requires_confirmation": false,
+  "task_tags": ["package", "closure"],
+  "compatible_roles": ["builder"],
+  "compatible_targets": ["codex-cli", "claude-code"],
+  "resources": [
+    {
+      "path": "packs/package-closure/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/package-closure/references/guide.md",
+      "kind": "example",
+      "required": true
+    },
+    {
+      "path": "packs/package-closure/scripts/check.sh",
+      "kind": "script",
+      "required": true
+    },
+    {
+      "path": "packs/package-closure/templates/report.md",
+      "kind": "example",
+      "required": true
+    },
+    {
+      "path": "packs/package-closure/assets/mark.svg",
+      "kind": "asset",
+      "required": true
+    },
+    {
+      "path": "packs/package-closure/secondary/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/package-closure/secondary/references/secondary.md",
+      "kind": "example",
+      "required": true
+    }
+  ],
+  "metadata": {
+    "fixture": "skill-package-closure"
+  }
+}

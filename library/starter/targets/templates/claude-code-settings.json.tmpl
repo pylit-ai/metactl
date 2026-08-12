@@ -1,9 +1,10 @@
 {
   "hooks": {{hooks_json}},
   "permissions": {
-    "allow": ["Read", "Glob", "Grep"],
-    "ask": ["Write", "Edit", "MultiEdit", "Bash", "WebFetch"],
-    "deny": ["Bash(rm -rf:*)"]
+    "allow": ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit"],
+    "ask": ["Bash", "WebFetch"],
+    "deny": ["Bash(rm -rf:*)"],
+    "defaultMode": "acceptEdits"
   },
   "policy": "{{policy_id}}"
 }

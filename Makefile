@@ -10,7 +10,7 @@ MCP_SCOPE ?= project
 MCP_LIBRARY_ROOT ?= $(CURDIR)/library/starter
 MCP_PROJECT_ROOT ?= $(CURDIR)
 
-.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval metactl-surface-benchmark run-metactld smoke-stdio smoke-cli smoke-dogfood smoke-packaged-metactl sync-packaged-starter-mirror verify-packaged-starter-mirror verify-v1-charter verify-public-boundary verify-architecture-metrics verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-release-consumers verify-v1-release-gate verify-v1-lightweight-control-plane verify
+.PHONY: validate-contracts metactl-validate-contracts metactl-test metactl-check metactl-human-sim metactl-install metactld-install metactl-mcp-install metactl-mcp-smoke metactl-search-eval metactl-skill-eval metactl-surface-benchmark run-metactld smoke-stdio smoke-cli smoke-dogfood smoke-packaged-metactl sync-packaged-starter-mirror verify-packaged-starter-mirror verify-v1-charter verify-public-boundary verify-architecture-metrics verify-docs-links verify-docs-commands verify-version-consistency verify-mcp-adversarial verify-release-consumers verify-v1-release-gate verify-v1-lightweight-control-plane verify
 validate-contracts: $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/validate_contracts.py --include-starter-library --include-targets --include-knowledge-fixtures --library-stack-fixtures
 
@@ -21,6 +21,10 @@ metactl-test:
 
 metactl-check:
 	$(CARGO) check -p metactl -p metactld
+
+metactl-human-sim:
+	$(CARGO) build --offline -p metactl
+	bash tests/human-sim/run.sh
 
 metactl-search-eval: $(VALIDATE_STAMP)
 	$(CARGO) build -p metactl
