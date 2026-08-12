@@ -100,6 +100,9 @@
           "path_template": {
             "$ref": "common.schema.json#/$defs/path"
           },
+          "import_stub_path": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
           "resource_kinds": {
             "type": "array",
             "items": {

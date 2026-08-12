@@ -1,6 +1,6 @@
 # CI Drift Gate
 
-Use the `metactl-check` action to fail a pull request when generated agent surfaces drift from the repository's metactl configuration. The action installs a release archive only after its SHA-256 checksum matches the release checksum; if an archive is unavailable for the runner, it falls back to `cargo install --locked`.
+Use the `metactl-check` action to fail a pull request when generated agent surfaces drift from the repository's metactl configuration. The action installs a release archive only after its SHA-256 checksum matches the release checksum and GitHub build provenance verifies. If the runner lacks a compatible GitHub CLI, checksum verification remains mandatory, provenance verification is skipped with an explicit workflow warning, and installation continues. If an archive is unavailable for the runner, the action falls back to `cargo install --locked`.
 
 Copy [.github/workflows/self-drift-gate.yml.example](../../.github/workflows/self-drift-gate.yml.example) into your repository as `.github/workflows/metactl-drift-gate.yml`:
 
