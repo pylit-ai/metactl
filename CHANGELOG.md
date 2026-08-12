@@ -23,6 +23,8 @@
   `.codex/skills` remains read-only reconciliation input and user-global Personal
   skills remain under `~/.codex/skills`.
 - Hardened generated, destination, backup, restore, and symlink path containment.
+- Scoped duplicate-trigger diagnostics to one consuming runtime so intentional
+  cross-target skill projections are not reported as conflicts.
 
 ## 0.1.21 - 2026-07-03
 
