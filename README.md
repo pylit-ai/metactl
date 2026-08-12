@@ -62,7 +62,7 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | crates.io | `cargo install metactl --version 0.1.21 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 
-All prebuilt paths verify the release SHA-256 checksum before use. `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
+All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Action also verifies GitHub build provenance when the runner provides a compatible GitHub CLI. The npm shim emits an explicit warning and supports [manual provenance verification](docs/user/install-verification.md). `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
 
 ## Quickstart
 

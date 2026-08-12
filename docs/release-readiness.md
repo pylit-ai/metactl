@@ -57,6 +57,7 @@ cargo run -p metactld -- --version
 ```
 
 Release artifacts should be created through `.github/workflows/release.yml`, which produces SHA-256 checksums and GitHub provenance attestations.
+Before publishing the draft, verify each archive with `gh attestation verify <archive> --repo pylit-ai/metactl`. Consumer verification behavior and the npm manual procedure are documented in [install verification](user/install-verification.md).
 The release workflow packages GitHub binary archives. crates.io publishing is run in dependency order because `metactld` depends on the matching published `metactl` crate version.
 
 Release notes for `0.1.21` are in [CHANGELOG.md](../CHANGELOG.md).
