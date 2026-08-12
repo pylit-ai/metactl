@@ -93,43 +93,28 @@ pub struct PartialProjectConfig {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceType {
+    #[default]
     Local,
     Git,
 }
 
-impl Default for SourceType {
-    fn default() -> Self {
-        Self::Local
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceVisibility {
+    #[default]
     Public,
     Private,
 }
 
-impl Default for SourceVisibility {
-    fn default() -> Self {
-        Self::Public
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceLockPublicity {
+    #[default]
     Public,
     Private,
-}
-
-impl Default for SourceLockPublicity {
-    fn default() -> Self {
-        Self::Public
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1701,7 +1686,7 @@ pub fn preferred_apply_mode_for_target(
     target: &crate::TargetCapabilityMatrix,
     requested: Option<ApplyMode>,
 ) -> ApplyMode {
-    requested.unwrap_or_else(|| {
+    requested.unwrap_or({
         if target.capabilities.local_scripts {
             ApplyMode::Symlink
         } else {
@@ -1918,21 +1903,23 @@ mod tests {
                 disabled: false,
             },
         ];
-        let mut project = PartialProjectConfig::default();
-        project.linked_projects = vec![
-            LinkedProjectRecord {
-                id: "beta".to_string(),
-                path: "../beta-local".to_string(),
-                profile: Some("local".to_string()),
-                disabled: true,
-            },
-            LinkedProjectRecord {
-                id: "gamma".to_string(),
-                path: "../gamma".to_string(),
-                profile: None,
-                disabled: false,
-            },
-        ];
+        let project = PartialProjectConfig {
+            linked_projects: vec![
+                LinkedProjectRecord {
+                    id: "beta".to_string(),
+                    path: "../beta-local".to_string(),
+                    profile: Some("local".to_string()),
+                    disabled: true,
+                },
+                LinkedProjectRecord {
+                    id: "gamma".to_string(),
+                    path: "../gamma".to_string(),
+                    profile: None,
+                    disabled: false,
+                },
+            ],
+            ..Default::default()
+        };
 
         let merged = merge_project_config(default_project_config(), profile, project);
 

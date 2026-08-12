@@ -1392,7 +1392,7 @@ fn infer_pack_id(path: &Path) -> Option<String> {
         .map(|c| c.as_os_str().to_string_lossy().to_string())
         .collect();
     for window in components.windows(4) {
-        if window.get(0).map(|s| s.as_str()) == Some(".codex")
+        if window.first().map(|s| s.as_str()) == Some(".codex")
             && window.get(1).map(|s| s.as_str()) == Some("skills")
         {
             return window.get(2).cloned();

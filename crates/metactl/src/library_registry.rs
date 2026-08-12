@@ -641,13 +641,15 @@ impl LibraryRegistry {
         let manifest = materializer::stage_outputs(
             &project_root,
             &params.target_capability.target_ref(),
-            outputs,
-            effective_surface_selection_mode,
-            surface_selection,
-            supported_apply_modes(&params.target_capability),
-            params.resolve_graph.brownfield_mode.clone(),
-            degradations,
-            params.durable_staging,
+            materializer::StageOutputsParams {
+                inputs: outputs,
+                surface_selection_mode: effective_surface_selection_mode,
+                surface_selection,
+                apply_modes_supported: supported_apply_modes(&params.target_capability),
+                brownfield_mode: params.resolve_graph.brownfield_mode.clone(),
+                degradations,
+                durable: params.durable_staging,
+            },
         )?;
 
         Ok(CompileResult {
@@ -2441,7 +2443,7 @@ fn substitute_tokens(src: &str, ctx: &std::collections::BTreeMap<String, String>
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
@@ -2539,7 +2541,7 @@ mod tests {
         }
     }
 
-    fn seed_search_lifecycle_library(root: &PathBuf) {
+    fn seed_search_lifecycle_library(root: &Path) {
         fs::create_dir_all(root.join("packs")).expect("packs dir");
         fs::create_dir_all(root.join("vendor/legacy-python-audit")).expect("skill dir");
         fs::write(
@@ -2737,7 +2739,7 @@ mod tests {
     #[test]
     fn search_full_text_matches_instruction_body_terms() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -2763,7 +2765,7 @@ mod tests {
     #[test]
     fn search_results_include_match_evidence_and_lifecycle_hints() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -2937,7 +2939,7 @@ mod tests {
     #[test]
     fn search_ranking_remains_pack_first_and_deterministic() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),

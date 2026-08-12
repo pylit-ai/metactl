@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -188,10 +188,10 @@ fn walk_files(project_root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             walk_files(project_root, &path, out)?;
-        } else if file_type.is_file() || file_type.is_symlink() {
-            if path.metadata().map(|meta| meta.is_file()).unwrap_or(false) {
-                out.push(relative(project_root, &path));
-            }
+        } else if (file_type.is_file() || file_type.is_symlink())
+            && path.metadata().map(|meta| meta.is_file()).unwrap_or(false)
+        {
+            out.push(relative(project_root, &path));
         }
     }
     Ok(())
@@ -267,7 +267,7 @@ fn sha256_path(path: &Path) -> Result<String> {
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
 }
 
-fn relative(project_root: &Path, path: &PathBuf) -> String {
+fn relative(project_root: &Path, path: &Path) -> String {
     path.strip_prefix(project_root)
         .unwrap_or(path)
         .to_string_lossy()

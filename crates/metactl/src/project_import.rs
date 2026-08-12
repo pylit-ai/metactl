@@ -813,23 +813,25 @@ fn build_project_import_plan(
         &fields,
         &raw,
         source_context.as_ref().map(|context| &context.config_file),
-        fields_requested_sources,
-        options.include_public_sources,
-        options.include_private_sources,
+        ProjectImportSourceSelection {
+            fields_requested: fields_requested_sources,
+            include_public: options.include_public_sources,
+            include_private: options.include_private_sources,
+        },
         &mut warnings,
     )?;
-    if mode == ProjectImportResolvedMode::ProfileBound && raw.extends_profile.is_some() {
-        if source_context
+    if mode == ProjectImportResolvedMode::ProfileBound
+        && raw.extends_profile.is_some()
+        && source_context
             .as_ref()
             .and_then(|context| context.active_profile.as_ref())
             .is_none()
-        {
-            warnings.push(json!({
-                "code": "profile_unavailable",
-                "message": "The source uses extends_profile, but the profile did not resolve in this environment.",
-                "profile": raw.extends_profile,
-            }));
-        }
+    {
+        warnings.push(json!({
+            "code": "profile_unavailable",
+            "message": "The source uses extends_profile, but the profile did not resolve in this environment.",
+            "profile": raw.extends_profile,
+        }));
     }
     let equivalence = project_import_equivalence(mode, &warnings);
     Ok(ProjectImportPlan {
@@ -1366,14 +1368,19 @@ fn resolve_project_import_mode(
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ProjectImportSourceSelection {
+    fields_requested: bool,
+    include_public: bool,
+    include_private: bool,
+}
+
 fn project_import_project_config(
     mode: ProjectImportResolvedMode,
     fields: &BTreeSet<ProjectImportField>,
     raw: &PartialProjectConfig,
     effective: Option<&ProjectConfigFile>,
-    fields_requested_sources: bool,
-    include_public_sources: bool,
-    include_private_sources: bool,
+    source_selection: ProjectImportSourceSelection,
     warnings: &mut Vec<Value>,
 ) -> std::result::Result<PartialProjectConfig, CliError> {
     let mut projected = PartialProjectConfig {
@@ -1416,9 +1423,9 @@ fn project_import_project_config(
             copy_import_sources(
                 &mut projected,
                 &raw.sources,
-                fields_requested_sources,
-                include_public_sources,
-                include_private_sources,
+                source_selection.fields_requested,
+                source_selection.include_public,
+                source_selection.include_private,
                 warnings,
             );
         }
@@ -1459,9 +1466,9 @@ fn project_import_project_config(
             copy_import_sources(
                 &mut projected,
                 &effective.sources,
-                fields_requested_sources,
-                include_public_sources,
-                include_private_sources,
+                source_selection.fields_requested,
+                source_selection.include_public,
+                source_selection.include_private,
                 warnings,
             );
         }

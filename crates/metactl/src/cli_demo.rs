@@ -213,14 +213,14 @@ fn cmd_demo_destroy(
     let manifest = read_demo_manifest(&demo_root)?;
     remove_demo_root(&demo_root)?;
     let demo_home = demo_home_dir().map_err(internal_error)?;
-    if args.purge && demo_home.is_dir() {
-        if fs::read_dir(&demo_home)
+    if args.purge
+        && demo_home.is_dir()
+        && fs::read_dir(&demo_home)
             .map_err(internal_error)?
             .next()
             .is_none()
-        {
-            fs::remove_dir(&demo_home).map_err(internal_error)?;
-        }
+    {
+        fs::remove_dir(&demo_home).map_err(internal_error)?;
     }
     Ok(CommandOutput {
         human: format!("Removed demo sandbox: {}", demo_root.display()),
