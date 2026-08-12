@@ -12,9 +12,9 @@ use sha2::{Digest, Sha256};
 use crate::materializer::{self, StagedOutputInput};
 use crate::suite_registry::selected_target_from_config;
 use crate::types::{
-    ActivationClass, ApplyMode, ApplyReport, CapabilityGap, CompileManifest, CompileParams,
-    CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus, ExplainParams,
-    ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
+    ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, CapabilityGap, CompileManifest,
+    CompileParams, CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus,
+    ExplainParams, ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
     InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport, PackImport, PackManifest,
     PackResource, PolicyEnforcementReport, PolicyManifest, PolicyOperator, PolicyRuleReport,
     PolicySelectors, PolicySubject, PromotionStatus, ProvenanceEnvelope, ProvenanceReview,
@@ -43,10 +43,11 @@ use library_hooks::{
 };
 use library_instruction::{
     derive_skill_surfaces, effective_surface_selection_mode, emit_pack_extension_manifests,
-    emit_pack_resource_outputs, expand_runtime_template, expand_skill_path, frontmatter_name,
-    instruction_document, instruction_document_plan, merged_skill_document,
-    semantic_carrier_parent_slug, should_emit_separate_surfaces, skill_compile_target_for,
-    skill_surface_document, slugify_surface_candidate, surface_selection_decisions,
+    emit_pack_resource_outputs, emit_skill_package_resources, expand_runtime_template,
+    expand_skill_path, frontmatter_name, instruction_document, instruction_document_plan,
+    merged_skill_document, semantic_carrier_parent_slug, should_emit_separate_surfaces,
+    skill_compile_target_for, skill_surface_document, slugify_surface_candidate,
+    surface_selection_decisions,
 };
 use library_validation::{validate_skill_frontmatter_text, validate_staged_outputs};
 
@@ -631,10 +632,13 @@ impl LibraryRegistry {
             role,
             policy,
             &active_packs,
-            &params.resolve_graph,
-            &params.target_capability,
-            &self.roots,
-            effective_surface_selection_mode.clone(),
+            SynthesisContext {
+                resolve_graph: &params.resolve_graph,
+                target: &params.target_capability,
+                library_roots: &self.roots,
+                apply_mode: &params.apply_mode,
+                surface_selection_override: effective_surface_selection_mode.clone(),
+            },
         )?;
         degradations.extend(surface_degradations);
         dedupe_degradations(&mut degradations);
@@ -775,6 +779,30 @@ impl LibraryRegistry {
         materializer::apply_manifest(project_root, manifest, apply_mode)
     }
 
+    pub fn apply_review_plan(
+        &self,
+        project_root: &Path,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+    ) -> Result<ApplyReviewPlan> {
+        materializer::build_apply_review_plan(project_root, manifest, apply_mode)
+    }
+
+    pub fn apply_manifest_bound(
+        &self,
+        project_root: &Path,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+        expected_plan_digest: &str,
+    ) -> Result<ApplyReport> {
+        materializer::apply_manifest_bound(
+            project_root,
+            manifest,
+            apply_mode,
+            Some(expected_plan_digest),
+        )
+    }
+
     pub fn revert_target(&self, project_root: &Path, target: &Ref) -> Result<RevertReport> {
         materializer::revert_target(project_root, target)
     }
@@ -817,7 +845,8 @@ impl LibraryRegistry {
             self.register_policy(path, manifest)?;
         }
         for path in sorted_glob_json(&root.join("targets"))? {
-            let manifest: TargetCapabilityMatrix = load_json(path.clone())?;
+            let mut manifest: TargetCapabilityMatrix = load_json(path.clone())?;
+            Self::apply_bundled_compile_target_defaults(&mut manifest)?;
             self.register_target(path, manifest)?;
         }
         for path in sorted_glob_json(&root.join("knowledge_sources"))? {
@@ -843,6 +872,31 @@ impl LibraryRegistry {
         for path in sorted_imports(&root.join("imports"))? {
             let (manifest, provenance) = normalize_candidate(root, &path)?;
             self.register_pack(root, path, manifest, Some(provenance))?;
+        }
+        Ok(())
+    }
+
+    /// Fill compatibility-only optional compile-target fields from the embedded
+    /// definition. User-library values remain authoritative when present.
+    fn apply_bundled_compile_target_defaults(manifest: &mut TargetCapabilityMatrix) -> Result<()> {
+        let bundled_root = crate::project::ensure_bundled_starter_library_root()?;
+        let bundled_path = bundled_root
+            .join("targets")
+            .join(format!("{}.json", manifest.target_id));
+        if !bundled_path.exists() {
+            return Ok(());
+        }
+        let bundled: TargetCapabilityMatrix = load_json(bundled_path)?;
+        for compile_target in &mut manifest.compile_targets {
+            if compile_target.import_stub_path.is_some() {
+                continue;
+            }
+            if let Some(default) = bundled.compile_targets.iter().find(|candidate| {
+                candidate.output_kind == compile_target.output_kind
+                    && candidate.path_template == compile_target.path_template
+            }) {
+                compile_target.import_stub_path = default.import_stub_path.clone();
+            }
         }
         Ok(())
     }
@@ -1054,19 +1108,31 @@ fn compile_project_root(project_root: Option<&str>) -> Result<PathBuf> {
     }
 }
 
+struct SynthesisContext<'a> {
+    resolve_graph: &'a ResolveGraph,
+    target: &'a TargetCapabilityMatrix,
+    library_roots: &'a [PathBuf],
+    apply_mode: &'a ApplyMode,
+    surface_selection_override: Option<SurfaceSelectionMode>,
+}
+
 fn synthesize_outputs(
     role: &RoleManifest,
     policy: &PolicyManifest,
     packs: &[&DiscoveredPack],
-    resolve_graph: &ResolveGraph,
-    target: &TargetCapabilityMatrix,
-    library_roots: &[PathBuf],
-    surface_selection_override: Option<SurfaceSelectionMode>,
+    context: SynthesisContext<'_>,
 ) -> Result<(
     Vec<StagedOutputInput>,
     Vec<SurfaceSelectionDecision>,
     Vec<CapabilityGap>,
 )> {
+    let SynthesisContext {
+        resolve_graph,
+        target,
+        library_roots,
+        apply_mode,
+        surface_selection_override,
+    } = context;
     let mut outputs = Vec::new();
     let mut surface_selection = Vec::new();
     let mut degradations = Vec::new();
@@ -1100,6 +1166,14 @@ fn synthesize_outputs(
                     compile_target,
                 )?;
                 let document = instruction_document(role, policy, &plan, resolve_graph, target)?;
+                let contents = if matches!(apply_mode, ApplyMode::ImportStub) {
+                    import_stub_contents(compile_target)?
+                } else {
+                    wrap_with_frontmatter(
+                        document.content.as_bytes(),
+                        &compile_target.instruction_frontmatter,
+                    )?
+                };
                 let mut degradation_codes = plan.degradation_codes;
                 if document.truncated {
                     degradation_codes.push("instruction_index_truncated".to_string());
@@ -1108,10 +1182,7 @@ fn synthesize_outputs(
                     id: Some(document_id_for_target(target)),
                     destination_path: destination,
                     kind: GeneratedOutputKind::InstructionFile,
-                    contents: wrap_with_frontmatter(
-                        document.content.as_bytes(),
-                        &compile_target.instruction_frontmatter,
-                    )?,
+                    contents,
                     instruction_mode: Some(plan.mode),
                     pack_ref: None,
                     surface_id: None,
@@ -1229,7 +1300,7 @@ fn synthesize_outputs(
                                     "skill-{}-{}",
                                     pack.manifest.id, surface.surface_slug
                                 )),
-                                destination_path: destination,
+                                destination_path: destination.clone(),
                                 kind: GeneratedOutputKind::SkillFolder,
                                 contents: skill_surface_document(
                                     pack,
@@ -1250,6 +1321,12 @@ fn synthesize_outputs(
                                 materialize_as_regular_file: compile_target
                                     .materialize_as_regular_file,
                             });
+                            outputs.extend(emit_skill_package_resources(
+                                compile_target,
+                                pack,
+                                surface,
+                                &destination,
+                            )?);
                         }
                     } else {
                         let destination = expand_skill_path(
@@ -1275,7 +1352,7 @@ fn synthesize_outputs(
                         };
                         outputs.push(StagedOutputInput {
                             id: Some(format!("skill-{}", pack.manifest.id)),
-                            destination_path: destination,
+                            destination_path: destination.clone(),
                             kind: GeneratedOutputKind::SkillFolder,
                             contents: merged_skill_document(pack)?,
                             instruction_mode: None,
@@ -1311,6 +1388,14 @@ fn synthesize_outputs(
                             )),
                             materialize_as_regular_file: compile_target.materialize_as_regular_file,
                         });
+                        for surface in &emitted_surfaces {
+                            outputs.extend(emit_skill_package_resources(
+                                compile_target,
+                                pack,
+                                surface,
+                                &destination,
+                            )?);
+                        }
                     }
                 }
             }
@@ -1565,6 +1650,19 @@ fn supported_apply_modes(target: &TargetCapabilityMatrix) -> Vec<ApplyMode> {
         modes.push(ApplyMode::Symlink);
     }
     modes
+}
+
+fn import_stub_contents(compile_target: &crate::types::CompileTarget) -> Result<Vec<u8>> {
+    let import_path = compile_target.import_stub_path.as_deref().ok_or_else(|| {
+        anyhow!(
+            "target compile entry '{}' does not declare import_stub_path",
+            compile_target.path_template
+        )
+    })?;
+    Ok(format!(
+        "<!-- metactl:begin import-stub -->\n@{import_path}\n<!-- Do not edit: metactl manages this import stub. -->\n<!-- metactl:end import-stub -->\n"
+    )
+    .into_bytes())
 }
 
 fn instruction_mode_label(mode: &InstructionProjectionMode) -> &'static str {

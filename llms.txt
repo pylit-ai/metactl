@@ -1,0 +1,32 @@
+# metactl
+
+> A human-first, agent-safe CLI for composing, projecting, and validating agent instruction surfaces.
+
+## Start here
+
+- [Agent surfaces](docs/agent-surfaces.md) — target-owned files and machine-output contract.
+- `metactl explain --capabilities --json` — command, error, and target capability manifest; works outside a project.
+- `metactl help --all` — complete local command help.
+
+## Porcelain commands
+
+- `metactl setup` — plan or create a metactl project.
+- `metactl use <pack>` — resolve, add, and sync a pack.
+- `metactl sync --preview` — inspect generated changes without applying them.
+- `metactl status` — show readiness, drift, and next actions.
+- `metactl validate` — check generated surfaces and policy.
+- `metactl doctor` — run health checks.
+- `metactl demo` — create or remove a disposable sandbox.
+
+## Agent contract
+
+- Use `--agent` for machine-readable JSON and non-interactive operation.
+- Every `--agent` failure includes `ok: false`, API version, command, error code, and recovery `next_commands`.
+- `next_commands` is always a non-empty array; consumers can safely offer recovery actions.
+- Machine lists may be bounded; inspect `<list>_truncated` and `<list>_total_count`, or pass `--full`.
+- Pass `--project PATH` to target a project explicitly; `explain --capabilities` needs no project.
+
+## References
+
+- [Capability and error contract](docs/agent-surfaces.md)
+- `metactl explain --capabilities`

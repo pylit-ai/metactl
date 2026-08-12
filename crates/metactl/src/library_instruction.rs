@@ -254,10 +254,6 @@ pub(super) fn derive_skill_surfaces(pack: &DiscoveredPack) -> Result<Vec<Derived
     }
 
     let mut seen_slugs = BTreeSet::new();
-    let primary_surface_index = instruction_resources
-        .iter()
-        .position(|resource| resource_file_name(resource) == Some("SKILL.md"))
-        .unwrap_or(0);
     let mut surfaces = Vec::new();
     for (index, resource) in instruction_resources.iter().enumerate() {
         let contents = read_pack_resource(pack, resource)?;
@@ -269,18 +265,18 @@ pub(super) fn derive_skill_surfaces(pack: &DiscoveredPack) -> Result<Vec<Derived
             surface_slug,
             title: surface_title(pack, resource, &contents),
             instruction_resource_paths: vec![resource.path.clone()],
-            attached_script_paths: if index == primary_surface_index {
-                pack_resource_paths(pack, ResourceKind::Script)
+            attached_script_paths: if resource_file_name(resource) == Some("SKILL.md") {
+                skill_surface_attachment_paths(pack, resource, ResourceKind::Script)
             } else {
                 Vec::new()
             },
-            attached_reference_paths: if index == primary_surface_index {
-                pack_resource_paths(pack, ResourceKind::Example)
+            attached_reference_paths: if resource_file_name(resource) == Some("SKILL.md") {
+                skill_surface_attachment_paths(pack, resource, ResourceKind::Example)
             } else {
                 Vec::new()
             },
-            attached_asset_paths: if index == primary_surface_index {
-                pack_resource_paths(pack, ResourceKind::Asset)
+            attached_asset_paths: if resource_file_name(resource) == Some("SKILL.md") {
+                skill_surface_attachment_paths(pack, resource, ResourceKind::Asset)
             } else {
                 Vec::new()
             },
@@ -288,6 +284,36 @@ pub(super) fn derive_skill_surfaces(pack: &DiscoveredPack) -> Result<Vec<Derived
         });
     }
     Ok(surfaces)
+}
+
+fn skill_surface_attachment_paths(
+    pack: &DiscoveredPack,
+    instruction: &PackResource,
+    kind: ResourceKind,
+) -> Vec<String> {
+    let Some(package_root) = Path::new(&instruction.path).parent() else {
+        return Vec::new();
+    };
+    let mut paths = pack
+        .manifest
+        .resources
+        .iter()
+        .filter(|resource| resource.kind == kind)
+        .filter_map(|resource| {
+            let relative = Path::new(&resource.path).strip_prefix(package_root).ok()?;
+            let top_level = relative.components().next()?.as_os_str().to_str()?;
+            let belongs_to_package = match kind {
+                ResourceKind::Script => top_level == "scripts",
+                ResourceKind::Example => matches!(top_level, "references" | "templates"),
+                ResourceKind::Asset => top_level == "assets",
+                _ => false,
+            };
+            belongs_to_package.then(|| resource.path.clone())
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
 }
 
 pub(super) fn should_emit_separate_surfaces(
@@ -563,6 +589,130 @@ pub(super) fn emit_pack_resource_outputs(
         }
     }
     Ok(outputs)
+}
+
+pub(super) fn emit_skill_package_resources(
+    compile_target: &crate::types::CompileTarget,
+    pack: &DiscoveredPack,
+    surface: &DerivedSkillSurface,
+    skill_destination: &str,
+) -> Result<Vec<StagedOutputInput>> {
+    let attached_paths = surface
+        .attached_script_paths
+        .iter()
+        .chain(&surface.attached_reference_paths)
+        .chain(&surface.attached_asset_paths)
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let skill_root = Path::new(skill_destination).parent().ok_or_else(|| {
+        anyhow!(
+            "skill destination '{}' has no package root",
+            skill_destination
+        )
+    })?;
+
+    let mut outputs = Vec::new();
+    for resource in pack
+        .manifest
+        .resources
+        .iter()
+        .filter(|resource| attached_paths.contains(resource.path.as_str()))
+    {
+        let Some(relative_path) = skill_package_resource_relative_path(pack, surface, resource)?
+        else {
+            continue;
+        };
+        let top_level = relative_path.split('/').next().unwrap_or_default();
+        let supported = match resource.kind {
+            ResourceKind::Script => {
+                compile_target.supports_surface_scripts && top_level == "scripts"
+            }
+            ResourceKind::Example => {
+                compile_target.supports_surface_assets
+                    && matches!(top_level, "references" | "templates")
+            }
+            ResourceKind::Asset => compile_target.supports_surface_assets && top_level == "assets",
+            _ => false,
+        };
+        if !supported {
+            continue;
+        }
+
+        let destination_path = skill_root.join(&relative_path);
+        let destination_path = destination_path
+            .components()
+            .map(|component| match component {
+                std::path::Component::Normal(segment) => Ok(segment.to_string_lossy()),
+                _ => Err(anyhow!(
+                    "skill package resource destination '{}' is not a safe relative path",
+                    destination_path.display()
+                )),
+            })
+            .collect::<Result<Vec<_>>>()?
+            .join("/");
+        outputs.push(StagedOutputInput {
+            id: Some(pack_resource_output_id(&pack.manifest.id, &relative_path)),
+            destination_path,
+            kind: GeneratedOutputKind::ResourceFile,
+            contents: read_skill_package_resource(pack, resource)?,
+            instruction_mode: None,
+            pack_ref: Some(pack.manifest.pack_ref()),
+            surface_id: Some(surface.surface_id.clone()),
+            surface_slug: Some(surface.surface_slug.clone()),
+            source_resource_paths: vec![resource.path.clone()],
+            merge_status: None,
+            degradation_codes: Vec::new(),
+            ownership_token: Some(format!(
+                "{}::{}::resource:{}",
+                pack.manifest.id, surface.surface_id, relative_path
+            )),
+            materialize_as_regular_file: compile_target.materialize_as_regular_file,
+        });
+    }
+    Ok(outputs)
+}
+
+fn read_skill_package_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<Vec<u8>> {
+    let source_path = pack.library_root.join(&resource.path);
+    if !source_path.is_file() {
+        return Err(anyhow!(
+            "declared skill package resource '{}' is missing",
+            source_path.display()
+        ));
+    }
+    read_cached_pack_resource(&source_path)
+}
+
+fn skill_package_resource_relative_path(
+    pack: &DiscoveredPack,
+    surface: &DerivedSkillSurface,
+    resource: &PackResource,
+) -> Result<Option<String>> {
+    let package_root = surface
+        .instruction_resource_paths
+        .first()
+        .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| Path::new("packs").join(&pack.manifest.id));
+    let Ok(relative) = Path::new(&resource.path).strip_prefix(&package_root) else {
+        return Ok(None);
+    };
+    if relative.as_os_str().is_empty() {
+        return Err(anyhow!(
+            "skill package resource '{}' has no relative path",
+            resource.path
+        ));
+    }
+    relative
+        .components()
+        .map(|component| match component {
+            std::path::Component::Normal(segment) => Ok(segment.to_string_lossy()),
+            _ => Err(anyhow!(
+                "skill package resource '{}' is not a safe relative path",
+                resource.path
+            )),
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(|segments| Some(segments.join("/")))
 }
 
 pub(super) fn skill_surface_document(

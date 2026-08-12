@@ -9,6 +9,7 @@ pub mod plugin_projection;
 pub mod project;
 pub mod reference_kernel;
 pub mod skill_audit;
+pub mod skill_card;
 pub mod suite_registry;
 pub mod surface_usage;
 pub mod types;
@@ -28,5 +29,6 @@ pub use skill_audit::{
     RecommendationAction, RelationKind, SkillAuditOptions, SkillAuditOutput, SkillAuditScope,
     SkillInventoryItem, SkillPortfolioAuditReport, SkillRelation, SkillReportFormat,
 };
+pub use skill_card::{validate_skill_card, SkillCardDecision};
 pub use suite_registry::{SuiteContext, SuiteRegistry};
 pub use types::*;

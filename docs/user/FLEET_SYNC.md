@@ -2,9 +2,28 @@
 
 Fleet Sync previews or applies `metactl sync` across explicitly linked local projects. It stays local-first: there is no hosted control plane, no filesystem auto-discovery, and no background mutation.
 
+## Importing Ruler and AgentSync projects
+
+`metactl project import list --search-root /path/to/projects` also discovers projects with a
+`.ruler/` or `.agents/` directory. Review its non-writing plan before applying it:
+
+```bash
+metactl project import plan /path/to/project --json
+metactl project import apply /path/to/project --yes --json
+metactl sync --adopt preview
+```
+
+Ruler Markdown rules (`.ruler/AGENTS.md`, legacy `instructions.md`, and other Markdown files)
+and AgentSync Markdown files become a private project-local instruction pack under
+`metactl-imports/`. The source directories are read only. Config files with no lossless metactl
+mapping are returned as `unmapped` in JSON; inspect those entries before recreating their
+tool-specific behavior.
+
 ## Controller Model
 
 A Fleet controller is a normal metactl project whose `metactl.yaml` contains the canonical `linked_projects` registry. The machine-local user config may store a pointer to that controller so Fleet commands work from any directory.
+
+Each `linked_projects` entry is a Fleet **member**: a named local project that the controller can inspect or synchronize. The controller owns membership and policy discovery; members retain their own files and are never discovered or changed implicitly. This makes the controller the review point for drift across a known set of projects.
 
 Minimum controller contents:
 
@@ -168,7 +187,7 @@ metactl --yes --no-input fleet sync --apply
 #   app      /path/to/repos/app      applied
 ```
 
-Fleet apply refuses dirty Git worktrees by default. Use `--allow-dirty` only after review.
+Fleet apply reports dirty Git worktrees in both human and machine output; review that warning before accepting generated-file changes alongside local edits.
 
 Fleet apply updates repo-local generated surfaces in linked projects, including `.codex/skills/...` for Codex CLI targets. It does not install those skills into the user-global Personal picker source under `~/.codex/skills`.
 
@@ -185,6 +204,17 @@ Install an operator-facing repo skill globally only when that is intended:
 ```bash
 metactl skills add <repo-skill-path> --scope user
 ```
+
+## Drift Gates In CI
+
+Use Fleet preview as a non-writing drift gate in continuous integration (CI, an automated build-and-check system). Point the job at the reviewed controller and fail the job when its structured result is not successful:
+
+```bash
+metactl --project /path/to/fleet-controller --agent fleet sync --preview
+metactl --project /path/to/fleet-controller --agent validate
+```
+
+`fleet sync --preview` reports the selected members and the sync command each ready member would receive; it does not write member files. `validate` checks the controller's own metactl state. Keep `fleet sync --apply` out of routine CI unless an explicit operator policy authorizes mutation, and retain `--yes --no-input` for that separate, reviewed workflow.
 
 ## Background Recommendations
 
@@ -224,3 +254,22 @@ background mutation.
 ```
 
 Automation should key on stable project IDs and controller metadata, not human text.
+
+Agent mode is the recommended CI surface because its failures always include an error code and recovery commands:
+
+```bash
+metactl --project /path/to/fleet-controller --agent fleet sync --preview
+```
+
+```json
+{
+  "ok": true,
+  "command": "fleet",
+  "action": "sync",
+  "preview": true,
+  "controller": { "id": "personal", "source": "user_default" },
+  "projects": [{ "id": "app", "status": "planned", "result": "preview" }]
+}
+```
+
+Both `--agent` and `--json` bound long arrays to 15 items by default. Check `projects_truncated` and `projects_total_count`, or pass `--full` when a complete list is required. On a Fleet failure, both modes return `ok: false`, `error_code`, and a non-empty `next_commands` list.

@@ -84,6 +84,25 @@ fn kernel() -> ReferenceKernel {
     ReferenceKernel::load_from_library_roots(vec![starter_root()]).expect("starter kernel")
 }
 
+fn package_closure_fixture_root() -> PathBuf {
+    repo_root().join("fixtures/library/skill-package-closure")
+}
+
+fn package_closure_kernel() -> ReferenceKernel {
+    ReferenceKernel::load_from_library_roots(vec![starter_root(), package_closure_fixture_root()])
+        .expect("package closure fixture kernel")
+}
+
+fn config_with_pack(role: &str, policy: &str, target: &str, pack: &str) -> Config {
+    let mut configured = config(role, policy, target);
+    configured.packs = vec![Ref {
+        kind: RefKind::Pack,
+        id: pack.to_string(),
+        version: Some("1.0.0".to_string()),
+    }];
+    configured
+}
+
 #[test]
 fn sandbox_greenfield_apply_revert() {
     let project_root = unique_project_root("greenfield");
@@ -443,9 +462,9 @@ fn codex_multi_surface_emission_uses_pack_scoped_surface_paths() {
         .filter_map(|item| item.destination_path.clone())
         .collect::<Vec<_>>();
     assert!(destinations
-        .contains(&".codex/skills/python-refactor/python-refactor/SKILL.md".to_string()));
-    assert!(destinations.contains(&".codex/skills/python-refactor/contracts/SKILL.md".to_string()));
-    assert!(destinations.contains(&".codex/skills/python-refactor/tests/SKILL.md".to_string()));
+        .contains(&".agents/skills/python-refactor/python-refactor/SKILL.md".to_string()));
+    assert!(destinations.contains(&".agents/skills/python-refactor/contracts/SKILL.md".to_string()));
+    assert!(destinations.contains(&".agents/skills/python-refactor/tests/SKILL.md".to_string()));
     assert!(compile
         .compile_manifest
         .generated_outputs
@@ -454,6 +473,198 @@ fn codex_multi_surface_emission_uses_pack_scoped_surface_paths() {
             item.surface_id.as_deref() == Some("python-refactor:contracts")
                 && item.merge_status == Some(metactl::SurfaceMergeStatus::Separate)
         }));
+}
+
+#[test]
+fn skill_projection_preserves_declared_package_resources_across_targets() {
+    for (target_id, skill_root) in [
+        (
+            "codex-cli",
+            ".agents/skills/package-closure/package-closure",
+        ),
+        (
+            "claude-code",
+            ".claude/skills/package-closure/package-closure",
+        ),
+    ] {
+        let project_root = unique_project_root(&format!("{target_id}-skill-package-closure"));
+        let kernel = package_closure_kernel();
+        let target = target_manifest(target_id);
+        let resolve = kernel
+            .resolve(ResolveParams {
+                config: config_with_pack(
+                    "builder",
+                    "brownfield-safe-builder",
+                    target_id,
+                    "package-closure",
+                ),
+                overlay: None,
+                available_targets: vec![target.clone()],
+                provenance: None,
+            })
+            .expect("resolve package closure fixture");
+        let compile = kernel
+            .compile(metactl::CompileParams {
+                resolve_graph: resolve,
+                target_capability: target,
+                apply_mode: ApplyMode::Copy,
+                surface_selection_mode: Some(metactl::SurfaceSelectionMode::Full),
+                emit_policy_report: true,
+                durable_staging: true,
+                project_root: Some(project_root.to_string_lossy().to_string()),
+            })
+            .expect("compile package closure fixture");
+
+        let pack_root = skill_root
+            .strip_suffix("/package-closure")
+            .expect("fixture surface suffix");
+        let expected = [
+            format!("{skill_root}/SKILL.md"),
+            format!("{skill_root}/references/guide.md"),
+            format!("{skill_root}/scripts/check.sh"),
+            format!("{skill_root}/templates/report.md"),
+            format!("{skill_root}/assets/mark.svg"),
+            format!("{pack_root}/secondary/SKILL.md"),
+            format!("{pack_root}/secondary/references/secondary.md"),
+        ];
+        let destinations = compile
+            .compile_manifest
+            .generated_outputs
+            .iter()
+            .filter_map(|item| item.destination_path.clone())
+            .collect::<Vec<_>>();
+        for path in &expected {
+            assert!(
+                destinations.contains(path),
+                "missing package resource {path}: {destinations:?}"
+            );
+        }
+        for output in compile
+            .compile_manifest
+            .generated_outputs
+            .iter()
+            .filter(|item| item.kind == metactl::GeneratedOutputKind::ResourceFile)
+        {
+            assert_eq!(output.source_resource_paths.len(), 1);
+            assert!(output.surface_id.is_some());
+            assert!(output.ownership_token.is_some());
+        }
+
+        let apply = kernel
+            .apply_compiled_outputs(&project_root, &compile.compile_manifest, &ApplyMode::Copy)
+            .expect("apply package closure fixture");
+        assert!(apply.conflicts.is_empty(), "{:?}", apply.conflicts);
+        for path in &expected {
+            assert!(project_root.join(path).is_file(), "missing applied {path}");
+        }
+    }
+}
+
+#[test]
+fn skill_projection_fails_closed_when_declared_package_resource_is_missing() {
+    let project_root = unique_project_root("incomplete-skill-package");
+    let kernel = package_closure_kernel();
+    let target = target_manifest("codex-cli");
+    let resolve = kernel
+        .resolve(ResolveParams {
+            config: config_with_pack(
+                "builder",
+                "brownfield-safe-builder",
+                "codex-cli",
+                "incomplete-package",
+            ),
+            overlay: None,
+            available_targets: vec![target.clone()],
+            provenance: None,
+        })
+        .expect("resolve incomplete package fixture");
+    let error = kernel
+        .compile(metactl::CompileParams {
+            resolve_graph: resolve,
+            target_capability: target,
+            apply_mode: ApplyMode::Copy,
+            surface_selection_mode: Some(metactl::SurfaceSelectionMode::Full),
+            emit_policy_report: true,
+            durable_staging: true,
+            project_root: Some(project_root.to_string_lossy().to_string()),
+        })
+        .expect_err("missing declared package resource must fail compilation");
+    assert!(
+        error
+            .to_string()
+            .contains("references/missing.md' is missing"),
+        "unexpected error: {error:#}"
+    );
+}
+
+#[test]
+fn recompile_prunes_stale_staged_skill_surfaces() {
+    let project_root = unique_project_root("stale-staged-skill-surfaces");
+    let kernel = kernel();
+    let target = target_manifest("codex-cli");
+    let resolve = kernel
+        .resolve(ResolveParams {
+            config: config("builder", "brownfield-safe-builder", "codex-cli"),
+            overlay: Some(overlay(EntryPoint::MagicwormholeDrop, "codex-cli")),
+            available_targets: vec![target.clone()],
+            provenance: None,
+        })
+        .expect("resolve");
+
+    kernel
+        .compile(metactl::CompileParams {
+            resolve_graph: resolve.clone(),
+            target_capability: target.clone(),
+            apply_mode: ApplyMode::Copy,
+            surface_selection_mode: Some(metactl::SurfaceSelectionMode::Full),
+            emit_policy_report: true,
+            durable_staging: true,
+            project_root: Some(project_root.to_string_lossy().to_string()),
+        })
+        .expect("full compile");
+
+    let stale_paths = [
+        ".metactl/generated/codex-cli/.agents/skills/migration-guard/escalation/SKILL.md",
+        ".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/SKILL.md",
+        ".metactl/generated/codex-cli/.agents/skills/python-refactor/tests/SKILL.md",
+    ];
+    for path in &stale_paths {
+        assert!(
+            project_root.join(path).is_file(),
+            "missing full output {path}"
+        );
+    }
+    let unmanaged_neighbor = project_root.join(
+        ".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/operator-note.txt",
+    );
+    std::fs::write(&unmanaged_neighbor, "preserve me\n").expect("write unmanaged neighbor");
+
+    let minimal = kernel
+        .compile(metactl::CompileParams {
+            resolve_graph: resolve,
+            target_capability: target,
+            apply_mode: ApplyMode::Copy,
+            surface_selection_mode: Some(metactl::SurfaceSelectionMode::Minimal),
+            emit_policy_report: true,
+            durable_staging: true,
+            project_root: Some(project_root.to_string_lossy().to_string()),
+        })
+        .expect("minimal compile");
+
+    assert_eq!(
+        minimal.compile_manifest.pruned_outputs,
+        stale_paths.map(str::to_string)
+    );
+    for path in &stale_paths {
+        assert!(
+            !project_root.join(path).exists(),
+            "stale generated output survived recompile: {path}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(unmanaged_neighbor).expect("read unmanaged neighbor"),
+        "preserve me\n"
+    );
 }
 
 #[test]
@@ -543,7 +754,7 @@ fn target_native_pack_resources() {
             // Spec 019 plus Codex command support.
             vec![
                 "AGENTS.md",
-                ".codex/skills/unit-test-loop/unit-test-loop/SKILL.md",
+                ".agents/skills/unit-test-loop/unit-test-loop/SKILL.md",
                 ".codex/commands/run-targeted-tests.md",
             ],
         ),
@@ -631,7 +842,7 @@ fn reference_based_instruction_indexes() {
             "release-policy",
             "codex-cli",
             "AGENTS.md",
-            ".codex/skills/unit-test-loop/",
+            ".agents/skills/unit-test-loop/",
             "Run the narrowest relevant test loop before closing work.",
         ),
     ];

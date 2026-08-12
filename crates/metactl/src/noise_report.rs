@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 const SCHEMA_VERSION: &str = "metactl.instruction_noise.v1";
 
 const SURFACE_PREFIXES: &[&str] = &[
-    ".codex/skills/",
+    ".agents/skills/",
     ".codex/commands/",
     ".claude/skills/",
     ".claude/commands/",
@@ -198,19 +198,23 @@ fn walk_files(project_root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<
 }
 
 fn duplicate_triggers(project_root: &Path, files: &[String]) -> Result<Vec<Value>> {
-    let mut by_trigger: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut by_runtime_trigger: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
     for rel in files {
         let path = project_root.join(rel);
         let Ok(contents) = fs::read_to_string(&path) else {
             continue;
         };
         if let Some(trigger) = trigger_key(rel, &contents) {
-            by_trigger.entry(trigger).or_default().push(rel.clone());
+            let runtime = runtime_family(rel).to_string();
+            by_runtime_trigger
+                .entry((runtime, trigger))
+                .or_default()
+                .push(rel.clone());
         }
     }
 
     let mut findings = Vec::new();
-    for (trigger, paths) in by_trigger {
+    for ((runtime, trigger), paths) in by_runtime_trigger {
         if paths.len() <= 1 {
             continue;
         }
@@ -219,14 +223,33 @@ fn duplicate_triggers(project_root: &Path, files: &[String]) -> Result<Vec<Value
                 "kind": "duplicate_trigger",
                 "severity": "warn",
                 "path": path,
+                "runtime": runtime,
                 "trigger": trigger,
                 "duplicates": paths,
-                "message": "Multiple agent surface files advertise the same trigger metadata.",
+                "message": "Multiple files for the same agent runtime advertise the same trigger metadata.",
                 "next": "Remove or rename duplicate skill/rule trigger metadata."
             }));
         }
     }
     Ok(findings)
+}
+
+fn runtime_family(rel: &str) -> &str {
+    if rel.starts_with(".agents/") || rel.starts_with(".codex/") {
+        "codex"
+    } else if rel.starts_with(".claude/") {
+        "claude"
+    } else if rel.starts_with(".cursor/") {
+        "cursor"
+    } else if rel.starts_with(".gemini/") {
+        "gemini"
+    } else if rel.starts_with(".opencode/") {
+        "opencode"
+    } else if rel.starts_with(".metactl/filesystem-agent/") {
+        "filesystem-agent"
+    } else {
+        "shared"
+    }
 }
 
 fn trigger_key(rel: &str, contents: &str) -> Option<String> {
@@ -276,4 +299,53 @@ fn relative(project_root: &Path, path: &Path) -> String {
 
 fn normalize_rel(path: &str) -> String {
     path.replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::duplicate_triggers;
+    use std::fs;
+
+    #[test]
+    fn duplicate_triggers_are_scoped_to_one_runtime() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let skill = "---\nname: shared-skill\ndescription: Shared fixture\n---\n\n# Shared\n";
+        for path in [
+            ".agents/skills/shared-skill/SKILL.md",
+            ".claude/skills/shared-skill/SKILL.md",
+            ".cursor/skills/shared-skill/SKILL.md",
+        ] {
+            let destination = project.path().join(path);
+            fs::create_dir_all(destination.parent().expect("parent")).expect("create parent");
+            fs::write(destination, skill).expect("write skill");
+        }
+        let files = vec![
+            ".agents/skills/shared-skill/SKILL.md".to_string(),
+            ".claude/skills/shared-skill/SKILL.md".to_string(),
+            ".cursor/skills/shared-skill/SKILL.md".to_string(),
+        ];
+
+        assert!(duplicate_triggers(project.path(), &files)
+            .expect("cross-runtime duplicates")
+            .is_empty());
+    }
+
+    #[test]
+    fn duplicate_triggers_still_report_same_runtime_collisions() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let skill = "---\nname: shared-skill\ndescription: Shared fixture\n---\n\n# Shared\n";
+        let files = vec![
+            ".agents/skills/shared-skill/SKILL.md".to_string(),
+            ".agents/skills/stray-shared-skill/SKILL.md".to_string(),
+        ];
+        for path in &files {
+            let destination = project.path().join(path);
+            fs::create_dir_all(destination.parent().expect("parent")).expect("create parent");
+            fs::write(destination, skill).expect("write skill");
+        }
+
+        let findings = duplicate_triggers(project.path(), &files).expect("same-runtime duplicates");
+        assert_eq!(findings.len(), 2);
+        assert!(findings.iter().all(|finding| finding["runtime"] == "codex"));
+    }
 }

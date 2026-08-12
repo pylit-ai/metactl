@@ -1089,14 +1089,14 @@ fn fallback_item(
 
 fn target_kind_for_path(path: &Path, fallback: &str) -> String {
     let normalized = normalize_path(path);
-    if normalized.contains("/.codex/skills/") {
+    if normalized.contains("/.agents/skills/") {
         "metactl-generated".to_string()
+    } else if normalized.contains("/.codex/skills/") {
+        "codex-cli-legacy".to_string()
     } else if normalized.contains("/.claude/skills/") {
         "claude-code".to_string()
     } else if normalized.contains("/.gemini/skills/") {
         "gemini-cli".to_string()
-    } else if normalized.contains("/.agents/skills/") {
-        "codex-cli".to_string()
     } else {
         fallback.to_string()
     }
@@ -1115,11 +1115,11 @@ fn scope_for_path(project_root: &Path, path: &Path, requested: SkillAuditScope) 
             return "user".to_string();
         }
     }
-    if normalized.contains("/.codex/skills/") {
+    if normalized.contains("/.agents/skills/") {
         return "generated".to_string();
     }
-    if normalized.contains("/.agents/skills/") {
-        return "repo".to_string();
+    if normalized.contains("/.codex/skills/") {
+        return "legacy".to_string();
     }
     if normalized.starts_with(&normalize_path(project_root)) {
         return "repo".to_string();

@@ -127,6 +127,9 @@
               "reference_index"
             ]
           },
+          "import_stub_path": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
           "surface_selection_mode": {
             "type": "string",
             "enum": [
@@ -283,6 +286,7 @@
         "type": "string",
         "enum": [
           "copy",
+          "import_stub",
           "patch",
           "symlink",
           "takeover"

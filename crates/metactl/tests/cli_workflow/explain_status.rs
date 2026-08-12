@@ -3,10 +3,37 @@ use super::*;
 // Explain, status, and doctor workflow tests.
 
 #[test]
+fn explain_capabilities_is_machine_readable_without_a_project() {
+    let cwd = TempDir::new().expect("cwd");
+    let home = TempDir::new().expect("home");
+
+    let output = run_cli_cwd(
+        cwd.path(),
+        home.path(),
+        &["--json", "explain", "--capabilities"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let value = json_output(&output);
+    assert_json_contract(&value, "explain", None);
+    assert_eq!(value["mode"], "capabilities");
+    assert_eq!(value["exit_codes"]["0"], "success");
+    assert_eq!(value["exit_codes"]["13"], "validation");
+    assert!(value["targets"]
+        .as_array()
+        .is_some_and(|targets| !targets.is_empty()));
+    assert!(value["global_flags"]
+        .as_array()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "--agent")));
+    assert!(value["global_flags"]
+        .as_array()
+        .is_some_and(|flags| flags.iter().any(|flag| flag == "--project")));
+}
+
+#[test]
 fn agent_status_bounds_large_path_lists_unless_full_is_requested() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
-    let skills_root = project.path().join(".codex/skills");
+    let skills_root = project.path().join(".agents/skills");
     for index in 0..25 {
         let skill_dir = skills_root.join(format!("generated-skill-{index:02}"));
         fs::create_dir_all(&skill_dir).expect("skill dir");
@@ -126,7 +153,7 @@ fn status_reports_codex_skill_visibility_scopes() {
     assert!(setup.status.success(), "{}", stderr(&setup));
     let repo_skill_root = project
         .path()
-        .join(".codex/skills/team-pack/release-manager");
+        .join(".agents/skills/team-pack/release-manager");
     fs::create_dir_all(&repo_skill_root).expect("repo skill dir");
     fs::write(
         repo_skill_root.join("SKILL.md"),
@@ -208,14 +235,14 @@ fn status_verbose_reports_instruction_noise_findings() {
 
     let managed_skill = project
         .path()
-        .join(".codex/skills/unit-test-loop/unit-test-loop/SKILL.md");
+        .join(".agents/skills/unit-test-loop/unit-test-loop/SKILL.md");
     let mut drifted = fs::read_to_string(&managed_skill).expect("read managed skill");
     drifted.push_str("\n# local drift\n");
     fs::write(&managed_skill, drifted).expect("write drift");
 
     let stray = project
         .path()
-        .join(".codex/skills/stray-unit-test-loop/unit-test-loop/SKILL.md");
+        .join(".agents/skills/stray-unit-test-loop/unit-test-loop/SKILL.md");
     fs::create_dir_all(stray.parent().expect("stray parent")).expect("stray dir");
     fs::copy(&managed_skill, &stray).expect("copy duplicate stray skill");
 

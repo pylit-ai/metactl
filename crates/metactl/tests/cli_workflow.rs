@@ -1387,13 +1387,13 @@ fn cli_target_native_harness_outputs() {
     let sync = run_cli(project.path(), &["sync"]);
     assert!(sync.status.success(), "{}", stderr(&sync));
     // Spec 019 plus Codex command support: codex-cli emits AGENTS.md,
-    // .codex/skills/..., and project slash commands under .codex/commands.
+    // .agents/skills/..., and project slash commands under .codex/commands.
     // Other .codex/* paths (rules, plugins, scripts, hooks, config.toml)
     // are not real Codex project surfaces and remain removed.
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/unit-test-loop/unit-test-loop/SKILL.md")
+        .join(".agents/skills/unit-test-loop/unit-test-loop/SKILL.md")
         .exists());
     assert!(project
         .path()

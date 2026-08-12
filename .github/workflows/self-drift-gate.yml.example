@@ -1,0 +1,17 @@
+name: metactl drift gate example
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  metactl-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pylit-ai/metactl@v0
+        with:
+          project-path: .
+          args: check --agent

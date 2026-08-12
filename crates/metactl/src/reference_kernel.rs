@@ -8,9 +8,9 @@ use crate::kernel::MetactlKernel;
 use crate::library_registry::LibraryRegistry;
 use crate::suite_registry::{selected_target_from_config, SuiteContext, SuiteRegistry};
 use crate::types::{
-    ApplyMode, ApplyReport, CompileManifest, CompileParams, CompileResult, ExplainParams,
-    ExplainResult, Ref, ResolveGraph, ResolveParams, RevertReport, SearchParams, SearchResult,
-    TargetCapabilityMatrix, ValidateParams, ValidationReport,
+    ApplyMode, ApplyReport, ApplyReviewPlan, CompileManifest, CompileParams, CompileResult,
+    ExplainParams, ExplainResult, Ref, ResolveGraph, ResolveParams, RevertReport, SearchParams,
+    SearchResult, TargetCapabilityMatrix, ValidateParams, ValidationReport,
 };
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,42 @@ impl ReferenceKernel {
             }
             KernelBackend::Suites(_) => Err(anyhow!(
                 "apply is not implemented for suite-backed fixtures"
+            )),
+        }
+    }
+
+    pub fn apply_review_plan(
+        &self,
+        project_root: impl AsRef<Path>,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+    ) -> Result<ApplyReviewPlan> {
+        match &self.backend {
+            KernelBackend::Libraries(registry) => {
+                registry.apply_review_plan(project_root.as_ref(), manifest, apply_mode)
+            }
+            KernelBackend::Suites(_) => Err(anyhow!(
+                "apply review planning is not implemented for suite-backed fixtures"
+            )),
+        }
+    }
+
+    pub fn apply_compiled_outputs_bound(
+        &self,
+        project_root: impl AsRef<Path>,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+        expected_plan_digest: &str,
+    ) -> Result<ApplyReport> {
+        match &self.backend {
+            KernelBackend::Libraries(registry) => registry.apply_manifest_bound(
+                project_root.as_ref(),
+                manifest,
+                apply_mode,
+                expected_plan_digest,
+            ),
+            KernelBackend::Suites(_) => Err(anyhow!(
+                "bound apply is not implemented for suite-backed fixtures"
             )),
         }
     }
