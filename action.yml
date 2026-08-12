@@ -20,6 +20,8 @@ runs:
       id: install
       shell: bash
       env:
+        GH_TOKEN: ${{ github.token }}
+        METACTL_ACTION_PATH: ${{ github.action_path }}
         METACTL_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
@@ -45,6 +47,7 @@ runs:
           else
             (cd "$workdir" && shasum -a 256 -c "$archive.sha256")
           fi
+          "$METACTL_ACTION_PATH/scripts/verify_github_attestation.sh" "$workdir/$archive"
           tar -xzf "$workdir/$archive" -C "$workdir"
           install -m 0755 "$workdir/${archive%.tar.gz}/metactl" "$RUNNER_TEMP/metactl"
           echo "bin=$RUNNER_TEMP/metactl" >> "$GITHUB_OUTPUT"
