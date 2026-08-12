@@ -35,5 +35,7 @@ Current scan record: `docs/release-readiness.md`.
 
 - Release artifacts include SHA-256 checksums.
 - Release artifacts have GitHub provenance attestations.
+- The composite GitHub Action verifies archive attestations when GitHub CLI supports it and warns explicitly when only checksum verification is available.
+- npm users can follow the documented manual attestation verification path before trusting the installed binary.
 - Published release notes include supported adapter tiers.
 - Any vulnerability found during release prep is handled through `SECURITY.md`.

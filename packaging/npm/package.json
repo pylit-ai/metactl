@@ -9,7 +9,8 @@
     "metactl": "bin/metactl.js"
   },
   "scripts": {
-    "postinstall": "node scripts/install.js"
+    "postinstall": "node scripts/install.js",
+    "test": "node --test test/*.test.js"
   },
   "engines": {
     "node": ">=18"
