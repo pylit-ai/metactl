@@ -441,9 +441,7 @@ fn cli_profile_porcelain_set_and_clear_default() {
         .expect("show2");
     let show2_json = json_output(&show2);
     assert!(
-        show2_json
-            .get("default_profile")
-            .map_or(true, Value::is_null),
+        show2_json.get("default_profile").is_none_or(Value::is_null),
         "{show2_json}"
     );
 }

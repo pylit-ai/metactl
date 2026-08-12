@@ -100,7 +100,7 @@ fn validate_v2(object: &serde_json::Map<String, Value>) -> Result<SkillCardDecis
         "host_compatibility": object["host_compatibility"].clone(),
         "provenance": object["provenance"].clone()
     });
-    Ok(decision(
+    decision(
         if degradations.is_empty() {
             "accept"
         } else {
@@ -108,7 +108,7 @@ fn validate_v2(object: &serde_json::Map<String, Value>) -> Result<SkillCardDecis
         },
         &normalized,
         degradations,
-    )?)
+    )
 }
 
 fn validate_relations(value: Option<&Value>) -> Result<()> {

@@ -2647,7 +2647,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
             let available_display = available_targets_display(&available);
             return Err(CliError::new(
                 EXIT_STATE,
-                &format!(
+                format!(
                     "No target specified and none detected.\n\
                      Available targets: {}\n\
                      Hint: use `metactl init --target <id>` or `metactl init --target all`",
@@ -2722,7 +2722,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
         );
     }
 
-    let extends_profile_written = if cli.profile.as_ref().map_or(false, |s| !s.is_empty()) {
+    let extends_profile_written = if cli.profile.as_ref().is_some_and(|s| !s.is_empty()) {
         cli.profile.clone()
     } else if args.bind_profile {
         init_resolution.name.clone()
@@ -2892,9 +2892,10 @@ fn cmd_library_init(
         fs::create_dir_all(parent).map_err(|err| internal_error(anyhow!(err)))?;
     }
     let starter = ensure_bundled_starter_library_root().map_err(internal_error)?;
-    let mut starter_library = Vec::new();
-    starter_library.push(starter.to_string_lossy().to_string());
-    starter_library.push(library_root.to_string_lossy().to_string());
+    let starter_library = vec![
+        starter.to_string_lossy().to_string(),
+        library_root.to_string_lossy().to_string(),
+    ];
     let profile = metactl::project::PartialProjectConfig {
         api_version: Some(API_VERSION.to_string()),
         role: Some("builder".to_string()),
@@ -3131,13 +3132,13 @@ fn add_pack_to_config_and_maybe_sync(
             write_partial_project_config(&local_path, &local).map_err(internal_error)?;
         }
     } else {
-        let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
+        let mut raw = load_partial_project_config(config_path).map_err(internal_error)?;
         if raw.packs.contains(&config_pack_ref.to_string()) {
             already_configured = true;
         } else {
             already_configured = false;
             raw.packs.push(config_pack_ref.to_string());
-            write_partial_project_config(&config_path, &raw).map_err(internal_error)?;
+            write_partial_project_config(config_path, &raw).map_err(internal_error)?;
         }
     };
 
@@ -3193,8 +3194,8 @@ fn add_pack_to_config_and_maybe_sync(
     }
 
     Ok(CommandOutput {
-        human: project_human_output(&project_root, human_parts.join("\n\n")),
-        json: success_json("use", Some(&project_root), use_json),
+        human: project_human_output(project_root, human_parts.join("\n\n")),
+        json: success_json("use", Some(project_root), use_json),
     })
 }
 
@@ -4492,7 +4493,7 @@ fn cmd_fleet_status(
     )?;
     let statuses = projects
         .iter()
-        .map(|project| fleet_project_status_json(project))
+        .map(fleet_project_status_json)
         .collect::<Vec<_>>();
     let mut lines = fleet_controller_human_header(&controller);
     lines.push("Fleet status:".to_string());
@@ -5605,7 +5606,6 @@ fn cmd_list(cli: &Cli, args: &ListArgs) -> std::result::Result<CommandOutput, Cl
                 .into_iter()
                 .filter(|item| !args.installed || installed.contains(&item.manifest.id))
                 .filter(|item| args.candidate || !is_candidate_pack(&item.promotion_status))
-                .filter(|_| args.starter_only || !args.starter_only)
                 .map(|item| {
                     json!({
                         "id": item.manifest.id,
@@ -6264,7 +6264,7 @@ fn background_run_output(
     results: Vec<Value>,
     failures: usize,
 ) -> std::result::Result<CommandOutput, CliError> {
-    let lines = vec![
+    let lines = [
         "Background refresh complete.".to_string(),
         format!("Scope: {}", scope.as_str()),
         format!("Projects: {}", results.len()),
@@ -6432,7 +6432,7 @@ fn background_scheduler_plan_for_os(
             &stderr_path,
         );
         let uid = current_uid_string().unwrap_or_else(|| "$(id -u)".to_string());
-        return Ok(BackgroundSchedulerPlan {
+        Ok(BackgroundSchedulerPlan {
             scope,
             project_root,
             label: label.clone(),
@@ -6480,7 +6480,7 @@ fn background_scheduler_plan_for_os(
                 ],
                 vec!["rm".to_string(), plist_path.to_string_lossy().to_string()],
             ],
-        });
+        })
     }
     #[cfg(target_os = "linux")]
     {
@@ -7217,11 +7217,13 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         &project_root,
         args.query.as_deref(),
         &explain,
-        &target_projection,
-        &surface_usage_summary,
-        surface_details.as_deref(),
-        pack_lifecycle.as_ref(),
-        &pack_sources,
+        ExplainOutputContext {
+            target_projection: &target_projection,
+            surface_usage_summary: &surface_usage_summary,
+            surface_details: surface_details.as_deref(),
+            pack_lifecycle: pack_lifecycle.as_ref(),
+            pack_sources: &pack_sources,
+        },
     );
     if let Some(notice) = profile_resolution_notice(&profile_resolution) {
         output.human.push_str(&format!("\n{notice}"));
@@ -8950,16 +8952,27 @@ fn search_output(
     }
 }
 
+struct ExplainOutputContext<'a> {
+    target_projection: &'a Value,
+    surface_usage_summary: &'a Value,
+    surface_details: Option<&'a [metactl::library_registry::PackSurfaceSummary]>,
+    pack_lifecycle: Option<&'a std::collections::BTreeMap<String, metactl::PackLifecycle>>,
+    pack_sources: &'a Value,
+}
+
 fn explain_output(
     project_root: &Path,
     query: Option<&str>,
     explain: &ExplainResult,
-    target_projection: &Value,
-    surface_usage_summary: &Value,
-    surface_details: Option<&[metactl::library_registry::PackSurfaceSummary]>,
-    pack_lifecycle: Option<&std::collections::BTreeMap<String, metactl::PackLifecycle>>,
-    pack_sources: &Value,
+    context: ExplainOutputContext<'_>,
 ) -> CommandOutput {
+    let ExplainOutputContext {
+        target_projection,
+        surface_usage_summary,
+        surface_details,
+        pack_lifecycle,
+        pack_sources,
+    } = context;
     let mut lines = vec![explain.summary.clone()];
     if let Some(query) = query {
         lines.push(format!("Query context: {query}"));
@@ -11696,7 +11709,7 @@ fn repo_gitignore_can_hide(path: &Path, patterns: &[&str]) -> bool {
                 .lines()
                 .map(str::trim)
                 .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .any(|line| patterns.iter().any(|pattern| line == *pattern))
+                .any(|line| patterns.contains(&line))
         })
         .unwrap_or(false)
 }

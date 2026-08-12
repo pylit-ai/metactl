@@ -2067,12 +2067,10 @@ fn walk_project_files(root: &Path, out: &mut Vec<PathBuf>) {
                 continue;
             }
             walk_project_files(&path, out);
-        } else if file_type.is_file() {
+        } else if file_type.is_file()
+            || (file_type.is_symlink() && path.metadata().map(|m| m.is_file()).unwrap_or(false))
+        {
             out.push(path);
-        } else if file_type.is_symlink() {
-            if path.metadata().map(|m| m.is_file()).unwrap_or(false) {
-                out.push(path);
-            }
         }
     }
 }

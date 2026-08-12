@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -188,10 +188,10 @@ fn walk_files(project_root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<
         let file_type = entry.file_type()?;
         if file_type.is_dir() {
             walk_files(project_root, &path, out)?;
-        } else if file_type.is_file() || file_type.is_symlink() {
-            if path.metadata().map(|meta| meta.is_file()).unwrap_or(false) {
-                out.push(relative(project_root, &path));
-            }
+        } else if (file_type.is_file() || file_type.is_symlink())
+            && path.metadata().map(|meta| meta.is_file()).unwrap_or(false)
+        {
+            out.push(relative(project_root, &path));
         }
     }
     Ok(())
@@ -269,6 +269,38 @@ fn trigger_key(rel: &str, contents: &str) -> Option<String> {
     }
 }
 
+fn yaml_frontmatter(contents: &str) -> Option<&str> {
+    let rest = contents.strip_prefix("---\n")?;
+    let end = rest.find("\n---")?;
+    Some(&rest[..end])
+}
+
+fn frontmatter_field(frontmatter: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}:");
+    frontmatter.lines().find_map(|line| {
+        let line = line.trim();
+        let value = line.strip_prefix(&prefix)?.trim();
+        let value = value.trim_matches('"').trim_matches('\'').trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+fn sha256_path(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
+}
+
+fn relative(project_root: &Path, path: &Path) -> String {
+    path.strip_prefix(project_root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn normalize_rel(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::duplicate_triggers;
@@ -316,36 +348,4 @@ mod tests {
         assert_eq!(findings.len(), 2);
         assert!(findings.iter().all(|finding| finding["runtime"] == "codex"));
     }
-}
-
-fn yaml_frontmatter(contents: &str) -> Option<&str> {
-    let rest = contents.strip_prefix("---\n")?;
-    let end = rest.find("\n---")?;
-    Some(&rest[..end])
-}
-
-fn frontmatter_field(frontmatter: &str, key: &str) -> Option<String> {
-    let prefix = format!("{key}:");
-    frontmatter.lines().find_map(|line| {
-        let line = line.trim();
-        let value = line.strip_prefix(&prefix)?.trim();
-        let value = value.trim_matches('"').trim_matches('\'').trim();
-        (!value.is_empty()).then(|| value.to_string())
-    })
-}
-
-fn sha256_path(path: &Path) -> Result<String> {
-    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
-}
-
-fn relative(project_root: &Path, path: &PathBuf) -> String {
-    path.strip_prefix(project_root)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-fn normalize_rel(path: &str) -> String {
-    path.replace('\\', "/")
 }

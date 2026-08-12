@@ -632,24 +632,28 @@ impl LibraryRegistry {
             role,
             policy,
             &active_packs,
-            &params.resolve_graph,
-            &params.target_capability,
-            &self.roots,
-            &params.apply_mode,
-            effective_surface_selection_mode.clone(),
+            SynthesisContext {
+                resolve_graph: &params.resolve_graph,
+                target: &params.target_capability,
+                library_roots: &self.roots,
+                apply_mode: &params.apply_mode,
+                surface_selection_override: effective_surface_selection_mode.clone(),
+            },
         )?;
         degradations.extend(surface_degradations);
         dedupe_degradations(&mut degradations);
         let manifest = materializer::stage_outputs(
             &project_root,
             &params.target_capability.target_ref(),
-            outputs,
-            effective_surface_selection_mode,
-            surface_selection,
-            supported_apply_modes(&params.target_capability),
-            params.resolve_graph.brownfield_mode.clone(),
-            degradations,
-            params.durable_staging,
+            materializer::StageOutputsParams {
+                inputs: outputs,
+                surface_selection_mode: effective_surface_selection_mode,
+                surface_selection,
+                apply_modes_supported: supported_apply_modes(&params.target_capability),
+                brownfield_mode: params.resolve_graph.brownfield_mode.clone(),
+                degradations,
+                durable: params.durable_staging,
+            },
         )?;
 
         Ok(CompileResult {
@@ -1104,20 +1108,31 @@ fn compile_project_root(project_root: Option<&str>) -> Result<PathBuf> {
     }
 }
 
+struct SynthesisContext<'a> {
+    resolve_graph: &'a ResolveGraph,
+    target: &'a TargetCapabilityMatrix,
+    library_roots: &'a [PathBuf],
+    apply_mode: &'a ApplyMode,
+    surface_selection_override: Option<SurfaceSelectionMode>,
+}
+
 fn synthesize_outputs(
     role: &RoleManifest,
     policy: &PolicyManifest,
     packs: &[&DiscoveredPack],
-    resolve_graph: &ResolveGraph,
-    target: &TargetCapabilityMatrix,
-    library_roots: &[PathBuf],
-    apply_mode: &ApplyMode,
-    surface_selection_override: Option<SurfaceSelectionMode>,
+    context: SynthesisContext<'_>,
 ) -> Result<(
     Vec<StagedOutputInput>,
     Vec<SurfaceSelectionDecision>,
     Vec<CapabilityGap>,
 )> {
+    let SynthesisContext {
+        resolve_graph,
+        target,
+        library_roots,
+        apply_mode,
+        surface_selection_override,
+    } = context;
     let mut outputs = Vec::new();
     let mut surface_selection = Vec::new();
     let mut degradations = Vec::new();
@@ -2526,7 +2541,7 @@ fn substitute_tokens(src: &str, ctx: &std::collections::BTreeMap<String, String>
 mod tests {
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
@@ -2624,7 +2639,7 @@ mod tests {
         }
     }
 
-    fn seed_search_lifecycle_library(root: &PathBuf) {
+    fn seed_search_lifecycle_library(root: &Path) {
         fs::create_dir_all(root.join("packs")).expect("packs dir");
         fs::create_dir_all(root.join("vendor/legacy-python-audit")).expect("skill dir");
         fs::write(
@@ -2822,7 +2837,7 @@ mod tests {
     #[test]
     fn search_full_text_matches_instruction_body_terms() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -2848,7 +2863,7 @@ mod tests {
     #[test]
     fn search_results_include_match_evidence_and_lifecycle_hints() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -3022,7 +3037,7 @@ mod tests {
     #[test]
     fn search_ranking_remains_pack_first_and_deterministic() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
