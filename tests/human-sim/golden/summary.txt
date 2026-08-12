@@ -1,0 +1,11 @@
+greenfield.canonical_exists=true
+greenfield.legacy_created=false
+greenfield.classifications=new
+repeat.receipt_status=noop
+stale.exit=12
+stale.reason=stale_plan
+legacy.classification=content_conflict
+legacy.exit=12
+legacy.bytes_preserved=true
+network_or_user_root_access=not_exercised
+claim_limit=offline_temp_filesystem_fixture

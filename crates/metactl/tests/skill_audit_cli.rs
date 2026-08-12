@@ -64,7 +64,7 @@ Repo local guidance.
     write_skill(
         &project
             .path()
-            .join(".codex/skills/demo-pack/review/SKILL.md"),
+            .join(".agents/skills/demo-pack/review/SKILL.md"),
         r#"---
 name: generated-review-skill
 description: Generated skill fixture.

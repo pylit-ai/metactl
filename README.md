@@ -240,8 +240,8 @@ metactl validate
 | `metactl profile list` | Show user profiles and built-in templates such as `neutral`, `multi-agent`, `agent-ci`, and `solo-codex`. |
 | `metactl preview` | Convenience alias for `metactl sync --preview`; stages output without applying runtime files. |
 | `metactl pack use <pack>` | Object-oriented alias for project pack activation; Agent Skill import/export remains under `pack import-skill` and `pack export-skill`. |
-| `metactl skills list --scope repo` | Show repo-local Codex skills generated under `.codex/skills`. |
-| `metactl skills add <skill-path> --scope user` | Install a Codex skill folder into the user-global `~/.codex/skills` Personal picker source. |
+| `metactl skills list --scope repo` | Show repo-local Codex skills generated under `.agents/skills` (legacy `.codex/skills` is reconciliation input only). |
+| `metactl skills add <skill-path> --scope user` | Install a Codex skill folder into the backward-compatible user-global `~/.codex/skills` Personal picker source. |
 | `metactl add <pack> --sync` | Add a known pack and immediately materialize it. |
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
 | `metactl explain` | Show why packs and targets were selected. |
@@ -369,7 +369,7 @@ Set `METACTL_DEMO_HOME` to isolate demos in CI or temporary test runs.
 
 | Target | Generated surface | Status |
 | --- | --- | --- |
-| Codex CLI | `AGENTS.md`, `.codex/skills/...` | Tier 1, conformance-covered. Repo-local skills are visible to Codex sessions opened in that repo; user-global Personal skills live under `~/.codex/skills`. |
+| Codex CLI | `AGENTS.md`, `.agents/skills/...` | Tier 1, conformance-covered. Repo-local skills use the current `.agents/skills` root; the user-global Personal picker remains backward-compatible under `~/.codex/skills`. |
 | Claude Code | `CLAUDE.md`, `.claude/skills/...` | Tier 1, conformance-covered |
 | Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 1, conformance-covered |
 | Filesystem Agent | `AGENTS.md`, `.metactl/filesystem-agent/...` | Generic compatibility fixture |
@@ -424,7 +424,7 @@ metactl fleet sync --preview
 
 Expected result: `status` reports linked project readiness, and `sync --preview` shows planned project updates without applying them.
 
-Fleet Sync updates repo-local generated surfaces in linked projects. It does not install Codex skills into the user-global Personal picker source. Use `metactl skills add <repo-skill-path> --scope user` when an operator-facing skill should also appear under `~/.codex/skills`.
+Fleet Sync updates repo-local generated surfaces in linked projects. It does not install Codex skills into the user-global Personal picker source. Use `metactl skills add <repo-skill-path> --scope user` when an operator-facing skill should also appear under the backward-compatible `~/.codex/skills` root.
 
 > **Expected output**
 >

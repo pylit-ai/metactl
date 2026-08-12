@@ -7,6 +7,11 @@
 - Project declared Agent Skill companion resources from `references/`, `scripts/`, `templates/`, and `assets/` beside each generated `SKILL.md`, with package-relative paths and per-resource source and ownership receipts.
 - Record stale generated paths removed during recompilation in `compile.manifest.json` and CLI compile output.
 - Add multi-target package-closure, missing-resource, managed-only pruning, and path-confinement regression coverage.
+- Added immutable, digest-bound apply review plans, private receipts, and append-only
+  action journals with safe compensation for partial failures.
+- Added a versioned skill-card consumer and shared v1/v2 conformance corpus.
+- Added deterministic offline human simulation for canonical Codex skill writes,
+  no-op repetition, stale-plan refusal, and legacy conflicts.
 
 ### Changed
 
@@ -14,6 +19,12 @@
 - Prune only outputs owned by the previous target compile manifest, retaining unmanaged neighboring files and removing empty managed directories.
 - Aligned the target capability schema with the existing `import_stub` mode and
   `import_stub_path` compile-target field.
+- Codex repo-local skills now write canonically to `.agents/skills`; legacy
+  `.codex/skills` remains read-only reconciliation input and user-global Personal
+  skills remain under `~/.codex/skills`.
+- Hardened generated, destination, backup, restore, and symlink path containment.
+- Scoped duplicate-trigger diagnostics to one consuming runtime so intentional
+  cross-target skill projections are not reported as conflicts.
 
 ## 0.1.21 - 2026-07-03
 

@@ -25,7 +25,7 @@
     },
     {
       "output_kind": "codex_skill",
-      "path_template": ".codex/skills/{pack_id}/{surface_slug}/SKILL.md",
+      "path_template": ".agents/skills/{pack_id}/{surface_slug}/SKILL.md",
       "surface_selection_mode": "minimal",
       "supports_multi_surface_pack": true,
       "supports_surface_assets": true,
@@ -63,6 +63,9 @@
     "approval_surface": ".codex/config.toml approval policy",
     "filesystem_surface": ".codex/config.toml approval policy",
     "advisory_surface": "AGENTS.md advisory guidance",
-    "trust_notice": "Project-level .codex/config.toml only loads for trusted projects; runtime_template removed until trust-flow is specced."
+    "trust_notice": "Project-level .codex/config.toml only loads for trusted projects; runtime_template removed until trust-flow is specced.",
+    "skill_discovery_contract": "dual-read:.agents/skills,.codex/skills;single-write:.agents/skills;legacy-delete:false",
+    "capability_verified_at": "2026-08-11",
+    "capability_source": "https://developers.openai.com/codex/skills"
   }
 }
