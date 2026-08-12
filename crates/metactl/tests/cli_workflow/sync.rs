@@ -299,7 +299,7 @@ fn cli_sync_greenfield_workflow() {
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md")
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
         .exists());
 }
 
@@ -313,7 +313,7 @@ fn cli_sync_codex_skill_outputs_are_regular_files() {
 
     let skill_path = project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md");
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md");
     let metadata = fs::symlink_metadata(&skill_path).expect("skill metadata");
     assert!(
         metadata.file_type().is_file(),
@@ -348,7 +348,7 @@ fn cli_sync_root_instruction_outputs_are_regular_files_under_symlink_apply() {
 
     let skill_path = project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md");
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md");
     let skill_metadata = fs::symlink_metadata(&skill_path).expect("skill metadata");
     assert!(
         skill_metadata.file_type().is_file() && !skill_metadata.file_type().is_symlink(),
@@ -660,7 +660,7 @@ fn cli_sync_patch_adopts_identical_unmanaged_skill_outputs() {
     let compile = run_cli(project.path(), &["compile"]);
     assert!(compile.status.success(), "{}", stderr(&compile));
 
-    let skill_path = ".codex/skills/python-refactor/python-refactor/SKILL.md";
+    let skill_path = ".agents/skills/python-refactor/python-refactor/SKILL.md";
     let staged = project
         .path()
         .join(".metactl/generated/codex-cli")
@@ -685,7 +685,7 @@ fn cli_sync_patch_backs_up_conflicting_unmanaged_skill_outputs() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
 
-    let skill_path = ".codex/skills/python-refactor/python-refactor/SKILL.md";
+    let skill_path = ".agents/skills/python-refactor/python-refactor/SKILL.md";
     let destination = project.path().join(skill_path);
     fs::create_dir_all(destination.parent().expect("skill parent")).expect("skill dir");
     fs::write(&destination, "local unmanaged skill body").expect("seed conflicting skill");

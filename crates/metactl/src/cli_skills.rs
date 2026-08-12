@@ -84,7 +84,7 @@ fn cmd_skills_list(
     ensure_codex_skill_target(&args.target)?;
     let project_root = project_root(cli).map_err(internal_error)?;
     let (scope, root) = match args.scope {
-        SkillScopeArg::Repo => ("repo", project_root.join(".codex").join("skills")),
+        SkillScopeArg::Repo => ("repo", project_root.join(".agents").join("skills")),
         SkillScopeArg::User => ("user", codex_user_skill_root_for_command()?),
     };
     let skills = discover_codex_skill_entries(&root).map_err(internal_error)?;

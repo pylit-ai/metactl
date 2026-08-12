@@ -1180,6 +1180,62 @@ pub struct ApplyReport {
     pub state_path: String,
 }
 
+/// Complete, deterministic review object for one target apply.
+///
+/// Renderers may summarize `actions`, but only the complete file-backed plan and
+/// its digest can authorize a later apply.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApplyReviewPlan {
+    pub schema_version: String,
+    pub target: Ref,
+    pub target_version: String,
+    pub tool_version: String,
+    pub project_identity: String,
+    pub apply_mode: ApplyMode,
+    pub manifest_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_state_digest: Option<String>,
+    pub actions: Vec<ApplyReviewAction>,
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApplyReviewAction {
+    pub destination_path: String,
+    pub staged_path: String,
+    pub classification: String,
+    pub reason_code: String,
+    pub consequence: String,
+    pub approval_required: bool,
+    pub desired_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_digest: Option<String>,
+    #[serde(default)]
+    pub before_path_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ApplyReceipt {
+    pub schema_version: String,
+    pub plan_digest: String,
+    pub target: Ref,
+    pub status: String,
+    #[serde(default)]
+    pub applied_paths: Vec<String>,
+    #[serde(default)]
+    pub conflicts: Vec<ApplyConflict>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal_path: Option<String>,
+    pub rollback_command: String,
+    pub backup_retention: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RevertReport {
     pub target: Ref,

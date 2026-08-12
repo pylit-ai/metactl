@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 const SCHEMA_VERSION: &str = "metactl.instruction_noise.v1";
 
 const SURFACE_PREFIXES: &[&str] = &[
-    ".codex/skills/",
+    ".agents/skills/",
     ".codex/commands/",
     ".claude/skills/",
     ".claude/commands/",

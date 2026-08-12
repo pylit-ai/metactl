@@ -346,7 +346,7 @@ fn cli_ignore_install_repo_writes_gitignore_and_agent_allowlists() {
     assert!(cursorignore.contains("# metactl:begin agent-surface-allowlist"));
     assert!(cursorignore.contains("!/.cursor/rules/**"));
     assert!(cursorignore.contains("!/.cursor/skills/**"));
-    assert!(cursorignore.contains("!/.codex/skills/**"));
+    assert!(cursorignore.contains("!/.agents/skills/**"));
 
     let geminiignore =
         fs::read_to_string(project.path().join(".geminiignore")).expect("read geminiignore");

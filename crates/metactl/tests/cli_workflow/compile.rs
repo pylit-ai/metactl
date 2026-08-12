@@ -24,12 +24,12 @@ fn cli_init_compile_apply_revert_greenfield() {
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md")
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
         .exists());
     assert!(
         !project
             .path()
-            .join(".codex/skills/python-refactor/contracts/SKILL.md")
+            .join(".agents/skills/python-refactor/contracts/SKILL.md")
             .exists(),
         "contracts surface should stay suppressed in default minimal mode"
     );
@@ -41,7 +41,7 @@ fn cli_init_compile_apply_revert_greenfield() {
     let revert = run_cli(project.path(), &["revert"]);
     assert!(revert.status.success(), "{}", stderr(&revert));
     assert!(!project.path().join("AGENTS.md").exists());
-    assert!(!project.path().join(".codex/skills").exists());
+    assert!(!project.path().join(".agents/skills").exists());
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn cli_compile_apply_chained_greenfield() {
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md")
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
         .exists());
 
     let validate = run_cli(project.path(), &["validate"]);
@@ -98,7 +98,7 @@ fn cli_compile_surface_mode_controls_emitted_skill_surfaces() {
     assert!(
         !project
             .path()
-            .join(".metactl/generated/codex-cli/.codex/skills/python-refactor/contracts/SKILL.md")
+            .join(".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/SKILL.md")
             .exists(),
         "contracts surface should be suppressed in minimal mode"
     );
@@ -131,7 +131,7 @@ fn cli_compile_surface_mode_controls_emitted_skill_surfaces() {
     assert!(
         project
             .path()
-            .join(".metactl/generated/codex-cli/.codex/skills/python-refactor/contracts/SKILL.md")
+            .join(".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/SKILL.md")
             .exists(),
         "contracts surface should emit in full mode"
     );

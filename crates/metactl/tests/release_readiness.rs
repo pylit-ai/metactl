@@ -462,9 +462,9 @@ fn codex_multi_surface_emission_uses_pack_scoped_surface_paths() {
         .filter_map(|item| item.destination_path.clone())
         .collect::<Vec<_>>();
     assert!(destinations
-        .contains(&".codex/skills/python-refactor/python-refactor/SKILL.md".to_string()));
-    assert!(destinations.contains(&".codex/skills/python-refactor/contracts/SKILL.md".to_string()));
-    assert!(destinations.contains(&".codex/skills/python-refactor/tests/SKILL.md".to_string()));
+        .contains(&".agents/skills/python-refactor/python-refactor/SKILL.md".to_string()));
+    assert!(destinations.contains(&".agents/skills/python-refactor/contracts/SKILL.md".to_string()));
+    assert!(destinations.contains(&".agents/skills/python-refactor/tests/SKILL.md".to_string()));
     assert!(compile
         .compile_manifest
         .generated_outputs
@@ -478,7 +478,10 @@ fn codex_multi_surface_emission_uses_pack_scoped_surface_paths() {
 #[test]
 fn skill_projection_preserves_declared_package_resources_across_targets() {
     for (target_id, skill_root) in [
-        ("codex-cli", ".codex/skills/package-closure/package-closure"),
+        (
+            "codex-cli",
+            ".agents/skills/package-closure/package-closure",
+        ),
         (
             "claude-code",
             ".claude/skills/package-closure/package-closure",
@@ -621,9 +624,9 @@ fn recompile_prunes_stale_staged_skill_surfaces() {
         .expect("full compile");
 
     let stale_paths = [
-        ".metactl/generated/codex-cli/.codex/skills/migration-guard/escalation/SKILL.md",
-        ".metactl/generated/codex-cli/.codex/skills/python-refactor/contracts/SKILL.md",
-        ".metactl/generated/codex-cli/.codex/skills/python-refactor/tests/SKILL.md",
+        ".metactl/generated/codex-cli/.agents/skills/migration-guard/escalation/SKILL.md",
+        ".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/SKILL.md",
+        ".metactl/generated/codex-cli/.agents/skills/python-refactor/tests/SKILL.md",
     ];
     for path in &stale_paths {
         assert!(
@@ -632,7 +635,7 @@ fn recompile_prunes_stale_staged_skill_surfaces() {
         );
     }
     let unmanaged_neighbor = project_root.join(
-        ".metactl/generated/codex-cli/.codex/skills/python-refactor/contracts/operator-note.txt",
+        ".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/operator-note.txt",
     );
     std::fs::write(&unmanaged_neighbor, "preserve me\n").expect("write unmanaged neighbor");
 
@@ -751,7 +754,7 @@ fn target_native_pack_resources() {
             // Spec 019 plus Codex command support.
             vec![
                 "AGENTS.md",
-                ".codex/skills/unit-test-loop/unit-test-loop/SKILL.md",
+                ".agents/skills/unit-test-loop/unit-test-loop/SKILL.md",
                 ".codex/commands/run-targeted-tests.md",
             ],
         ),
@@ -839,7 +842,7 @@ fn reference_based_instruction_indexes() {
             "release-policy",
             "codex-cli",
             "AGENTS.md",
-            ".codex/skills/unit-test-loop/",
+            ".agents/skills/unit-test-loop/",
             "Run the narrowest relevant test loop before closing work.",
         ),
     ];

@@ -59,8 +59,8 @@ const EXIT_STALE_LOCK: u8 = 11;
 const EXIT_CONFLICT: u8 = 12;
 const EXIT_VALIDATION: u8 = 13;
 
-const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills under .codex/skills are visible to Codex sessions opened in that repository. User-global Personal skills live under ~/.codex/skills.";
-const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills.";
+const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills are written canonically under .agents/skills. Legacy .codex/skills remains read-only reconciliation input. User-global Personal skills live under ~/.codex/skills.";
+const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync writes repo-local .agents/skills in linked projects, reads legacy .codex/skills only for safe reconciliation, and does not install user-global Personal skills under ~/.codex/skills.";
 const MACHINE_LIST_LIMIT: usize = 15;
 const AGENT_ARTIFACT_POLICY_METADATA_KEY: &str = "agent_artifact_policy";
 const AGENT_ARTIFACT_STEWARDSHIP_PACK: &str = "agentic-artifact-forge";
@@ -1429,6 +1429,9 @@ struct SyncArgs {
     /// Explicitly apply generated changes (default when --preview is not passed)
     #[arg(long)]
     apply: bool,
+    /// Bind an explicit apply to the complete plan digest emitted by preview
+    #[arg(long, value_name = "SHA256")]
+    plan_digest: Option<String>,
     /// Folder-native surface selection mode (overrides defaults.surface_selection_mode)
     #[arg(long, value_enum)]
     surface_mode: Option<SurfaceSelectionModeArg>,
@@ -1448,6 +1451,9 @@ struct ApplyArgs {
     /// Show what would be applied without writing files
     #[arg(long)]
     preview: bool,
+    /// Bind apply to the complete plan digest emitted by a prior preview
+    #[arg(long, value_name = "SHA256")]
+    plan_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2209,7 +2215,7 @@ fn codex_skill_entry_json(entry: &CodexSkillEntry) -> Value {
 }
 
 fn codex_skill_visibility_json(project_root: &Path) -> Result<Value> {
-    let repo_root = project_root.join(".codex").join("skills");
+    let repo_root = project_root.join(".agents").join("skills");
     let repo_entries = discover_codex_skill_entries(&repo_root)?;
     let user_root = codex_user_skill_root();
     let user_entries = match user_root.as_ref() {
@@ -2265,7 +2271,7 @@ fn append_codex_skill_visibility_lines(lines: &mut Vec<String>, visibility: &Val
     lines.push("  Codex skill visibility:".to_string());
     lines.push(format!(
         "    repo-local: {repo_count} skill(s) under {}",
-        visibility["repo_root"].as_str().unwrap_or(".codex/skills")
+        visibility["repo_root"].as_str().unwrap_or(".agents/skills")
     ));
     lines.push(format!(
         "    user-global: {user_count} skill(s) under {}",
@@ -3166,6 +3172,7 @@ fn add_pack_to_config_and_maybe_sync(
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -3615,6 +3622,7 @@ fn cmd_target_add(
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -3668,6 +3676,7 @@ fn cmd_target_add(
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -3743,6 +3752,7 @@ fn cmd_target_remove(
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -3803,6 +3813,7 @@ fn cmd_target_remove(
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -3930,6 +3941,7 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -3990,6 +4002,7 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -4056,6 +4069,7 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -4109,6 +4123,7 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -7286,21 +7301,25 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
             target: None,
             mode: None,
             preview: true,
+            plan_digest: None,
         },
         Some(SyncAdoptArg::Patch) => ApplyArgs {
             target: None,
             mode: Some(ApplyModeArg::Patch),
             preview: false,
+            plan_digest: args.plan_digest.clone(),
         },
         Some(SyncAdoptArg::Takeover) => ApplyArgs {
             target: None,
             mode: Some(ApplyModeArg::Takeover),
             preview: false,
+            plan_digest: args.plan_digest.clone(),
         },
         None => ApplyArgs {
             target: None,
             mode: None,
             preview: false,
+            plan_digest: args.plan_digest.clone(),
         },
     };
 
@@ -7855,6 +7874,7 @@ fn cmd_compile_with_durable_writes(
     let apply_out = cmd_apply(
         cli,
         &ApplyArgs {
+            plan_digest: None,
             target: None,
             mode: args.apply_mode,
             preview: false,
@@ -7882,6 +7902,12 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
     }
     let kernel = kernel_from_context(&context).map_err(internal_error)?;
     let targets = select_locked_targets(&context.lock, args.target.clone())?;
+    if args.plan_digest.is_some() && targets.len() != 1 {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "--plan-digest requires exactly one selected target.",
+        ));
+    }
     let mut outputs = Vec::new();
     let mut notes = Vec::new();
     for target in targets {
@@ -7900,19 +7926,60 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
         if let Some(note) = note {
             notes.push(note);
         }
+        let review_plan = kernel
+            .apply_review_plan(&project_root, &manifest, &apply_mode)
+            .map_err(state_error)?;
+        let plan_path =
+            write_apply_review_plan(&project_root, &review_plan).map_err(internal_error)?;
+        let action_total = review_plan.actions.len();
+        let hidden_count = action_total.saturating_sub(MACHINE_LIST_LIMIT);
         if args.preview {
             outputs.push(json!({
                 "target": target.target.id,
                 "apply_mode": apply_mode,
-                "preview": preview_manifest(&project_root, &manifest),
+                "plan_digest": review_plan.digest,
+                "plan_path": plan_path,
+                "actions": review_plan.actions,
+                "actions_total_count": action_total,
+                "actions_hidden_count": hidden_count,
+                "render_authorizing": false,
+                "complete_plan_authorizing": true,
             }));
             continue;
         }
+        let expected_digest = args
+            .plan_digest
+            .as_deref()
+            .unwrap_or(review_plan.digest.as_str());
         let report = kernel
-            .apply_compiled_outputs(&project_root, &manifest, &apply_mode)
+            .apply_compiled_outputs_bound(&project_root, &manifest, &apply_mode, expected_digest)
             .map_err(state_error)?;
         if !report.conflicts.is_empty() {
-            return Err(conflict_error(&report));
+            let receipt_status = if report
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.detail.starts_with("compensated_failure:"))
+            {
+                "compensated_failure"
+            } else if report
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.detail.starts_with("failed_partial:"))
+            {
+                "failed_partial"
+            } else {
+                "conflict"
+            };
+            let receipt_path =
+                write_apply_receipt(&project_root, &review_plan, receipt_status, &report)
+                    .map_err(internal_error)?;
+            let mut err = conflict_error(&report);
+            err.details.push(format!("Receipt: {receipt_path}"));
+            if let Some(object) = err.json.as_object_mut() {
+                object.insert("plan_digest".to_string(), json!(review_plan.digest));
+                object.insert("receipt_path".to_string(), json!(receipt_path));
+            }
+            return Err(err);
         }
         append_history_entry(
             &project_root,
@@ -7926,11 +7993,27 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             },
         )
         .map_err(internal_error)?;
+        let receipt_status =
+            if review_plan.actions.iter().all(|action| {
+                action.before_digest.as_deref() == Some(action.desired_digest.as_str())
+            }) {
+                "noop"
+            } else {
+                "success"
+            };
+        let receipt_path =
+            write_apply_receipt(&project_root, &review_plan, receipt_status, &report)
+                .map_err(internal_error)?;
         outputs.push(json!({
             "target": report.target.id,
             "apply_mode": apply_mode,
             "applied_paths": report.applied_paths,
             "state_path": report.state_path,
+            "plan_digest": review_plan.digest,
+            "plan_path": plan_path,
+            "receipt_path": receipt_path,
+            "actions_total_count": action_total,
+            "actions_hidden_count": hidden_count,
         }));
     }
     update_managed_files_index(&project_root).map_err(internal_error)?;
@@ -7945,7 +8028,7 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             let target_id = output["target"].as_str().unwrap_or("unknown");
             let apply_mode = output["apply_mode"].as_str().unwrap_or("unknown");
             let paths = if args.preview {
-                output["preview"]
+                output["actions"]
                     .as_array()
                     .map(|items| {
                         items
@@ -7967,8 +8050,43 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
                 paths.len(),
                 if paths.len() == 1 { "" } else { "s" }
             ));
-            for path in &paths {
-                human_lines.push(format!("    {}", path));
+            for path in paths.iter().take(MACHINE_LIST_LIMIT) {
+                if args.preview {
+                    let action = output["actions"].as_array().and_then(|actions| {
+                        actions
+                            .iter()
+                            .find(|action| action["destination_path"].as_str() == Some(path))
+                    });
+                    if let Some(action) = action {
+                        human_lines.push(format!(
+                            "    {} [{}; {}; approval: {}]",
+                            path,
+                            action["classification"].as_str().unwrap_or("unknown"),
+                            action["reason_code"].as_str().unwrap_or("unknown"),
+                            action["approval_required"].as_bool().unwrap_or(false)
+                        ));
+                        human_lines.push(format!(
+                            "      {}",
+                            action["consequence"]
+                                .as_str()
+                                .unwrap_or("Consequence unavailable.")
+                        ));
+                    }
+                } else {
+                    human_lines.push(format!("    {}", path));
+                }
+            }
+            if let Some(digest) = output["plan_digest"].as_str() {
+                human_lines.push(format!("    plan digest: {digest}"));
+            }
+            if let Some(path) = output["plan_path"].as_str() {
+                human_lines.push(format!("    complete plan: {path}"));
+            }
+            let hidden = output["actions_hidden_count"].as_u64().unwrap_or(0);
+            if hidden > 0 {
+                human_lines.push(format!(
+                    "    {hidden} action(s) hidden here; this rendered summary cannot authorize apply"
+                ));
             }
         }
         project_human_output(&project_root, human_lines.join("\n"))
@@ -9029,52 +9147,70 @@ fn normalize_apply_mode(
     )))
 }
 
-fn preview_manifest(project_root: &Path, manifest: &CompileManifest) -> Vec<serde_json::Value> {
-    let managed_index = load_managed_index(project_root);
-    manifest
-        .generated_outputs
-        .iter()
-        .map(|item| {
-            let destination = item.destination_path.clone().unwrap_or_default();
-            let destination_abs = project_root.join(&destination);
-            let classification = if managed_index.contains(&destination) {
-                "managed"
-            } else if destination_abs.exists() {
-                "unmanaged-existing"
-            } else {
-                "new"
-            };
-            json!({
-                "destination_path": destination,
-                "staged_path": item.path,
-                "classification": classification,
-            })
-        })
-        .collect()
+fn write_apply_review_plan(project_root: &Path, plan: &metactl::ApplyReviewPlan) -> Result<String> {
+    let relative = Path::new(".metactl")
+        .join("plans")
+        .join(format!("{}.json", plan.target.id));
+    let path = project_root.join(&relative);
+    atomic_write(
+        &path,
+        &serde_json::to_vec_pretty(plan).context("serialize complete apply plan")?,
+    )?;
+    restrict_private_file(&path)?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn load_managed_index(project_root: &Path) -> BTreeSet<String> {
-    let path = project_root.join(".metactl/state/managed_files.json");
-    let Ok(raw) = fs::read(&path) else {
-        return BTreeSet::new();
+fn write_apply_receipt(
+    project_root: &Path,
+    plan: &metactl::ApplyReviewPlan,
+    status: &str,
+    report: &ApplyReport,
+) -> Result<String> {
+    let digest_name = plan.digest.strip_prefix("sha256:").unwrap_or(&plan.digest);
+    let relative = Path::new(".metactl")
+        .join("receipts")
+        .join(&plan.target.id)
+        .join(format!("{digest_name}.json"));
+    let path = project_root.join(&relative);
+    let receipt = metactl::ApplyReceipt {
+        schema_version: "metactl.apply-receipt.v1".to_string(),
+        plan_digest: plan.digest.clone(),
+        target: plan.target.clone(),
+        status: status.to_string(),
+        applied_paths: report.applied_paths.clone(),
+        conflicts: report.conflicts.clone(),
+        state_path: Some(report.state_path.clone()),
+        journal_path: Some(
+            Path::new(".metactl")
+                .join("state")
+                .join("apply-journal")
+                .join(&plan.target.id)
+                .join(format!("{digest_name}.jsonl"))
+                .to_string_lossy()
+                .replace('\\', "/"),
+        ),
+        rollback_command: format!("metactl revert --target {}", plan.target.id),
+        backup_retention:
+            "Project-private until successful verified rollback or explicit operator cleanup."
+                .to_string(),
     };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) else {
-        return BTreeSet::new();
-    };
-    value
-        .as_object()
-        .into_iter()
-        .flat_map(|map| map.values())
-        .filter_map(|items| items.as_array())
-        .flat_map(|items| items.iter())
-        .filter_map(|item| {
-            item.as_str().map(ToString::to_string).or_else(|| {
-                item.get("destination_path")
-                    .and_then(|value| value.as_str())
-                    .map(ToString::to_string)
-            })
-        })
-        .collect()
+    atomic_write(
+        &path,
+        &serde_json::to_vec_pretty(&receipt).context("serialize apply receipt")?,
+    )?;
+    restrict_private_file(&path)?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(unix)]
+fn restrict_private_file(path: &Path) -> Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restrict permissions on {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn restrict_private_file(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn shared_surface_rules(
@@ -11621,6 +11757,7 @@ fn git_ignore_patterns(
 
     if targets.iter().any(|target| target == "codex-cli") {
         patterns.insert(".codex/".to_string());
+        patterns.insert(".agents/".to_string());
     }
     if targets.iter().any(|target| target == "claude-code") {
         patterns.insert(".claude/".to_string());
@@ -11652,9 +11789,12 @@ fn cursor_allowlist_patterns(targets: &[String]) -> Vec<String> {
         patterns.extend(
             [
                 "!/AGENTS.md",
+                "!/.agents/",
+                "!/.agents/skills/",
+                "!/.agents/skills/**",
                 "!/.codex/",
-                "!/.codex/skills/",
-                "!/.codex/skills/**",
+                "!/.codex/commands/",
+                "!/.codex/commands/**",
             ]
             .iter()
             .map(|item| item.to_string()),

@@ -12,9 +12,9 @@ use sha2::{Digest, Sha256};
 use crate::materializer::{self, StagedOutputInput};
 use crate::suite_registry::selected_target_from_config;
 use crate::types::{
-    ActivationClass, ApplyMode, ApplyReport, CapabilityGap, CompileManifest, CompileParams,
-    CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus, ExplainParams,
-    ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
+    ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, CapabilityGap, CompileManifest,
+    CompileParams, CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus,
+    ExplainParams, ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
     InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport, PackImport, PackManifest,
     PackResource, PolicyEnforcementReport, PolicyManifest, PolicyOperator, PolicyRuleReport,
     PolicySelectors, PolicySubject, PromotionStatus, ProvenanceEnvelope, ProvenanceReview,
@@ -773,6 +773,30 @@ impl LibraryRegistry {
         apply_mode: &ApplyMode,
     ) -> Result<ApplyReport> {
         materializer::apply_manifest(project_root, manifest, apply_mode)
+    }
+
+    pub fn apply_review_plan(
+        &self,
+        project_root: &Path,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+    ) -> Result<ApplyReviewPlan> {
+        materializer::build_apply_review_plan(project_root, manifest, apply_mode)
+    }
+
+    pub fn apply_manifest_bound(
+        &self,
+        project_root: &Path,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+        expected_plan_digest: &str,
+    ) -> Result<ApplyReport> {
+        materializer::apply_manifest_bound(
+            project_root,
+            manifest,
+            apply_mode,
+            Some(expected_plan_digest),
+        )
     }
 
     pub fn revert_target(&self, project_root: &Path, target: &Ref) -> Result<RevertReport> {
