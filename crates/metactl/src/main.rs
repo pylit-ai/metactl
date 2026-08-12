@@ -7767,6 +7767,7 @@ fn cmd_compile_with_durable_writes(
         compiled_targets.push(json!({
             "target": target.target_id,
             "generated_outputs": compile.compile_manifest.generated_outputs.iter().map(|item| item.path.clone()).collect::<Vec<_>>(),
+            "pruned_outputs": compile.compile_manifest.pruned_outputs,
             "degradations": compile.compile_manifest.degradations,
             "apply_modes_supported": compile.compile_manifest.apply_modes_supported,
             "surface_selection_mode": compile.compile_manifest.surface_selection_mode.as_ref().map(surface_selection_mode_label),
@@ -7788,18 +7789,33 @@ fn cmd_compile_with_durable_writes(
                 .map(|a| a.len())
                 .unwrap_or(0);
             let degradations = ct["degradations"].as_array().map(|a| a.len()).unwrap_or(0);
+            let pruned = ct["pruned_outputs"]
+                .as_array()
+                .map(|items| items.len())
+                .unwrap_or(0);
             let surface_mode = ct["surface_selection_mode"]
                 .as_str()
                 .map(|mode| format!(", surface: {mode}"))
                 .unwrap_or_default();
-            let note = if degradations > 0 {
-                format!(
-                    " ({} degradation{})",
+            let mut notes = Vec::new();
+            if pruned > 0 {
+                notes.push(format!(
+                    "{} stale output{} pruned",
+                    pruned,
+                    if pruned == 1 { "" } else { "s" }
+                ));
+            }
+            if degradations > 0 {
+                notes.push(format!(
+                    "{} degradation{}",
                     degradations,
                     if degradations == 1 { "" } else { "s" }
-                )
-            } else {
+                ));
+            }
+            let note = if notes.is_empty() {
                 String::new()
+            } else {
+                format!(" ({})", notes.join(", "))
             };
             human_lines.push(format!(
                 "  {} ({} output{}{}{})",
