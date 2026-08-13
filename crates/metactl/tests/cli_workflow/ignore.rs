@@ -34,13 +34,10 @@ fn ignore_status_agent_json_has_next_commands() {
     assert!(output.status.success(), "{}", stderr(&output));
     let value = json_output(&output);
     assert_json_contract(&value, "ignore", Some(project.path()));
-    assert!(
-        value["next_commands"]
-            .as_array()
-            .expect("next commands")
-            .len()
-            >= 1
-    );
+    assert!(!value["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .is_empty());
 }
 
 #[test]

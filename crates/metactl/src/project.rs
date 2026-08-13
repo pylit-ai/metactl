@@ -3,6 +3,7 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -20,6 +21,7 @@ pub const METACTL_DIRS: &[&str] = &["generated", "state", "history", "private", 
 pub const METACTL_GITIGNORE_ENTRY: &str = "/.metactl/";
 pub const LOCAL_CONFIG_GITIGNORE_ENTRY: &str = "/metactl.local.yaml";
 const DEFAULT_OPERATION_LOCK_STALE_SECS: u64 = 6 * 60 * 60;
+static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static BUNDLED_STARTER_LIBRARY: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/starter");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -93,43 +95,28 @@ pub struct PartialProjectConfig {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceType {
+    #[default]
     Local,
     Git,
 }
 
-impl Default for SourceType {
-    fn default() -> Self {
-        Self::Local
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceVisibility {
+    #[default]
     Public,
     Private,
 }
 
-impl Default for SourceVisibility {
-    fn default() -> Self {
-        Self::Public
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceLockPublicity {
+    #[default]
     Public,
     Private,
-}
-
-impl Default for SourceLockPublicity {
-    fn default() -> Self {
-        Self::Public
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1576,7 +1563,11 @@ fn atomic_write_with_durability(path: &Path, bytes: &[u8], durable: bool) -> Res
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let tmp_path = parent.join(format!(".{filename}.tmp-{}-{stamp}", std::process::id()));
+    let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = parent.join(format!(
+        ".{filename}.tmp-{}-{stamp}-{sequence}",
+        std::process::id()
+    ));
     {
         let mut file = File::create(&tmp_path)
             .with_context(|| format!("create temp {}", tmp_path.display()))?;
@@ -1701,7 +1692,7 @@ pub fn preferred_apply_mode_for_target(
     target: &crate::TargetCapabilityMatrix,
     requested: Option<ApplyMode>,
 ) -> ApplyMode {
-    requested.unwrap_or_else(|| {
+    requested.unwrap_or({
         if target.capabilities.local_scripts {
             ApplyMode::Symlink
         } else {
@@ -1918,21 +1909,23 @@ mod tests {
                 disabled: false,
             },
         ];
-        let mut project = PartialProjectConfig::default();
-        project.linked_projects = vec![
-            LinkedProjectRecord {
-                id: "beta".to_string(),
-                path: "../beta-local".to_string(),
-                profile: Some("local".to_string()),
-                disabled: true,
-            },
-            LinkedProjectRecord {
-                id: "gamma".to_string(),
-                path: "../gamma".to_string(),
-                profile: None,
-                disabled: false,
-            },
-        ];
+        let project = PartialProjectConfig {
+            linked_projects: vec![
+                LinkedProjectRecord {
+                    id: "beta".to_string(),
+                    path: "../beta-local".to_string(),
+                    profile: Some("local".to_string()),
+                    disabled: true,
+                },
+                LinkedProjectRecord {
+                    id: "gamma".to_string(),
+                    path: "../gamma".to_string(),
+                    profile: None,
+                    disabled: false,
+                },
+            ],
+            ..Default::default()
+        };
 
         let merged = merge_project_config(default_project_config(), profile, project);
 
@@ -2030,5 +2023,37 @@ mod tests {
                     .into_owned();
                 !name.contains(".tmp-")
             }));
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_use_distinct_temporary_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("cache").join("shared.json");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(32));
+
+        std::thread::scope(|scope| {
+            for index in 0..32 {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    atomic_write_relaxed(&path, format!("value-{index}").as_bytes())
+                        .expect("concurrent atomic write");
+                });
+            }
+        });
+
+        let contents = fs::read_to_string(&path).expect("read final value");
+        assert!(contents.starts_with("value-"));
+        assert!(path
+            .parent()
+            .expect("parent")
+            .read_dir()
+            .expect("read cache dir")
+            .all(|entry| !entry
+                .expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")));
     }
 }

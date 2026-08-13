@@ -32,6 +32,17 @@ pub(crate) struct StagedOutputInput {
     pub materialize_as_regular_file: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct StageOutputsParams {
+    pub inputs: Vec<StagedOutputInput>,
+    pub surface_selection_mode: Option<crate::types::SurfaceSelectionMode>,
+    pub surface_selection: Vec<crate::types::SurfaceSelectionDecision>,
+    pub apply_modes_supported: Vec<ApplyMode>,
+    pub brownfield_mode: Option<BrownfieldMode>,
+    pub degradations: Vec<CapabilityGap>,
+    pub durable: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ManagedState {
     api_version: String,
@@ -146,13 +157,7 @@ struct ApplyJournalEntry<'a> {
 pub(crate) fn stage_outputs(
     project_root: &Path,
     target: &Ref,
-    inputs: Vec<StagedOutputInput>,
-    surface_selection_mode: Option<crate::types::SurfaceSelectionMode>,
-    surface_selection: Vec<crate::types::SurfaceSelectionDecision>,
-    apply_modes_supported: Vec<ApplyMode>,
-    brownfield_mode: Option<BrownfieldMode>,
-    degradations: Vec<CapabilityGap>,
-    durable: bool,
+    params: StageOutputsParams,
 ) -> Result<CompileManifest> {
     validate_relative_output_path("target id", &target.id)?;
     let stage_root = project_root
@@ -182,7 +187,7 @@ pub(crate) fn stage_outputs(
 
     let mut outputs = Vec::new();
     let mut seen_destinations = BTreeSet::new();
-    for input in inputs {
+    for input in params.inputs {
         validate_relative_output_path("generated destination", &input.destination_path)?;
         ensure_platform_unique_path(&mut seen_destinations, &input.destination_path)?;
         let relative_stage_path = Path::new(".metactl")
@@ -194,8 +199,7 @@ pub(crate) fn stage_outputs(
         if let Some(parent) = stage_path.parent() {
             fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
         }
-        ensure_contained_regular_path(project_root, &relative_stage_path, true)?;
-        write_staged_if_changed(&stage_path, &input.contents, durable)
+        write_staged_if_changed(&stage_path, &input.contents, params.durable)
             .with_context(|| format!("write {}", stage_path.display()))?;
         outputs.push(GeneratedOutput {
             id: input.id,
@@ -232,11 +236,11 @@ pub(crate) fn stage_outputs(
         target: target.clone(),
         generated_outputs: outputs,
         pruned_outputs,
-        surface_selection_mode,
-        surface_selection,
-        apply_modes_supported,
-        brownfield_mode,
-        degradations,
+        surface_selection_mode: params.surface_selection_mode,
+        surface_selection: params.surface_selection,
+        apply_modes_supported: params.apply_modes_supported,
+        brownfield_mode: params.brownfield_mode,
+        degradations: params.degradations,
     };
 
     atomic_write(
@@ -812,7 +816,7 @@ pub(crate) fn apply_manifest_bound(
             applied_paths: Vec::new(),
             conflicts,
             state_path: normalize_relative(
-                &state_path
+                state_path
                     .strip_prefix(project_root)
                     .unwrap_or(state_path.as_path()),
             ),
@@ -1091,7 +1095,7 @@ pub(crate) fn apply_manifest_bound(
         applied_paths,
         conflicts: Vec::new(),
         state_path: normalize_relative(
-            &state_path
+            state_path
                 .strip_prefix(project_root)
                 .unwrap_or(state_path.as_path()),
         ),
@@ -1140,7 +1144,7 @@ pub(crate) fn revert_target(project_root: &Path, target: &Ref) -> Result<RevertR
             reverted_paths: Vec::new(),
             conflicts,
             state_path: Some(normalize_relative(
-                &state_path
+                state_path
                     .strip_prefix(project_root)
                     .unwrap_or(state_path.as_path()),
             )),
@@ -1175,7 +1179,7 @@ pub(crate) fn revert_target(project_root: &Path, target: &Ref) -> Result<RevertR
         reverted_paths,
         conflicts: Vec::new(),
         state_path: Some(normalize_relative(
-            &state_path
+            state_path
                 .strip_prefix(project_root)
                 .unwrap_or(state_path.as_path()),
         )),
@@ -1804,12 +1808,13 @@ fn patch_document(existing: &str, managed: &str, marker: &str) -> Result<String>
         let prefix = &existing[..start];
         let suffix = &tail[end_offset + end.len()..];
         return Ok(format!(
-            "{}{}{}{}{}",
+            "{}{}{}{}\n{}\n{}",
             prefix,
             begin,
             if managed.starts_with('\n') { "" } else { "\n" },
             managed.trim_end(),
-            format!("\n{}\n{}", end, suffix.trim_start_matches('\n'))
+            end,
+            suffix.trim_start_matches('\n')
         ));
     }
 
