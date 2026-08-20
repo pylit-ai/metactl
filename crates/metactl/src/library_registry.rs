@@ -134,6 +134,8 @@ pub struct SkillRouteCandidate {
     pub skill_name: String,
     pub pack_ref: Ref,
     pub resource_path: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surface_ids: Vec<String>,
     pub score: i64,
     pub matched_fields: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -351,10 +353,21 @@ impl LibraryRegistry {
                         suppressed_reasons.push("target_not_compatible".to_string());
                     }
                 }
+                let surface_ids = derive_skill_surfaces(pack)?
+                    .into_iter()
+                    .filter(|surface| {
+                        surface
+                            .instruction_resource_paths
+                            .iter()
+                            .any(|path| path == &resource.path)
+                    })
+                    .map(|surface| surface.surface_id)
+                    .collect();
                 candidates.push(SkillRouteCandidate {
                     skill_name,
                     pack_ref: pack.manifest.pack_ref(),
                     resource_path: resource.path.clone(),
+                    surface_ids,
                     score,
                     matched_fields,
                     suppressed_reasons,
@@ -3491,6 +3504,10 @@ mod tests {
             .expect("route");
         assert_eq!(result.candidates.len(), 1);
         assert_eq!(result.candidates[0].skill_name, "delegated-work");
+        assert_eq!(
+            result.candidates[0].surface_ids,
+            vec!["demo-route:delegated-work".to_string()]
+        );
         assert_eq!(result.candidates[0].matched_fields, vec!["alias"]);
         assert_eq!(
             result.candidates[0].suppressed_reasons,
