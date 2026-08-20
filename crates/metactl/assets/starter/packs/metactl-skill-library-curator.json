@@ -1,0 +1,25 @@
+{
+  "kind": "pack",
+  "id": "metactl-skill-library-curator",
+  "version": "1.0.0",
+  "title": "MetaCTL Skill Library Curator",
+  "description": "Read-only relational audits for skill discoverability, aliases, routing boundaries, and approval-gated library curation proposals.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "task_tags": ["metactl", "library", "skills", "routing", "audit", "authoring"],
+  "compatible_roles": ["builder", "reviewer", "release-manager"],
+  "compatible_targets": ["claude-code", "codex-cli", "cursor", "gemini-cli", "openclaw"],
+  "resources": [
+    {"path": "packs/metactl-skill-library-curator/SKILL.md", "kind": "instruction", "required": true, "surface_relevance": "suppressible"}
+  ],
+  "imports": [{"ecosystem": "first_party", "origin": "starter-library"}],
+  "lifecycle": {
+    "status": "active",
+    "verified_targets": ["claude-code", "codex-cli", "cursor", "gemini-cli", "openclaw"],
+    "last_verified_at": "2026-08-20T00:00:00Z",
+    "evidence_refs": ["tests:starter-library", "tests:skill-routing"]
+  },
+  "metadata": {"pack_status": "starter-promoted", "visibility_scope": "public"}
+}

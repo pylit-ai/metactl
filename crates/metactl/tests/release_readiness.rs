@@ -907,12 +907,12 @@ fn starter_library_inventory_and_metadata_checks() {
         .expect("starter inventory");
     assert_eq!(roles, 3);
     assert_eq!(policies, 3);
-    assert_eq!(packs, 13);
+    assert_eq!(packs, 14);
 
     let manifest: serde_json::Value = serde_json::from_slice(
         &fs::read(starter_root().join("library.json")).expect("starter metadata"),
     )
     .expect("library metadata json");
     assert_eq!(manifest["minimum_roles"], 3);
-    assert_eq!(manifest["minimum_packs"], 13);
+    assert_eq!(manifest["minimum_packs"], 14);
 }
