@@ -626,6 +626,15 @@ impl LibraryRegistry {
                 affected_refs: vec![role.role_ref(), policy.policy_ref()],
             });
         }
+        if let Some(selection) = params
+            .config
+            .defaults
+            .as_ref()
+            .and_then(|defaults| defaults.auto_surface_selection.as_ref())
+        {
+            capability_gaps
+                .extend(self.auto_surface_selection_gaps(&activated_pack_refs, selection)?);
+        }
 
         Ok(ResolveGraph {
             api_version: crate::types::API_VERSION.to_string(),
@@ -651,6 +660,51 @@ impl LibraryRegistry {
                 .and_then(|defaults| defaults.auto_surface_selection.clone()),
             pack_visibility,
         })
+    }
+
+    /// Stable surface ids currently known to this registry. Selection commands
+    /// use this to reject typos before they are persisted.
+    pub fn known_surface_ids(&self) -> Result<BTreeSet<String>> {
+        let mut ids = BTreeSet::new();
+        for pack in self.packs.values() {
+            ids.extend(
+                derive_skill_surfaces(pack)?
+                    .into_iter()
+                    .map(|surface| surface.surface_id),
+            );
+        }
+        Ok(ids)
+    }
+
+    fn auto_surface_selection_gaps(
+        &self,
+        activated_pack_refs: &[Ref],
+        selection: &AutoSurfaceSelection,
+    ) -> Result<Vec<CapabilityGap>> {
+        let active_ids = activated_pack_refs
+            .iter()
+            .filter_map(|pack_ref| self.find_pack(pack_ref))
+            .map(derive_skill_surfaces)
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .map(|surface| surface.surface_id)
+            .collect::<BTreeSet<_>>();
+        let saved_ids = selection
+            .selected_surface_ids
+            .iter()
+            .chain(selection.pinned_surface_ids.iter())
+            .chain(selection.blocked_surface_ids.iter())
+            .collect::<BTreeSet<_>>();
+        Ok(saved_ids
+            .into_iter()
+            .filter(|surface_id| !active_ids.contains(*surface_id))
+            .map(|surface_id| CapabilityGap {
+                feature: format!("auto_surface_selection:{surface_id}"),
+                reason_code: ReasonCode::NotFound,
+                affected_refs: Vec::new(),
+            })
+            .collect())
     }
 
     pub fn explain(&self, params: ExplainParams) -> ExplainResult {
@@ -3513,6 +3567,58 @@ mod tests {
             result.candidates[0].suppressed_reasons,
             vec!["target_not_compatible"]
         );
+    }
+
+    #[test]
+    fn public_curator_card_routes_naming_audits_and_rejects_patch_execution() {
+        let registry = LibraryRegistry::load_from_roots(&[starter_root()]).expect("registry");
+        let result = registry
+            .route_skills("skill naming audit", Some("codex-cli"), None)
+            .expect("route");
+        let candidate = result.candidates.first().expect("curator candidate");
+        assert_eq!(candidate.skill_name, "metactl-skill-library-curator");
+        assert_eq!(candidate.pack_ref.id, "metactl-skill-library-curator");
+        assert_eq!(
+            candidate.surface_ids,
+            vec!["metactl-skill-library-curator:metactl-skill-library-curator".to_string()]
+        );
+
+        let negative = registry
+            .route_skills("apply an already approved patch", Some("codex-cli"), None)
+            .expect("negative route");
+        assert!(negative
+            .candidates
+            .iter()
+            .all(|item| item.skill_name != "metactl-skill-library-curator"));
+    }
+
+    #[test]
+    fn resolve_warns_when_saved_auto_selection_is_not_active() {
+        let registry = LibraryRegistry::load_from_roots(&[starter_root()]).expect("registry");
+        let target = starter_target("codex-cli");
+        let mut config = starter_config("builder", "brownfield-safe-builder", "codex-cli");
+        config.defaults = Some(ConfigDefaults {
+            brownfield_mode: None,
+            discovery_mode: None,
+            surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+            auto_surface_selection: Some(AutoSurfaceSelection {
+                selected_surface_ids: BTreeSet::from(["missing-pack:missing-surface".to_string()]),
+                pinned_surface_ids: BTreeSet::new(),
+                blocked_surface_ids: BTreeSet::new(),
+            }),
+        });
+        let resolved = registry
+            .resolve(ResolveParams {
+                config,
+                overlay: None,
+                available_targets: vec![target],
+                provenance: None,
+            })
+            .expect("resolve");
+        assert!(resolved.capability_gaps.iter().any(|gap| {
+            gap.feature == "auto_surface_selection:missing-pack:missing-surface"
+                && gap.reason_code == crate::types::ReasonCode::NotFound
+        }));
     }
 
     #[test]

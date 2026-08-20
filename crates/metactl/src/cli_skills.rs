@@ -10,6 +10,7 @@ pub(super) fn cmd_skills(
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
         SkillsCommand::Audit(audit_args) => cmd_skills_audit(cli, audit_args),
         SkillsCommand::Route(route_args) => cmd_skills_route(cli, route_args),
+        SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
     }
 }
 
@@ -45,6 +46,12 @@ fn cmd_skills_route(
                 candidate.matched_fields.join(", "),
                 suppression,
             ));
+            if !candidate.surface_ids.is_empty() {
+                lines.push(format!(
+                    "    surface IDs: {}",
+                    candidate.surface_ids.join(", ")
+                ));
+            }
         }
     }
     lines.push("Read-only: routing does not activate skills or bypass policy checks.".to_string());
@@ -54,6 +61,103 @@ fn cmd_skills_route(
             "skills",
             Some(&project_root),
             json!({"action": "route", "result": result}),
+        ),
+    })
+}
+
+fn cmd_skills_select(
+    cli: &Cli,
+    args: &SkillsSelectArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let context = load_required_context(cli, &project_root)?;
+    let registry = context.registry.as_ref().ok_or_else(|| {
+        CliError::new(
+            EXIT_STATE,
+            "No configured skill library is available for surface selection.",
+        )
+    })?;
+    if !registry
+        .known_surface_ids()
+        .map_err(internal_error)?
+        .contains(&args.surface_id)
+    {
+        return Err(CliError::new(
+            EXIT_VALIDATION,
+            format!("Unknown skill surface id '{}'.", args.surface_id),
+        )
+        .with_details(vec![
+            "Use `metactl skills route <task> --json` to obtain declared surface ids.".to_string(),
+            "Selections are saved only for surfaces present in the configured library.".to_string(),
+        ]));
+    }
+
+    let local_path = metactl::project::local_config_path(&project_root);
+    let mut local = metactl::project::load_local_config(&project_root)
+        .map_err(internal_error)?
+        .unwrap_or_default();
+    let defaults = local.defaults.get_or_insert_with(Default::default);
+    defaults.surface_selection_mode = Some(metactl::SurfaceSelectionMode::Auto);
+    let selection = defaults
+        .auto_surface_selection
+        .get_or_insert_with(Default::default);
+    let prior = selection.clone();
+    match args.mode {
+        SkillSelectionModeArg::Select => {
+            selection.blocked_surface_ids.remove(&args.surface_id);
+            selection.pinned_surface_ids.remove(&args.surface_id);
+            selection
+                .selected_surface_ids
+                .insert(args.surface_id.clone());
+        }
+        SkillSelectionModeArg::Pin => {
+            selection.blocked_surface_ids.remove(&args.surface_id);
+            selection.selected_surface_ids.remove(&args.surface_id);
+            selection.pinned_surface_ids.insert(args.surface_id.clone());
+        }
+        SkillSelectionModeArg::Block => {
+            selection.selected_surface_ids.remove(&args.surface_id);
+            selection.pinned_surface_ids.remove(&args.surface_id);
+            selection
+                .blocked_surface_ids
+                .insert(args.surface_id.clone());
+        }
+        SkillSelectionModeArg::Clear => {
+            selection.selected_surface_ids.remove(&args.surface_id);
+            selection.pinned_surface_ids.remove(&args.surface_id);
+            selection.blocked_surface_ids.remove(&args.surface_id);
+        }
+    }
+    let resulting = selection.clone();
+    ensure_gitignore_entries(&project_root).map_err(internal_error)?;
+    write_partial_project_config(&local_path, &local).map_err(internal_error)?;
+
+    let mode = match args.mode {
+        SkillSelectionModeArg::Select => "selected",
+        SkillSelectionModeArg::Pin => "pinned",
+        SkillSelectionModeArg::Block => "blocked",
+        SkillSelectionModeArg::Clear => "cleared",
+    };
+    Ok(CommandOutput {
+        human: project_human_output(
+            &project_root,
+            format!(
+                "Surface {} {} in metactl.local.yaml.\nAuto mode is now active for this machine-local project setting.\nNext: metactl explain",
+                args.surface_id, mode,
+            ),
+        ),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({
+                "action": "select",
+                "surface_id": args.surface_id,
+                "decision": mode,
+                "config_path": local_path.to_string_lossy(),
+                "previous_selection": prior,
+                "selection": resulting,
+                "next_steps": ["metactl explain", "metactl sync --preview"],
+            }),
         ),
     })
 }

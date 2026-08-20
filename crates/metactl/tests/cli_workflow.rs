@@ -1654,6 +1654,48 @@ fn local_config_layer_additive_packs_and_staleness() {
 }
 
 #[test]
+fn skills_select_persists_machine_local_auto_selection_and_rejects_unknown_ids() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let selected = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "select",
+            "metactl-skill-library-curator:metactl-skill-library-curator",
+            "--mode",
+            "pin",
+        ],
+    );
+    assert!(selected.status.success(), "{}", stderr(&selected));
+    let json = json_output(&selected);
+    assert_eq!(json["decision"], "pinned");
+    assert_eq!(
+        json["selection"]["pinned_surface_ids"],
+        json!(["metactl-skill-library-curator:metactl-skill-library-curator"])
+    );
+    let local =
+        fs::read_to_string(project.path().join("metactl.local.yaml")).expect("read local config");
+    assert!(local.contains("surface_selection_mode: auto"));
+    assert!(local.contains("pinned_surface_ids"));
+
+    let unknown = run_cli(
+        project.path(),
+        &[
+            "skills",
+            "select",
+            "does-not-exist:surface",
+            "--mode",
+            "select",
+        ],
+    );
+    assert_eq!(unknown.status.code(), Some(13));
+    assert!(stderr(&unknown).contains("Unknown skill surface id"));
+}
+
+#[test]
 fn porcelain_use_local_adds_to_local_config() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());

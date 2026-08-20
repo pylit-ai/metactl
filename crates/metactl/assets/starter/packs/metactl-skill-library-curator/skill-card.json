@@ -1,0 +1,45 @@
+{
+  "schema_version": "2alpha1",
+  "name": "metactl-skill-library-curator",
+  "version": "1.0.0",
+  "summary": "Audits a MetaCTL skill library for confusing names, weak discovery cues, routing boundaries, and approval-gated curation proposals.",
+  "aliases": [
+    "metactl curate skill library",
+    "skill naming audit",
+    "skill library maintenance"
+  ],
+  "intents": {
+    "positive": [
+      "audit confusing skills",
+      "improve skill discoverability",
+      "review skill pack placement"
+    ],
+    "negative": [
+      "apply an already approved patch",
+      "prove downstream task quality"
+    ]
+  },
+  "facets": {
+    "domain": ["metactl", "agent skills", "library governance"],
+    "operations": ["audit", "routing", "naming", "curation"],
+    "authority": ["read-only", "approval-gated recommendations"]
+  },
+  "reviewed_relations": [
+    {
+      "type": "complements",
+      "target": "metactl-skill-improvement",
+      "reviewed_by": "metactl-public-starter",
+      "reviewed_at": "2026-08-20"
+    }
+  ],
+  "host_compatibility": {
+    "targets": ["claude-code", "codex-cli", "cursor", "gemini-cli", "openclaw"],
+    "minimum_metactl": "0.1.21",
+    "notes": []
+  },
+  "provenance": {
+    "source_kind": "first_party",
+    "reviewed_by": "metactl-public-starter",
+    "reviewed_at": "2026-08-20"
+  }
+}

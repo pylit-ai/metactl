@@ -406,30 +406,74 @@ pub(super) fn surface_selection_decisions_with_auto_selection(
         .iter()
         .map(|surface| {
             let relevance_tier = surface_relevance_tier(pack, surface);
-            let emitted = match mode {
-                SurfaceSelectionMode::Full => true,
-                SurfaceSelectionMode::Minimal => relevance_tier == SurfaceRelevanceTier::AlwaysOn,
-                SurfaceSelectionMode::Auto => auto_selection
-                    .map(|selection| {
-                        !selection.blocked_surface_ids.contains(&surface.surface_id)
-                            && (relevance_tier == SurfaceRelevanceTier::AlwaysOn
-                                || selection.selected_surface_ids.contains(&surface.surface_id)
-                                || selection.pinned_surface_ids.contains(&surface.surface_id))
-                    })
-                    .unwrap_or(relevance_tier == SurfaceRelevanceTier::AlwaysOn),
-            };
-            let reason_code = if emitted {
-                None
-            } else {
-                Some(ReasonCode::SuppressedByMode)
-            };
-            let detail = if emitted {
-                None
-            } else {
-                Some(
-                    "Surface is suppressible, blocked, or lacks Auto-selection evidence."
-                        .to_string(),
-                )
+            let (emitted, reason_code, detail) = match mode {
+                SurfaceSelectionMode::Full => (
+                    true,
+                    None,
+                    Some("Full mode emits every surface.".to_string()),
+                ),
+                SurfaceSelectionMode::Minimal => {
+                    let emitted = relevance_tier == SurfaceRelevanceTier::AlwaysOn;
+                    (
+                        emitted,
+                        (!emitted).then_some(ReasonCode::SuppressedByMode),
+                        Some(
+                            if emitted {
+                                "Always-on surface retained by minimal mode."
+                            } else {
+                                "Suppressible surface omitted by minimal mode."
+                            }
+                            .to_string(),
+                        ),
+                    )
+                }
+                SurfaceSelectionMode::Auto => match auto_selection {
+                    Some(selection)
+                        if selection.blocked_surface_ids.contains(&surface.surface_id) =>
+                    {
+                        (
+                            false,
+                            Some(ReasonCode::SuppressedByMode),
+                            Some("Blocked by saved Auto-selection decision.".to_string()),
+                        )
+                    }
+                    Some(selection)
+                        if selection.pinned_surface_ids.contains(&surface.surface_id) =>
+                    {
+                        (
+                            true,
+                            None,
+                            Some(
+                                "Included because it is pinned in saved Auto-selection."
+                                    .to_string(),
+                            ),
+                        )
+                    }
+                    Some(selection)
+                        if selection.selected_surface_ids.contains(&surface.surface_id) =>
+                    {
+                        (
+                            true,
+                            None,
+                            Some(
+                                "Included because it is selected in saved Auto-selection."
+                                    .to_string(),
+                            ),
+                        )
+                    }
+                    _ if relevance_tier == SurfaceRelevanceTier::AlwaysOn => (
+                        true,
+                        None,
+                        Some("Always-on surface retained by Auto mode.".to_string()),
+                    ),
+                    _ => (
+                        false,
+                        Some(ReasonCode::SuppressedByMode),
+                        Some(
+                            "Suppressible surface lacks saved Auto-selection evidence.".to_string(),
+                        ),
+                    ),
+                },
             };
             SurfaceSelectionDecision {
                 pack_ref: pack.manifest.pack_ref(),

@@ -980,7 +980,7 @@ pub fn load_project_context_with_profile_preferences(
     let raw_config_file = load_partial_project_config(&config_path)?;
     let resolution = resolve_profile_cli_chain(profile, &raw_config_file, ignore_user_default);
     let active_profile = build_active_profile_from_resolution(&resolution)?;
-    let config_file = merge_project_config(
+    let shared_config_file = merge_project_config(
         default_project_config(),
         active_profile
             .as_ref()
@@ -990,11 +990,13 @@ pub fn load_project_context_with_profile_preferences(
     );
     let overlay = load_overlay(overlay_path)?;
     let local_cfg_path = local_config_path(project_root);
-    let local_config_path_opt = if local_cfg_path.exists() {
-        Some(local_cfg_path)
-    } else {
-        None
-    };
+    let local_config = load_local_config(project_root)?.unwrap_or_default();
+    let local_config_path_opt = local_cfg_path.exists().then_some(local_cfg_path);
+    let config_file = merge_project_config(
+        shared_config_file,
+        PartialProjectConfig::default(),
+        local_config,
+    );
     let library_roots = resolve_library_roots(project_root, &config_file)?;
     let registry = load_registry(&library_roots)?;
     let lock_path = project_lock_path(project_root);
@@ -1898,6 +1900,35 @@ mod tests {
             .expect("starter roots");
 
         assert_eq!(roots, vec![explicit]);
+    }
+
+    #[test]
+    fn local_config_overlays_shared_defaults_in_effective_context() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("metactl.yaml"),
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\ndefaults:\n  surface_selection_mode: minimal\n",
+        )
+        .expect("shared config");
+        fs::write(
+            temp.path().join("metactl.local.yaml"),
+            "defaults:\n  surface_selection_mode: auto\n  auto_surface_selection:\n    selected_surface_ids:\n    - python-refactor:contracts\n",
+        )
+        .expect("local config");
+
+        let context = load_project_context(temp.path(), None, None, None).expect("context");
+        let defaults = context.config_file.defaults.expect("defaults");
+        assert_eq!(
+            defaults.surface_selection_mode,
+            Some(SurfaceSelectionMode::Auto)
+        );
+        assert_eq!(
+            defaults
+                .auto_surface_selection
+                .expect("selection")
+                .selected_surface_ids,
+            BTreeSet::from(["python-refactor:contracts".to_string()])
+        );
     }
 
     #[test]

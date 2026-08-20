@@ -848,6 +848,8 @@ enum SkillsCommand {
     Audit(SkillsAuditArgs),
     /// Explain a read-only route from a task description to declared skill resources
     Route(SkillsRouteArgs),
+    /// Save an Auto-mode surface decision in machine-local project configuration
+    Select(SkillsSelectArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1110,6 +1112,23 @@ struct SkillsRouteArgs {
     /// Maximum candidate skills to return
     #[arg(long, short = 'n', default_value_t = 10)]
     limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsSelectArgs {
+    /// Stable surface id from `metactl skills route --json` (pack-id:surface-slug)
+    surface_id: String,
+    /// Decision to save; block wins over pin, and pin wins over select
+    #[arg(long, value_enum, default_value = "select")]
+    mode: SkillSelectionModeArg,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillSelectionModeArg {
+    Select,
+    Pin,
+    Block,
+    Clear,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2037,6 +2056,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::Remove(_) => Some("skills remove"),
             SkillsCommand::Audit(_) => Some("skills audit"),
             SkillsCommand::Route(_) => None,
+            SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {
             PluginCommand::List(_) | PluginCommand::Verify(_) => None,
@@ -7191,10 +7211,11 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         .registry
         .as_ref()
         .map(|registry| {
-            registry.surface_summaries_for_target(
+            registry.surface_summaries_for_target_with_auto_selection(
                 &explain.resolve_graph.activated_pack_refs,
                 &explain_target,
                 selected_surface_mode.clone(),
+                explain.resolve_graph.auto_surface_selection.as_ref(),
             )
         })
         .transpose()
@@ -9022,6 +9043,23 @@ fn explain_output(
                 .iter()
                 .map(|item| format!("- {item}")),
         );
+    }
+    if let Some(selection) = explain.resolve_graph.auto_surface_selection.as_ref() {
+        lines.push("Saved Auto-selection:".to_string());
+        for (label, ids) in [
+            ("selected", &selection.selected_surface_ids),
+            ("pinned", &selection.pinned_surface_ids),
+            ("blocked", &selection.blocked_surface_ids),
+        ] {
+            lines.push(if ids.is_empty() {
+                format!("- {label}: none")
+            } else {
+                format!(
+                    "- {label}: {}",
+                    ids.iter().cloned().collect::<Vec<_>>().join(", ")
+                )
+            });
+        }
     }
     lines.push("Projection:".to_string());
     if let Some(summary) = target_projection["summary"].as_str() {

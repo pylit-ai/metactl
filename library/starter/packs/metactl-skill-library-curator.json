@@ -12,7 +12,8 @@
   "compatible_roles": ["builder", "reviewer", "release-manager"],
   "compatible_targets": ["claude-code", "codex-cli", "cursor", "gemini-cli", "openclaw"],
   "resources": [
-    {"path": "packs/metactl-skill-library-curator/SKILL.md", "kind": "instruction", "required": true, "surface_relevance": "suppressible"}
+    {"path": "packs/metactl-skill-library-curator/SKILL.md", "kind": "instruction", "required": true, "surface_relevance": "suppressible"},
+    {"path": "packs/metactl-skill-library-curator/skill-card.json", "kind": "example", "required": true}
   ],
   "imports": [{"ecosystem": "first_party", "origin": "starter-library"}],
   "lifecycle": {
