@@ -1,4 +1,5 @@
 use super::*;
+use crate::types::AutoSurfaceSelection;
 
 pub(super) fn instruction_document_plan(
     _role: &RoleManifest,
@@ -393,14 +394,6 @@ fn surface_relevance_tier(
             SurfaceRelevanceTier::Suppressible
         }
     })
-}
-
-pub(super) fn surface_selection_decisions(
-    pack: &DiscoveredPack,
-    surfaces: &[DerivedSkillSurface],
-    mode: SurfaceSelectionMode,
-) -> Vec<SurfaceSelectionDecision> {
-    surface_selection_decisions_with_auto_selection(pack, surfaces, mode, None)
 }
 
 pub(super) fn surface_selection_decisions_with_auto_selection(

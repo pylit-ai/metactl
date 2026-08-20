@@ -2711,6 +2711,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
         fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
         discovery_mode: Some(DiscoveryMode::CandidateSearch),
         surface_selection_mode: None,
+        auto_surface_selection: None,
     });
 
     let mut metadata = BTreeMap::new();
@@ -2922,6 +2923,7 @@ fn cmd_library_init(
             fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
             discovery_mode: Some(DiscoveryMode::CandidateSearch),
             surface_selection_mode: None,
+            auto_surface_selection: None,
         }),
         ..metactl::project::PartialProjectConfig::default()
     };

@@ -13,8 +13,9 @@ use sha2::{Digest, Sha256};
 
 use crate::library_registry::LibraryRegistry;
 use crate::types::{
-    ApplyMode, BrownfieldMode, CompileManifest, Config, ConfigDefaults, DiscoveryMode,
-    InvocationOverlay, PolicyEnforcementReport, PromotionStatus, Ref, SurfaceSelectionMode,
+    ApplyMode, AutoSurfaceSelection, BrownfieldMode, CompileManifest, Config, ConfigDefaults,
+    DiscoveryMode, InvocationOverlay, PolicyEnforcementReport, PromotionStatus, Ref,
+    SurfaceSelectionMode,
 };
 
 pub const METACTL_DIRS: &[&str] = &["generated", "state", "history", "private", "cache"];
@@ -38,6 +39,8 @@ pub struct ProjectConfigDefaults {
         skip_serializing_if = "Option::is_none"
     )]
     pub surface_selection_mode: Option<SurfaceSelectionMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_surface_selection: Option<AutoSurfaceSelection>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -448,6 +451,7 @@ pub fn default_project_config() -> ProjectConfigFile {
             fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
             discovery_mode: Some(DiscoveryMode::CandidateSearch),
             surface_selection_mode: None,
+            auto_surface_selection: None,
         }),
         metadata: BTreeMap::new(),
     }
@@ -672,6 +676,9 @@ fn merge_config_defaults(
     }
     if overlay.surface_selection_mode.is_some() {
         merged.surface_selection_mode = overlay.surface_selection_mode;
+    }
+    if overlay.auto_surface_selection.is_some() {
+        merged.auto_surface_selection = overlay.auto_surface_selection;
     }
     merged
 }
@@ -1274,6 +1281,7 @@ impl ProjectContext {
                     brownfield_mode: defaults.brownfield_mode.clone(),
                     discovery_mode: defaults.discovery_mode.clone(),
                     surface_selection_mode: defaults.surface_selection_mode.clone(),
+                    auto_surface_selection: defaults.auto_surface_selection.clone(),
                 }),
             metadata: self.config_file.metadata.clone(),
         })

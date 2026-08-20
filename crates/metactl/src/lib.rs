@@ -17,9 +17,7 @@ pub mod types;
 pub use fixture_kernel::{FixtureKernel, FixtureSuite};
 pub use jsonrpc::{JsonRpcService, RpcError, RpcRequestEnvelope, RpcResponseEnvelope};
 pub use kernel::MetactlKernel;
-pub use library_registry::{
-    AutoSurfaceSelection, LibraryRegistry, SkillRouteCandidate, SkillRouteResult,
-};
+pub use library_registry::{LibraryRegistry, SkillRouteCandidate, SkillRouteResult};
 pub use mcp::McpService;
 pub use plugin_projection::{
     export_plugin_marketplace, list_plugin_packs, verify_plugin_marketplace, PluginExportOptions,

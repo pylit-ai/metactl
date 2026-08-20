@@ -57,6 +57,7 @@ fn config(role: &str, policy: &str, target: &str) -> Config {
             brownfield_mode: None,
             discovery_mode: None,
             surface_selection_mode: None,
+            auto_surface_selection: None,
         }),
         metadata: Default::default(),
     }

@@ -13,18 +13,19 @@ use sha2::{Digest, Sha256};
 use crate::materializer::{self, StagedOutputInput};
 use crate::suite_registry::selected_target_from_config;
 use crate::types::{
-    ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, CapabilityGap, CompileManifest,
-    CompileParams, CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus,
-    ExplainParams, ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
-    InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport, PackImport, PackManifest,
-    PackResource, PolicyEnforcementReport, PolicyManifest, PolicyOperator, PolicyRuleReport,
-    PolicySelectors, PolicySubject, PromotionStatus, ProvenanceEnvelope, ProvenanceReview,
-    RealizedEnforcementClass, ReasonCode, Ref, RefKind, RequestedEnforcementClass, ResolveGraph,
-    ResolveParams, ResourceKind, RevertReport, RoleManifest, RuntimeTemplateRef, SearchMatch,
-    SearchMatchEvidence, SearchParams, SearchResult, SideEffectClass, SuppressedRef,
-    SuppressedSubject, SurfaceMergeStatus, SurfaceMergeStrategy, SurfaceRelevanceTier,
-    SurfaceSelectionDecision, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier,
-    ValidateParams, ValidationCheck, ValidationReport, ValidationStatus, VisibilityScope,
+    ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, AutoSurfaceSelection, CapabilityGap,
+    CompileManifest, CompileParams, CompileResult, CompileTargetKind, Config, DiscoveryMode,
+    EnforcementStatus, ExplainParams, ExplainResult, GeneratedOutputKind, ImportEcosystem,
+    InstructionProjectionMode, InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport,
+    PackImport, PackManifest, PackResource, PolicyEnforcementReport, PolicyManifest,
+    PolicyOperator, PolicyRuleReport, PolicySelectors, PolicySubject, PromotionStatus,
+    ProvenanceEnvelope, ProvenanceReview, RealizedEnforcementClass, ReasonCode, Ref, RefKind,
+    RequestedEnforcementClass, ResolveGraph, ResolveParams, ResourceKind, RevertReport,
+    RoleManifest, RuntimeTemplateRef, SearchMatch, SearchMatchEvidence, SearchParams, SearchResult,
+    SideEffectClass, SuppressedRef, SuppressedSubject, SurfaceMergeStatus, SurfaceMergeStrategy,
+    SurfaceRelevanceTier, SurfaceSelectionDecision, SurfaceSelectionMode, TargetCapabilityMatrix,
+    TrustTier, ValidateParams, ValidationCheck, ValidationReport, ValidationStatus,
+    VisibilityScope,
 };
 
 #[path = "library_frontmatter.rs"]
@@ -48,7 +49,7 @@ use library_instruction::{
     expand_skill_path, frontmatter_name, instruction_document, instruction_document_plan,
     merged_skill_document, semantic_carrier_parent_slug, should_emit_separate_surfaces,
     skill_compile_target_for, skill_surface_document, slugify_surface_candidate,
-    surface_selection_decisions, surface_selection_decisions_with_auto_selection,
+    surface_selection_decisions_with_auto_selection,
 };
 use library_validation::{validate_skill_frontmatter_text, validate_staged_outputs};
 
@@ -148,18 +149,6 @@ pub struct SkillRouteResult {
     pub candidates: Vec<SkillRouteCandidate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
-}
-
-/// Explicit evidence supplied by a caller for `SurfaceSelectionMode::Auto`.
-/// Without it, Auto preserves the minimal safe baseline.
-#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
-pub struct AutoSurfaceSelection {
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub selected_surface_ids: BTreeSet<String>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub pinned_surface_ids: BTreeSet<String>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub blocked_surface_ids: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -642,6 +631,11 @@ impl LibraryRegistry {
                 .defaults
                 .as_ref()
                 .and_then(|defaults| defaults.brownfield_mode.clone()),
+            auto_surface_selection: params
+                .config
+                .defaults
+                .as_ref()
+                .and_then(|defaults| defaults.auto_surface_selection.clone()),
             pack_visibility,
         })
     }
@@ -783,6 +777,7 @@ impl LibraryRegistry {
                 library_roots: &self.roots,
                 apply_mode: &params.apply_mode,
                 surface_selection_override: effective_surface_selection_mode.clone(),
+                auto_surface_selection: params.resolve_graph.auto_surface_selection.as_ref(),
             },
         )?;
         degradations.extend(surface_degradations);
@@ -1259,6 +1254,7 @@ struct SynthesisContext<'a> {
     library_roots: &'a [PathBuf],
     apply_mode: &'a ApplyMode,
     surface_selection_override: Option<SurfaceSelectionMode>,
+    auto_surface_selection: Option<&'a AutoSurfaceSelection>,
 }
 
 fn synthesize_outputs(
@@ -1277,6 +1273,7 @@ fn synthesize_outputs(
         library_roots,
         apply_mode,
         surface_selection_override,
+        auto_surface_selection,
     } = context;
     let mut outputs = Vec::new();
     let mut surface_selection = Vec::new();
@@ -1418,8 +1415,12 @@ fn synthesize_outputs(
                 );
                 for pack in packs {
                     let surfaces = derive_skill_surfaces(pack)?;
-                    let decisions =
-                        surface_selection_decisions(pack, &surfaces, selection_mode.clone());
+                    let decisions = surface_selection_decisions_with_auto_selection(
+                        pack,
+                        &surfaces,
+                        selection_mode.clone(),
+                        auto_surface_selection,
+                    );
                     surface_selection.extend(decisions.clone());
                     let emitted_surfaces = surfaces
                         .iter()
@@ -2752,6 +2753,8 @@ fn substitute_tokens(src: &str, ctx: &std::collections::BTreeMap<String, String>
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -2769,10 +2772,11 @@ mod tests {
     use crate::kernel::MetactlKernel;
     use crate::reference_kernel::ReferenceKernel;
     use crate::types::{
-        ActivationClass, ApplyMode, CompileParams, Config, ConfigDefaults, DiscoveryMode,
-        EntryPoint, ImportEcosystem, InvocationOverlay, LifecycleStatus, PackImport, PackLifecycle,
-        PackManifest, PackResource, Ref, RefKind, ResolveParams, ResourceKind, SearchParams,
-        SideEffectClass, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier, VisibilityScope,
+        ActivationClass, ApplyMode, AutoSurfaceSelection, CompileParams, Config, ConfigDefaults,
+        DiscoveryMode, EntryPoint, ImportEcosystem, InvocationOverlay, LifecycleStatus, PackImport,
+        PackLifecycle, PackManifest, PackResource, Ref, RefKind, ResolveParams, ResourceKind,
+        SearchParams, SideEffectClass, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier,
+        VisibilityScope,
     };
 
     fn fixtures_root() -> PathBuf {
@@ -2808,6 +2812,7 @@ mod tests {
                 brownfield_mode: None,
                 discovery_mode: Some(DiscoveryMode::CandidateSearch),
                 surface_selection_mode: None,
+                auto_surface_selection: None,
             }),
             metadata: Default::default(),
         }
@@ -2846,7 +2851,8 @@ mod tests {
             defaults: Some(ConfigDefaults {
                 brownfield_mode: None,
                 discovery_mode: Some(DiscoveryMode::CandidateSearch),
-                surface_selection_mode: None,
+                surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+                auto_surface_selection: None,
             }),
             metadata: Default::default(),
         }
@@ -3359,6 +3365,53 @@ mod tests {
             compile.compile_manifest.surface_selection_mode,
             Some(SurfaceSelectionMode::Full)
         );
+        assert!(compile
+            .compile_manifest
+            .surface_selection
+            .iter()
+            .any(|item| {
+                item.pack_ref.id == "python-refactor"
+                    && item.surface_slug == "contracts"
+                    && item.emitted
+            }));
+    }
+
+    #[test]
+    fn relevance_selector_auto_uses_saved_selection() {
+        let project = TempDir::new().expect("tempdir");
+        let kernel =
+            ReferenceKernel::load_from_library_roots(vec![starter_root()]).expect("library kernel");
+        let target = starter_target("codex-cli");
+        let mut config = starter_config("builder", "brownfield-safe-builder", "codex-cli");
+        config.defaults = Some(ConfigDefaults {
+            brownfield_mode: None,
+            discovery_mode: Some(DiscoveryMode::CandidateSearch),
+            surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+            auto_surface_selection: Some(AutoSurfaceSelection {
+                selected_surface_ids: BTreeSet::from(["python-refactor:contracts".to_string()]),
+                pinned_surface_ids: BTreeSet::new(),
+                blocked_surface_ids: BTreeSet::new(),
+            }),
+        });
+        let resolve = kernel
+            .resolve(ResolveParams {
+                config,
+                overlay: None,
+                available_targets: vec![target.clone()],
+                provenance: None,
+            })
+            .expect("resolve");
+        let compile = kernel
+            .compile(CompileParams {
+                resolve_graph: resolve,
+                target_capability: target,
+                apply_mode: ApplyMode::Copy,
+                emit_policy_report: true,
+                durable_staging: true,
+                project_root: Some(project.path().to_string_lossy().into_owned()),
+                surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+            })
+            .expect("compile");
         assert!(compile
             .compile_manifest
             .surface_selection

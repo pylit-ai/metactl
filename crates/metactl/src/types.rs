@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 pub const API_VERSION: &str = "metactl/v2alpha1";
@@ -274,6 +276,19 @@ pub enum SurfaceSelectionMode {
     Auto,
 }
 
+/// Persisted, human-approved evidence for `SurfaceSelectionMode::Auto`.
+/// Surface ids are stable `pack-id:surface-slug` identifiers emitted by
+/// `metactl skills route` and shown in compile manifests.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutoSurfaceSelection {
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub selected_surface_ids: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub pinned_surface_ids: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub blocked_surface_ids: BTreeSet<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum VisibilityScope {
@@ -348,6 +363,8 @@ pub struct ConfigDefaults {
         skip_serializing_if = "Option::is_none"
     )]
     pub surface_selection_mode: Option<SurfaceSelectionMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_surface_selection: Option<AutoSurfaceSelection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -976,6 +993,8 @@ pub struct ResolveGraph {
     pub provenance_refs: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brownfield_mode: Option<BrownfieldMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_surface_selection: Option<AutoSurfaceSelection>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pack_visibility: BTreeMap<String, VisibilityScope>,
 }
