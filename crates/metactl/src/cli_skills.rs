@@ -9,7 +9,53 @@ pub(super) fn cmd_skills(
         SkillsCommand::List(list_args) => cmd_skills_list(cli, list_args),
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
         SkillsCommand::Audit(audit_args) => cmd_skills_audit(cli, audit_args),
+        SkillsCommand::Route(route_args) => cmd_skills_route(cli, route_args),
     }
+}
+
+fn cmd_skills_route(
+    cli: &Cli,
+    args: &SkillsRouteArgs,
+) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    let context = load_required_context(cli, &project_root)?;
+    let registry = context.registry.as_ref().ok_or_else(|| {
+        CliError::new(
+            EXIT_STATE,
+            "No configured skill library is available for routing.",
+        )
+    })?;
+    let result = registry
+        .route_skills(&args.query, args.target.as_deref(), Some(args.limit))
+        .map_err(internal_error)?;
+    let mut lines = vec![format!("Skill route for \"{}\":", args.query)];
+    if result.candidates.is_empty() {
+        lines.push("  (no declared skill resources matched)".to_string());
+    } else {
+        for candidate in &result.candidates {
+            let suppression = if candidate.suppressed_reasons.is_empty() {
+                String::new()
+            } else {
+                format!(" [suppressed: {}]", candidate.suppressed_reasons.join(", "))
+            };
+            lines.push(format!(
+                "  {:<32} score {:>3} [{}]{}",
+                candidate.skill_name,
+                candidate.score,
+                candidate.matched_fields.join(", "),
+                suppression,
+            ));
+        }
+    }
+    lines.push("Read-only: routing does not activate skills or bypass policy checks.".to_string());
+    Ok(CommandOutput {
+        human: project_human_output(&project_root, lines.join("\n")),
+        json: success_json(
+            "skills",
+            Some(&project_root),
+            json!({"action": "route", "result": result}),
+        ),
+    })
 }
 
 fn cmd_skills_add(cli: &Cli, args: &SkillsAddArgs) -> std::result::Result<CommandOutput, CliError> {

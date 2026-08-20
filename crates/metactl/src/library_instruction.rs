@@ -400,15 +400,30 @@ pub(super) fn surface_selection_decisions(
     surfaces: &[DerivedSkillSurface],
     mode: SurfaceSelectionMode,
 ) -> Vec<SurfaceSelectionDecision> {
+    surface_selection_decisions_with_auto_selection(pack, surfaces, mode, None)
+}
+
+pub(super) fn surface_selection_decisions_with_auto_selection(
+    pack: &DiscoveredPack,
+    surfaces: &[DerivedSkillSurface],
+    mode: SurfaceSelectionMode,
+    auto_selection: Option<&AutoSurfaceSelection>,
+) -> Vec<SurfaceSelectionDecision> {
     surfaces
         .iter()
         .map(|surface| {
             let relevance_tier = surface_relevance_tier(pack, surface);
             let emitted = match mode {
                 SurfaceSelectionMode::Full => true,
-                SurfaceSelectionMode::Minimal | SurfaceSelectionMode::Auto => {
-                    relevance_tier == SurfaceRelevanceTier::AlwaysOn
-                }
+                SurfaceSelectionMode::Minimal => relevance_tier == SurfaceRelevanceTier::AlwaysOn,
+                SurfaceSelectionMode::Auto => auto_selection
+                    .map(|selection| {
+                        !selection.blocked_surface_ids.contains(&surface.surface_id)
+                            && (relevance_tier == SurfaceRelevanceTier::AlwaysOn
+                                || selection.selected_surface_ids.contains(&surface.surface_id)
+                                || selection.pinned_surface_ids.contains(&surface.surface_id))
+                    })
+                    .unwrap_or(relevance_tier == SurfaceRelevanceTier::AlwaysOn),
             };
             let reason_code = if emitted {
                 None
@@ -418,7 +433,10 @@ pub(super) fn surface_selection_decisions(
             let detail = if emitted {
                 None
             } else {
-                Some("Surface is suppressible and omitted in minimal surface mode.".to_string())
+                Some(
+                    "Surface is suppressible, blocked, or lacks Auto-selection evidence."
+                        .to_string(),
+                )
             };
             SurfaceSelectionDecision {
                 pack_ref: pack.manifest.pack_ref(),

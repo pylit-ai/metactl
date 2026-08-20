@@ -7,6 +7,7 @@ use std::time::SystemTime;
 use anyhow::{anyhow, Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::materializer::{self, StagedOutputInput};
@@ -47,7 +48,7 @@ use library_instruction::{
     expand_skill_path, frontmatter_name, instruction_document, instruction_document_plan,
     merged_skill_document, semantic_carrier_parent_slug, should_emit_separate_surfaces,
     skill_compile_target_for, skill_surface_document, slugify_surface_candidate,
-    surface_selection_decisions,
+    surface_selection_decisions, surface_selection_decisions_with_auto_selection,
 };
 use library_validation::{validate_skill_frontmatter_text, validate_staged_outputs};
 
@@ -123,6 +124,42 @@ pub struct PackSurfaceSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merge_strategy: Option<SurfaceMergeStrategy>,
     pub surfaces: Vec<SurfaceSummary>,
+}
+
+/// A read-only skill-level route. Cards are only consumed when the adjacent
+/// `skill-card.json` is declared by the pack manifest.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SkillRouteCandidate {
+    pub skill_name: String,
+    pub pack_ref: Ref,
+    pub resource_path: String,
+    pub score: i64,
+    pub matched_fields: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub suppressed_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SkillRouteResult {
+    pub api_version: String,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub candidates: Vec<SkillRouteCandidate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
+}
+
+/// Explicit evidence supplied by a caller for `SurfaceSelectionMode::Auto`.
+/// Without it, Auto preserves the minimal safe baseline.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct AutoSurfaceSelection {
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub selected_surface_ids: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub pinned_surface_ids: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub blocked_surface_ids: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -266,11 +303,115 @@ impl LibraryRegistry {
         })
     }
 
+    /// Route a natural-language task to declared skill resources. This does
+    /// not activate packs or change the configured project state.
+    pub fn route_skills(
+        &self,
+        query: &str,
+        target: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<SkillRouteResult> {
+        let terms = routing_terms(query);
+        let mut candidates = Vec::new();
+        for pack in self.packs.values() {
+            for resource in &pack.manifest.resources {
+                if !resource.path.ends_with("SKILL.md") {
+                    continue;
+                }
+                let contents = read_pack_resource(pack, resource)?;
+                let Some(skill_name) = frontmatter_name(&contents) else {
+                    continue;
+                };
+                let (aliases, positive, negative, card_targets) =
+                    declared_skill_card_metadata(pack, resource)?;
+                let mut matched_fields = Vec::new();
+                let mut score =
+                    score_routing_field(&terms, &skill_name, 12, "name", &mut matched_fields);
+                for alias in &aliases {
+                    score += score_routing_field(&terms, alias, 10, "alias", &mut matched_fields);
+                }
+                for intent in &positive {
+                    score += score_routing_field(
+                        &terms,
+                        intent,
+                        6,
+                        "positive_intent",
+                        &mut matched_fields,
+                    );
+                }
+                for intent in &negative {
+                    score -= score_routing_field(
+                        &terms,
+                        intent,
+                        20,
+                        "negative_intent",
+                        &mut matched_fields,
+                    );
+                }
+                if score <= 0 {
+                    continue;
+                }
+                let mut suppressed_reasons = Vec::new();
+                if let Some(target) = target {
+                    let compatible = if card_targets.is_empty() {
+                        &pack.manifest.compatible_targets
+                    } else {
+                        &card_targets
+                    };
+                    if !compatible.is_empty() && !compatible.iter().any(|item| item == target) {
+                        suppressed_reasons.push("target_not_compatible".to_string());
+                    }
+                }
+                candidates.push(SkillRouteCandidate {
+                    skill_name,
+                    pack_ref: pack.manifest.pack_ref(),
+                    resource_path: resource.path.clone(),
+                    score,
+                    matched_fields,
+                    suppressed_reasons,
+                });
+            }
+        }
+        candidates.sort_by(|left, right| {
+            left.suppressed_reasons
+                .is_empty()
+                .cmp(&right.suppressed_reasons.is_empty())
+                .reverse()
+                .then_with(|| right.score.cmp(&left.score))
+                .then_with(|| left.skill_name.cmp(&right.skill_name))
+        });
+        if let Some(limit) = limit {
+            candidates.truncate(limit);
+        }
+        Ok(SkillRouteResult {
+            api_version: "metactl.skill_route.v1".to_string(),
+            query: query.to_string(),
+            target: target.map(ToOwned::to_owned),
+            candidates,
+            notes: vec!["Read-only route; selected skills remain subject to project policy and activation checks.".to_string()],
+        })
+    }
+
     pub fn surface_summaries_for_target(
         &self,
         pack_refs: &[Ref],
         target: &TargetCapabilityMatrix,
         surface_selection_mode: SurfaceSelectionMode,
+    ) -> Result<Vec<PackSurfaceSummary>> {
+        self.surface_summaries_for_target_with_auto_selection(
+            pack_refs,
+            target,
+            surface_selection_mode,
+            None,
+        )
+    }
+
+    pub fn surface_summaries_for_target_with_auto_selection(
+        &self,
+        pack_refs: &[Ref],
+        target: &TargetCapabilityMatrix,
+        surface_selection_mode: SurfaceSelectionMode,
+        auto_selection: Option<&AutoSurfaceSelection>,
     ) -> Result<Vec<PackSurfaceSummary>> {
         let compile_target = skill_compile_target_for(target);
         pack_refs
@@ -278,8 +419,12 @@ impl LibraryRegistry {
             .filter_map(|pack_ref| self.find_pack(pack_ref))
             .map(|pack| {
                 let surfaces = derive_skill_surfaces(pack)?;
-                let decisions =
-                    surface_selection_decisions(pack, &surfaces, surface_selection_mode.clone());
+                let decisions = surface_selection_decisions_with_auto_selection(
+                    pack,
+                    &surfaces,
+                    surface_selection_mode.clone(),
+                    auto_selection,
+                );
                 let emitted_surfaces = surfaces
                     .iter()
                     .filter(|surface| {
@@ -1926,6 +2071,74 @@ fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<
     .into_bytes())
 }
 
+fn declared_skill_card_metadata(
+    pack: &DiscoveredPack,
+    skill_resource: &PackResource,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>, Vec<String>)> {
+    let Some(parent) = Path::new(&skill_resource.path).parent() else {
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+    };
+    let card_path = parent.join("skill-card.json").to_string_lossy().to_string();
+    let Some(card_resource) = pack
+        .manifest
+        .resources
+        .iter()
+        .find(|resource| resource.path == card_path)
+    else {
+        return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
+    };
+    let card: Value = serde_json::from_slice(&read_pack_resource(pack, card_resource)?)
+        .with_context(|| format!("parse declared skill card {card_path}"))?;
+    crate::skill_card::validate_skill_card(&card)
+        .with_context(|| format!("validate declared skill card {card_path}"))?;
+    let strings = |value: Option<&Value>| -> Vec<String> {
+        value
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let intents = card.get("intents").and_then(Value::as_object);
+    let compatibility = card.get("host_compatibility").and_then(Value::as_object);
+    Ok((
+        strings(card.get("aliases")),
+        strings(intents.and_then(|value| value.get("positive"))),
+        strings(intents.and_then(|value| value.get("negative"))),
+        strings(compatibility.and_then(|value| value.get("targets"))),
+    ))
+}
+
+fn routing_terms(query: &str) -> BTreeSet<String> {
+    query
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|term| !term.is_empty())
+        .map(|term| term.to_ascii_lowercase())
+        .collect()
+}
+
+fn score_routing_field(
+    terms: &BTreeSet<String>,
+    field: &str,
+    weight: i64,
+    field_name: &str,
+    matched_fields: &mut Vec<String>,
+) -> i64 {
+    let field_terms = routing_terms(field);
+    if !terms.is_disjoint(&field_terms) {
+        if !matched_fields.iter().any(|item| item == field_name) {
+            matched_fields.push(field_name.to_string());
+        }
+        weight
+    } else {
+        0
+    }
+}
+
 fn read_cached_pack_resource(path: &Path) -> Result<Vec<u8>> {
     let metadata = fs::metadata(path).with_context(|| format!("stat {}", path.display()))?;
     let modified = metadata.modified().ok();
@@ -3155,6 +3368,81 @@ mod tests {
                     && item.surface_slug == "contracts"
                     && item.emitted
             }));
+    }
+
+    #[test]
+    fn route_skills_uses_declared_card_aliases_and_reports_target_suppression() {
+        let root = TempDir::new().expect("tempdir");
+        let skill_dir = root.path().join("packs/demo-route");
+        fs::create_dir_all(&skill_dir).expect("skill dir");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: delegated-work\ndescription: Delegate independent work safely.\n---\n",
+        )
+        .expect("skill");
+        fs::write(
+            skill_dir.join("skill-card.json"),
+            r#"{"schema_version":"2alpha1","name":"delegated-work","version":"1","summary":"Route independent work to agents.","aliases":["repo orchestrator"],"intents":{"positive":["delegate independent tasks"],"negative":["rename files"]},"facets":{"workflow":["delegation"]},"reviewed_relations":[],"host_compatibility":{"targets":["codex-cli"]},"provenance":{"source_kind":"first_party","reviewed_by":"test","reviewed_at":"2026-08-20"}}"#,
+        )
+        .expect("card");
+        let pack = DiscoveredPack {
+            manifest: PackManifest {
+                kind: "pack".to_string(),
+                id: "demo-route".to_string(),
+                version: "1.0.0".to_string(),
+                title: "Demo route".to_string(),
+                description: None,
+                activation_class: ActivationClass::Instruction,
+                side_effect_class: SideEffectClass::None,
+                trust_tier: TrustTier::FirstPartyValidated,
+                requires_confirmation: false,
+                task_tags: Vec::new(),
+                compatible_roles: Vec::new(),
+                compatible_targets: Vec::new(),
+                knowledge_refs: Vec::new(),
+                resources: vec![
+                    PackResource {
+                        path: "packs/demo-route/SKILL.md".to_string(),
+                        kind: ResourceKind::Instruction,
+                        required: true,
+                        surface_relevance: None,
+                    },
+                    PackResource {
+                        path: "packs/demo-route/skill-card.json".to_string(),
+                        kind: ResourceKind::Example,
+                        required: true,
+                        surface_relevance: None,
+                    },
+                ],
+                imports: Vec::new(),
+                visibility_scope: VisibilityScope::default(),
+                lifecycle: None,
+                metadata: BTreeMap::new(),
+            },
+            provenance: None,
+            provenance_ref: None,
+            source_path: root.path().join("packs/demo-route.json"),
+            library_root: root.path().to_path_buf(),
+            promotion_status: crate::types::PromotionStatus::Promoted,
+        };
+        let registry = LibraryRegistry {
+            roots: vec![root.path().to_path_buf()],
+            roles: BTreeMap::new(),
+            policies: BTreeMap::new(),
+            targets: BTreeMap::new(),
+            knowledge_sources: BTreeMap::new(),
+            packs: BTreeMap::from([("demo-route".to_string(), pack)]),
+        };
+        let result = registry
+            .route_skills("repo orchestrator", Some("claude-code"), None)
+            .expect("route");
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].skill_name, "delegated-work");
+        assert_eq!(result.candidates[0].matched_fields, vec!["alias"]);
+        assert_eq!(
+            result.candidates[0].suppressed_reasons,
+            vec!["target_not_compatible"]
+        );
     }
 
     #[test]

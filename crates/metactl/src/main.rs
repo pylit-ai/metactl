@@ -846,6 +846,8 @@ enum SkillsCommand {
     Remove(SkillsRemoveArgs),
     /// Audit skill-like artifacts across repo, generated, user, and explicit roots
     Audit(SkillsAuditArgs),
+    /// Explain a read-only route from a task description to declared skill resources
+    Route(SkillsRouteArgs),
 }
 
 #[derive(Debug, Args)]
@@ -1096,6 +1098,18 @@ struct SkillsAuditArgs {
     /// Write the selected report format to a custom path
     #[arg(long)]
     output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SkillsRouteArgs {
+    /// Task or intent to route to available skills
+    query: String,
+    /// Target runtime to require when a skill card declares compatibility
+    #[arg(long, short = 't')]
+    target: Option<String>,
+    /// Maximum candidate skills to return
+    #[arg(long, short = 'n', default_value_t = 10)]
+    limit: usize,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2022,6 +2036,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::List(_) => None,
             SkillsCommand::Remove(_) => Some("skills remove"),
             SkillsCommand::Audit(_) => Some("skills audit"),
+            SkillsCommand::Route(_) => None,
         },
         Commands::Plugin(args) => match &args.command {
             PluginCommand::List(_) | PluginCommand::Verify(_) => None,
