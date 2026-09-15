@@ -178,3 +178,23 @@ fn first_target_conflict_keeps_precedence_over_later_access_failure() {
         b"user instructions\n"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn project_root_symlink_alias_keeps_sync_working() {
+    let parent = tempfile::tempdir().unwrap();
+    let real = parent.path().join("real-project");
+    let alias = parent.path().join("project-alias");
+    fs::create_dir(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &alias).unwrap();
+    let init = cli(&alias, &["init", "--target", "codex-cli"]);
+    assert!(init.status.success(), "{init:?}");
+    let sync = cli(&alias, &["--json", "sync"]);
+    assert!(sync.status.success(), "{sync:?}");
+    assert!(real.join("AGENTS.md").is_file());
+    assert!(real
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
+        .is_file());
+    assert!(!real.join(".metactl/state/operation.lock").exists());
+    assert!(cli(&alias, &["sync"]).status.success());
+}

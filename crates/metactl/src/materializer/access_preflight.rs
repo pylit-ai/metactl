@@ -60,7 +60,9 @@ pub(super) fn check_write_paths(root: &Path, paths: &[PathBuf]) -> Result<()> {
         let requested_parent = path.parent().context("preflight path has no parent")?;
         let mut parent = requested_parent;
         loop {
-            match fs::symlink_metadata(parent) {
+            // Containment above rejects symlink traversal below the project root.
+            // The root itself may be a supported user-selected directory alias.
+            match fs::metadata(parent) {
                 Ok(metadata) if metadata.is_dir() => break,
                 Ok(_) => {
                     return Err(anyhow!(
