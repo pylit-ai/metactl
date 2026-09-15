@@ -11,6 +11,9 @@ use include_dir::{include_dir, Dir, DirEntry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod operation_lock_error;
+pub use operation_lock_error::OperationLockError;
+
 use crate::library_registry::LibraryRegistry;
 use crate::types::{
     ApplyMode, AutoSurfaceSelection, BrownfieldMode, CompileManifest, Config, ConfigDefaults,
@@ -1607,9 +1610,23 @@ pub struct OperationLock {
 
 impl OperationLock {
     pub fn acquire(project_root: &Path, command: &str) -> Result<Self> {
+        Self::acquire_with_initializer(project_root, command, |file, payload| {
+            file.write_all(payload)?;
+            file.sync_all()
+        })
+    }
+
+    fn acquire_with_initializer(
+        project_root: &Path,
+        command: &str,
+        initialize: impl FnOnce(&mut File, &[u8]) -> std::io::Result<()>,
+    ) -> Result<Self> {
         let state_dir = project_root.join(".metactl").join("state");
-        fs::create_dir_all(&state_dir)
-            .with_context(|| format!("create {}", state_dir.display()))?;
+        fs::create_dir_all(&state_dir).map_err(|source| OperationLockError::Io {
+            operation: "create_state_directory",
+            path: state_dir.clone(),
+            source,
+        })?;
         let path = state_dir.join("operation.lock");
         let payload = format!(
             "pid={}\ncommand={}\nstarted_at={}\n",
@@ -1619,28 +1636,34 @@ impl OperationLock {
         );
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
-                file.write_all(payload.as_bytes())
-                    .with_context(|| format!("write {}", path.display()))?;
-                let _ = file.sync_all();
-                Ok(Self { path })
+                // Establish ownership before fallible initialization. Close the file
+                // before dropping the guard so cleanup also works on Windows.
+                let lock = Self { path };
+                let result = initialize(&mut file, payload.as_bytes());
+                drop(file);
+                result.map_err(|source| OperationLockError::Io {
+                    operation: "initialize_lock",
+                    path: lock.path.clone(),
+                    source,
+                })?;
+                Ok(lock)
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let existing = fs::read_to_string(&path).unwrap_or_default();
                 let age_secs = operation_lock_age_secs(&path, &existing).unwrap_or_default();
                 let stale_after = operation_lock_stale_after_secs();
                 if age_secs >= stale_after {
-                    Err(anyhow!(
-                        "stale metactl operation lock at {}. Another metactl write may have been interrupted.\nNext: inspect the repo, then remove .metactl/state/operation.lock and retry.",
-                        path.display()
-                    ))
+                    Err(OperationLockError::Stale { path }.into())
                 } else {
-                    Err(anyhow!(
-                        "another metactl write operation is already active for this project (lock: {}).\nNext: wait for the active command to finish, then retry. If no metactl process is running, inspect the repo before removing .metactl/state/operation.lock.",
-                        path.display()
-                    ))
+                    Err(OperationLockError::Active { path }.into())
                 }
             }
-            Err(error) => Err(error).with_context(|| format!("create {}", path.display())),
+            Err(source) => Err(OperationLockError::Io {
+                operation: "create_lock",
+                path,
+                source,
+            }
+            .into()),
         }
     }
 }
