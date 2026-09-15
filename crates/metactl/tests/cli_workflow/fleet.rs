@@ -697,7 +697,7 @@ fn fleet_sync_apply_human_output_reports_dirty_projects() {
 }
 
 #[test]
-fn fleet_sync_apply_returns_nonzero_for_mixed_project_failure() {
+fn fleet_sync_apply_preserves_dirty_worktree_warning_without_refusing() {
     let project = TempDir::new().expect("tempdir");
     let clean = TempDir::new().expect("clean");
     let dirty = TempDir::new().expect("dirty");
