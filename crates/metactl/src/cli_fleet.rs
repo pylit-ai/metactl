@@ -1,5 +1,12 @@
 use super::*;
 
+#[path = "cli_fleet_plan.rs"]
+mod plan;
+
+#[path = "cli_fleet_sync.rs"]
+mod sync;
+use sync::cmd_fleet_sync;
+
 #[cfg(test)]
 #[path = "cli_fleet_tests.rs"]
 mod tests;
@@ -375,120 +382,6 @@ fn cmd_fleet_status(
     })
 }
 
-fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<CommandOutput, CliError> {
-    let controller = resolve_fleet_controller(cli)?;
-    let apply = args.apply;
-    if apply && !(cli.yes && cli.no_input_enabled()) {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "fleet sync --apply requires explicit --yes --no-input confirmation",
-        ));
-    }
-    let projects = select_fleet_projects(
-        &controller.project_root,
-        &controller.context.config_file,
-        &args.ids,
-        args.include_disabled,
-    )?;
-    let mut results = Vec::new();
-    for project in &projects {
-        let mut result = linked_project_json(project);
-        if project.status != LinkedProjectStatus::Ready {
-            result["result"] = json!("skipped");
-            results.push(result);
-            continue;
-        }
-        let fleet_sync_adopt = match fleet_sync_adopt_for_project(project) {
-            Ok(mode) => mode,
-            Err(err) => {
-                result["status"] = json!("failed");
-                result["result"] = json!("invalid_config");
-                result["message"] = json!(err.to_string());
-                results.push(result);
-                continue;
-            }
-        };
-        result["fleet_sync_adopt"] = json!(fleet_sync_adopt_label(fleet_sync_adopt));
-        if !apply {
-            result["status"] = json!("planned");
-            result["result"] = json!("preview");
-            result["planned_command"] = json!(fleet_sync_command_label(fleet_sync_adopt));
-            attach_codex_skill_visibility(&mut result, &project.path);
-            results.push(result);
-            continue;
-        }
-        if git_worktree_dirty(&project.path) {
-            result["worktree_dirty"] = json!(true);
-            result["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
-        }
-        match run_project_sync(project, fleet_sync_adopt) {
-            Ok(sync_json) => {
-                result["status"] = json!("applied");
-                result["result"] = json!("applied");
-                result["sync"] = sync_json;
-            }
-            Err(message) => {
-                result["status"] = json!("failed");
-                result["result"] = json!("sync_failed");
-                result["message"] = json!(message);
-            }
-        }
-        attach_codex_skill_visibility(&mut result, &project.path);
-        results.push(result);
-    }
-    if apply {
-        write_fleet_sync_log(&controller.project_root, &results).map_err(internal_error)?;
-    }
-    let failed = results.iter().any(|item| item["status"] == "failed");
-    let mut lines = fleet_controller_human_header(&controller);
-    lines.push(if apply {
-        "Fleet sync applied:".to_string()
-    } else {
-        "Fleet sync preview:".to_string()
-    });
-    for item in &results {
-        lines.push(format!(
-            "  {:<18} {:<14} {}",
-            item["id"].as_str().unwrap_or("?"),
-            item["status"].as_str().unwrap_or("?"),
-            item["path"].as_str().unwrap_or("?")
-        ));
-        if item["worktree_dirty"] == true {
-            lines.push(format!("    Warning: {DIRTY_WORKTREE_WARNING}"));
-        }
-    }
-    append_fleet_codex_skill_scope_note(&mut lines);
-    let mut json_payload = success_json(
-        "fleet",
-        Some(&controller.project_root),
-        json!({
-            "action": "sync",
-            "controller": fleet_controller_json(&controller),
-            "preview": !apply,
-            "projects": results,
-            "scope_note": CODEX_FLEET_SCOPE_NOTE,
-        }),
-    );
-    if results.iter().any(|item| item["worktree_dirty"] == true) {
-        json_payload["worktree_dirty"] = json!(true);
-        json_payload["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
-    }
-    if failed {
-        let details = fleet_sync_failure_details(&results);
-        let mut err = CliError::new(EXIT_STATE, "one or more fleet projects failed");
-        json_payload["ok"] = json!(false);
-        json_payload["message"] = json!("one or more fleet projects failed");
-        json_payload["details"] = json!(details);
-        err.json = json_payload;
-        err.details = details;
-        return Err(err);
-    }
-    Ok(CommandOutput {
-        human: project_human_output(&controller.project_root, lines.join("\n")),
-        json: json_payload,
-    })
-}
-
 fn fleet_sync_failure_details(results: &[Value]) -> Vec<String> {
     let failures: Vec<&Value> = results
         .iter()
@@ -805,40 +698,6 @@ pub(super) fn linked_project_status_label(status: LinkedProjectStatus) -> &'stat
         LinkedProjectStatus::MissingPath => "missing_path",
         LinkedProjectStatus::MissingConfig => "missing_config",
     }
-}
-
-fn run_project_sync(
-    project: &LinkedProject,
-    fleet_sync_adopt: FleetSyncAdoptMode,
-) -> std::result::Result<Value, String> {
-    let exe = std::env::current_exe().map_err(|err| err.to_string())?;
-    let mut command = Command::new(exe);
-    command
-        .arg("--json")
-        .arg("--yes")
-        .arg("--no-input")
-        .arg("--project")
-        .arg(&project.path);
-    if let Some(profile) = project.profile.as_ref() {
-        command.arg("--profile").arg(profile);
-    }
-    command.arg("sync");
-    if fleet_sync_adopt == FleetSyncAdoptMode::Patch {
-        command.arg("--adopt").arg("patch");
-    }
-    let output = command.output().map_err(|err| err.to_string())?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Err(if stderr.is_empty() { stdout } else { stderr });
-    }
-    serde_json::from_slice(&output.stdout).map_err(|err| err.to_string())
-}
-
-fn fleet_sync_adopt_for_project(project: &LinkedProject) -> Result<FleetSyncAdoptMode> {
-    let context = load_project_context(&project.path, None, project.profile.as_deref(), None)
-        .with_context(|| format!("load linked project {}", project.id))?;
-    Ok(fleet_sync_adopt_from_context(&context))
 }
 
 fn fleet_sync_adopt_from_context(context: &metactl::project::ProjectContext) -> FleetSyncAdoptMode {

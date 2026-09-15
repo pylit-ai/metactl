@@ -350,6 +350,15 @@ pub(crate) fn build_apply_review_plan(
     manifest: &CompileManifest,
     apply_mode: &ApplyMode,
 ) -> Result<ApplyReviewPlan> {
+    build_apply_review_plan_from_staging(project_root, project_root, manifest, apply_mode)
+}
+
+fn build_apply_review_plan_from_staging(
+    project_root: &Path,
+    staging_root: &Path,
+    manifest: &CompileManifest,
+    apply_mode: &ApplyMode,
+) -> Result<ApplyReviewPlan> {
     let state_path = state_path(project_root, &manifest.target);
     let state_bytes = fs::read(&state_path).ok();
     let managed = load_state(&state_path)?
@@ -377,7 +386,7 @@ pub(crate) fn build_apply_review_plan(
         ensure_platform_unique_path(&mut equivalent_paths, destination)?;
         validate_relative_output_path("staged output", &output.path)?;
         ensure_staged_path_for_target(&output.path, &manifest.target.id)?;
-        ensure_contained_regular_path(project_root, Path::new(&output.path), false)?;
+        ensure_contained_regular_path(staging_root, Path::new(&output.path), false)?;
         ensure_contained_regular_path(project_root, Path::new(destination), true)?;
 
         let destination_abs = project_root.join(destination);
@@ -393,7 +402,7 @@ pub(crate) fn build_apply_review_plan(
             }
             None => None,
         };
-        let staged_digest = digest_if_regular(&project_root.join(&output.path), false)?;
+        let staged_digest = digest_if_regular(&staging_root.join(&output.path), false)?;
         let destination_exists = destination_abs.exists();
         let (classification, reason_code, consequence, approval_required) = classify_review_action(
             destination_is_managed,
@@ -432,6 +441,38 @@ pub(crate) fn build_apply_review_plan(
     };
     plan.digest = review_plan_digest(&plan)?;
     Ok(plan)
+}
+
+/// Plan against real destinations using separately staged, temporary outputs.
+/// Neither project state nor destination files are created by this operation.
+pub(crate) fn preview_manifest(
+    project_root: &Path,
+    staging_root: &Path,
+    manifest: &CompileManifest,
+    apply_mode: &ApplyMode,
+) -> Result<(ApplyReviewPlan, Vec<ApplyConflict>)> {
+    let review =
+        build_apply_review_plan_from_staging(project_root, staging_root, manifest, apply_mode)?;
+    let mut conflicts = review
+        .actions
+        .iter()
+        .filter(|action| action.classification == "content_conflict")
+        .map(|action| ApplyConflict {
+            destination_path: action.destination_path.clone(),
+            reason_code: ReasonCode::BrownfieldCollision,
+            detail: format!("{}: {}", action.reason_code, action.consequence),
+        })
+        .collect::<Vec<_>>();
+    let state = load_state(&state_path(project_root, &manifest.target))?;
+    let plans = plan_apply_from_staging(
+        project_root,
+        staging_root,
+        manifest,
+        apply_mode,
+        state.as_ref(),
+    )?;
+    conflicts.extend(collect_conflicts(&plans).unwrap_or_default());
+    Ok((review, conflicts))
 }
 
 fn review_plan_digest(plan: &ApplyReviewPlan) -> Result<String> {
@@ -1407,6 +1448,22 @@ fn plan_apply(
     apply_mode: &ApplyMode,
     existing_state: Option<&ManagedState>,
 ) -> Result<Vec<Result<PlannedAction>>> {
+    plan_apply_from_staging(
+        project_root,
+        project_root,
+        manifest,
+        apply_mode,
+        existing_state,
+    )
+}
+
+fn plan_apply_from_staging(
+    project_root: &Path,
+    staging_root: &Path,
+    manifest: &CompileManifest,
+    apply_mode: &ApplyMode,
+    existing_state: Option<&ManagedState>,
+) -> Result<Vec<Result<PlannedAction>>> {
     let existing_apply_mode = existing_state.map(|state| state.apply_mode.clone());
     let managed = existing_state
         .map(|state| {
@@ -1429,7 +1486,7 @@ fn plan_apply(
             continue;
         };
         let destination_abs = project_root.join(destination_path);
-        let staged_abs = project_root.join(&output.path);
+        let staged_abs = staging_root.join(&output.path);
         let merge_json = structured_json_merge_output(output, destination_path);
         if !staged_abs.exists() {
             plans.push(Err(conflict_json(
