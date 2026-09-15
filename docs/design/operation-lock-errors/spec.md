@@ -1,6 +1,7 @@
 # Operation lock failure contract
 
-Status: implemented; verification in progress.
+Status: implemented and independently reviewed; validation results and existing
+release prerequisites are recorded in [the verification ledger](tasks.md).
 
 ## Problem
 

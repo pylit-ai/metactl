@@ -555,6 +555,7 @@ See [docs/security-checklist.md](https://github.com/pylit-ai/metactl/blob/main/d
 | Demo viewer | [docs/cli-demos.md](https://github.com/pylit-ai/metactl/blob/main/docs/cli-demos.md) |
 | Daily operator | [docs/user/WORKFLOWS.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/WORKFLOWS.md) |
 | Fleet operator | [docs/user/FLEET_SYNC.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/FLEET_SYNC.md) |
+| Lock or filesystem failure | [Operation-lock recovery](docs/user/operation-locks.md) |
 | Pack author | [docs/user/PACK_VISIBILITY.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/PACK_VISIBILITY.md) |
 | Integrator | [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) |
 | Maintainer | [docs/release-readiness.md](https://github.com/pylit-ai/metactl/blob/main/docs/release-readiness.md) |

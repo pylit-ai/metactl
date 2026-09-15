@@ -4,8 +4,24 @@
 - [x] Implement typed diagnostics and failed-initialization cleanup.
 - [x] Pass focused regression and contention tests (`cargo test -p metactl operation_lock`: seven passed).
 - [x] Document recovery and prioritized core follow-ups.
-- [ ] Pass repository gates and independent review.
-- [ ] Open PR with exact remote head and verification evidence.
+- [x] Run repository gates and disclose the baseline failure below.
+- [x] Independent read-only code and documentation review: no blocking findings.
+- [x] Open [PR #27](https://github.com/pylit-ai/metactl/pull/27); verify its remote head at handoff.
+
+## Completed checks
+
+- `cargo test --offline --workspace`: 349 passed, zero failed or ignored.
+- `cargo check -p metactl -p metactld`: passed.
+- `cargo fmt --check` and `git diff --check`: passed.
+- `bash scripts/check_public_boundary.sh`: passed.
+- `scripts/validate_contracts.py --include-starter-library --include-targets --include-knowledge-fixtures --library-stack-fixtures`: passed with the configured validation Python environment.
+- `python3 scripts/verify_docs_links.py`: passed.
+- `CARGO_NET_OFFLINE=true bash scripts/smoke_cli.sh`: passed, including installing the release binary and init/compile/apply/validate/revert.
+- `scripts/verify_v1_release_gate.py`: passed; its packaged Docker smoke was explicitly skipped because Docker was unavailable.
+
+Permission regression fixtures ran without privilege-based skips on the local
+Unix runner. Non-Unix runners omit the mode-bit fixture; typed classification
+and injected initialization-failure tests remain portable.
 
 ## Baseline release-gate finding
 
