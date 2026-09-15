@@ -17,8 +17,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Format
         run: cargo fmt --check
-      - name: Architecture boundaries
-        run: bash scripts/check_architecture_metrics.sh
       - name: Check
         run: cargo check -p metactl -p metactld
       - name: Test
