@@ -15,6 +15,8 @@ use crate::types::{
     InstructionProjectionMode, ReasonCode, Ref, RevertReport, SurfaceMergeStatus,
 };
 
+mod access_preflight;
+
 #[derive(Debug, Clone)]
 pub(crate) struct StagedOutputInput {
     pub id: Option<String>,
@@ -846,6 +848,27 @@ pub(crate) fn apply_manifest_bound(
     }
 
     let journal_path = apply_journal_path(project_root, &manifest.target, &review_plan.digest);
+    let mut write_paths = Vec::new();
+    for plan in plans.iter().filter_map(|plan| plan.as_ref().ok()) {
+        if !matches!(plan.kind, ActionKind::Noop) {
+            write_paths.push(project_root.join(destination_path_fallback(&plan.output)));
+            if plan.existed_before
+                && matches!(
+                    plan.kind,
+                    ActionKind::MergeJsonUnmanaged
+                        | ActionKind::PatchUnmanaged
+                        | ActionKind::TakeoverUnmanaged
+                )
+            {
+                if let Some(backup_path) = &plan.backup_path {
+                    write_paths.push(backup_path.clone());
+                }
+            }
+        }
+    }
+    write_paths.push(state_path.clone());
+    write_paths.push(journal_path.clone());
+    access_preflight::check_write_paths(project_root, &write_paths)?;
     append_apply_journal(&journal_path, &review_plan.digest, "", "preflight_ok", None)?;
 
     // Capture every path before the first mutation. This makes a later failure
@@ -2230,6 +2253,112 @@ mod tests {
             brownfield_mode: None,
             degradations: Vec::new(),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preflight_denied_later_destination_precedes_all_managed_writes() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = tempfile::tempdir().expect("tempdir");
+        let root = project.path();
+        let mut manifest = codex_skill_manifest(root);
+        let mut second = manifest.generated_outputs[0].clone();
+        manifest.generated_outputs[0].destination_path = Some("first/skill.md".into());
+        second.destination_path = Some("denied/skill.md".into());
+        manifest.generated_outputs.push(second);
+        let denied = root.join("denied");
+        fs::create_dir(&denied).unwrap();
+        fs::set_permissions(&denied, fs::Permissions::from_mode(0o500)).unwrap();
+        if fs::write(denied.join("privilege-probe"), "probe").is_ok() {
+            fs::remove_file(denied.join("privilege-probe")).unwrap();
+            fs::set_permissions(&denied, fs::Permissions::from_mode(0o700)).unwrap();
+            eprintln!("permission fixture skipped: runner bypasses directory permissions");
+            return;
+        }
+        let result = apply_manifest(root, &manifest, &ApplyMode::Copy);
+        if denied.exists() {
+            fs::set_permissions(&denied, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let error = result.expect_err("permission failure must precede apply");
+        assert!(format!("{error:#}").contains("preflight"));
+        assert!(
+            !root.join("first").exists(),
+            "even destination parents remain absent"
+        );
+        assert!(!state_path(root, &manifest.target).exists());
+        assert!(!root.join(".metactl/state/apply-journal").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preflight_denied_recovery_storage_preserves_user_files() {
+        use std::os::unix::fs::PermissionsExt;
+        for relative in [".metactl/state/backups/codex-cli", ".metactl/state"] {
+            let project = tempfile::tempdir().unwrap();
+            let root = project.path();
+            let mut manifest = codex_skill_manifest(root);
+            manifest.generated_outputs[0].destination_path = Some("USER.md".into());
+            fs::write(root.join("USER.md"), "original user content\n").unwrap();
+            let denied = root.join(relative);
+            fs::create_dir_all(&denied).unwrap();
+            fs::set_permissions(&denied, fs::Permissions::from_mode(0o500)).unwrap();
+            if fs::write(denied.join("privilege-probe"), "probe").is_ok() {
+                fs::remove_file(denied.join("privilege-probe")).unwrap();
+                fs::set_permissions(&denied, fs::Permissions::from_mode(0o700)).unwrap();
+                eprintln!("permission fixture skipped: runner bypasses directory permissions");
+                continue;
+            }
+            let result = apply_manifest(root, &manifest, &ApplyMode::Takeover);
+            fs::set_permissions(&denied, fs::Permissions::from_mode(0o700)).unwrap();
+            let error = result.expect_err("recovery storage denied");
+            assert!(format!("{error:#}").contains("access preflight"));
+            assert_eq!(
+                fs::read(root.join("USER.md")).unwrap(),
+                b"original user content\n"
+            );
+            assert!(!state_path(root, &manifest.target).exists());
+            assert!(!root.join(".metactl/state/apply-journal").exists());
+            assert_eq!(fs::read_dir(&denied).unwrap().count(), 0);
+        }
+    }
+
+    #[test]
+    fn preflight_recovery_obstruction_precedes_new_destinations() {
+        for relative in [".metactl/state/apply-journal", ".metactl/state/backups"] {
+            let project = tempfile::tempdir().unwrap();
+            let root = project.path();
+            let mut manifest = codex_skill_manifest(root);
+            manifest.generated_outputs[0].destination_path = Some("USER.md".into());
+            let mut first = manifest.generated_outputs[0].clone();
+            first.destination_path = Some("new/FIRST.md".into());
+            manifest.generated_outputs.insert(0, first);
+            fs::write(root.join("USER.md"), "original\n").unwrap();
+            fs::create_dir_all(root.join(".metactl/state")).unwrap();
+            fs::write(root.join(relative), "obstruction\n").unwrap();
+            assert!(apply_manifest(root, &manifest, &ApplyMode::Takeover).is_err());
+            assert!(!root.join("new").exists());
+            assert_eq!(fs::read(root.join("USER.md")).unwrap(), b"original\n");
+            assert_eq!(fs::read(root.join(relative)).unwrap(), b"obstruction\n");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preflight_noop_does_not_require_destination_write_access() {
+        use std::os::unix::fs::PermissionsExt;
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        let manifest = codex_skill_manifest(root);
+        assert!(apply_manifest(root, &manifest, &ApplyMode::Copy)
+            .unwrap()
+            .conflicts
+            .is_empty());
+        let parent = root.join(".agents/skills/demo");
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = apply_manifest(root, &manifest, &ApplyMode::Copy);
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.unwrap().conflicts.is_empty());
+        assert_eq!(fs::read_dir(&parent).unwrap().count(), 1, "no probe litter");
     }
 
     #[test]
