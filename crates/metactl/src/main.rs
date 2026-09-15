@@ -10556,24 +10556,27 @@ fn stale_lock_error() -> CliError {
 }
 
 fn operation_lock_error(error: anyhow::Error) -> CliError {
-    let message = error.to_string();
-    let mut err = CliError::new(EXIT_STATE, message.clone()).with_details(vec![
-        "Next: wait for the active command to finish before retrying.".to_string(),
-        "If no metactl process is running, inspect the repo and remove .metactl/state/operation.lock.".to_string(),
-    ]);
+    use metactl::project::OperationLockError;
+    let Some(lock_error) = error.downcast_ref::<OperationLockError>() else {
+        return state_error(error);
+    };
+    let steps = lock_error.next_steps();
+    let mut err = CliError::new(EXIT_STATE, lock_error.to_string())
+        .with_details(steps.iter().map(|step| format!("Next: {step}")).collect());
     if let Some(obj) = err.json.as_object_mut() {
-        obj.insert("code".to_string(), json!("operation_lock_active"));
+        obj.insert("code".to_string(), json!(lock_error.code()));
         obj.insert("category".to_string(), json!("project_state"));
-        if message.contains("stale metactl operation lock") {
-            obj.insert("code".to_string(), json!("operation_lock_stale"));
+        obj.insert("path".to_string(), json!(lock_error.path()));
+        obj.insert("next_steps".to_string(), json!(steps));
+        if let OperationLockError::Io {
+            operation, source, ..
+        } = lock_error
+        {
+            obj.insert("operation".to_string(), json!(operation));
+            obj.insert("io_kind".to_string(), json!(format!("{:?}", source.kind())));
+            obj.insert("raw_os_error".to_string(), json!(source.raw_os_error()));
+            obj.insert("cause".to_string(), json!(source.to_string()));
         }
-        obj.insert(
-            "next_steps".to_string(),
-            json!([
-                "wait for the active command to finish",
-                "if stale, inspect the repo and remove .metactl/state/operation.lock"
-            ]),
-        );
     }
     err
 }

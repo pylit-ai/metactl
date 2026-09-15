@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- Distinguish operation-lock contention from permission and other filesystem
+  failures, preserving the OS cause in text and machine output without unrelated
+  lock-deletion advice. Existing contention codes and exit status 10 remain stable.
+- Release newly created operation locks when initial payload writing or flushing
+  fails. Clarify that lock age alone does not prove abandonment. See
+  [operation-lock recovery](docs/user/operation-locks.md).
+
 ### Added
 
 - Project declared Agent Skill companion resources from `references/`, `scripts/`, `templates/`, and `assets/` beside each generated `SKILL.md`, with package-relative paths and per-resource source and ownership receipts.
