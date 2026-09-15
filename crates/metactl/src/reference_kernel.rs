@@ -62,6 +62,26 @@ impl ReferenceKernel {
         }
     }
 
+    /// Exercise temporary access probes without applying or persisting a target.
+    /// Returns false for a known conflict, which normal apply must report first.
+    pub fn preflight_compiled_outputs_access(
+        &self,
+        project_root: impl AsRef<Path>,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+    ) -> Result<bool> {
+        match &self.backend {
+            KernelBackend::Libraries(_) => crate::materializer::preflight_apply_access(
+                project_root.as_ref(),
+                manifest,
+                apply_mode,
+            ),
+            KernelBackend::Suites(_) => Err(anyhow!(
+                "apply access preflight is not implemented for suite-backed fixtures"
+            )),
+        }
+    }
+
     pub fn apply_review_plan(
         &self,
         project_root: impl AsRef<Path>,
