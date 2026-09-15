@@ -24,6 +24,10 @@
 
 ### Changed
 
+- Separate fleet command ownership, library discovery, and instruction formatting
+  into focused internal modules without changing command behavior. Enforce the
+  existing architecture limits in CI and budget the extracted modules.
+
 - Fail skill compilation when a declared package companion is missing instead of synthesizing placeholder content.
 - Prune only outputs owned by the previous target compile manifest, retaining unmanaged neighboring files and removing empty managed directories.
 - Aligned the target capability schema with the existing `import_stub` mode and

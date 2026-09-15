@@ -9,4 +9,11 @@
 5. Run full tests, public-boundary/contracts/install smoke and independent review.
 6. Publish a separate refactoring PR before changing fleet semantics.
 
+Replan: once the main-file violation was repaired, the same gate revealed the
+registry also exceeded its existing limits. Extract cohesive registry discovery
+and instruction-formatting helpers as a parallel mechanical change; give the
+new modules explicit budgets and preserve all old limits. Run Cargo verification
+serially within each target directory so rebuilding a CLI cannot race tests that
+are spawning it.
+
 Replan on any unintentional difference; never update expectations to hide it.
