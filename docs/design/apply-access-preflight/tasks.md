@@ -7,6 +7,9 @@
 - [x] Real CLI denial, permission repair/retry, repeated sync and journal
   obstruction tests pass in text, JSON and agent modes.
 - [x] Focused materializer permission, recovery, no-op and rollback tests pass.
+- [x] First per-target checkpoint full workspace suite passes, exit 0.
+- [x] Reproduced cross-target failure before the upfront pass: later target
+  denial left the first target's `AGENTS.md` written. Added the CLI-wide pass.
 - [ ] Final full workspace, formatting and public-boundary checks.
 - [ ] Independent review and remote-head verification.
 

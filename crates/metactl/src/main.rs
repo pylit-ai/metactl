@@ -7950,6 +7950,7 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
     }
     let mut outputs = Vec::new();
     let mut notes = Vec::new();
+    let mut prepared_targets = Vec::new();
     for target in targets {
         let manifest_path = project_root.join(&target.compile_manifest_path);
         let manifest = load_compile_manifest(&manifest_path).map_err(state_error)?;
@@ -7963,6 +7964,21 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             &manifest,
             target_capability.as_ref(),
         )?;
+        prepared_targets.push((target, manifest, apply_mode, note));
+    }
+    // Single-target apply already checks access after conflict/stale-plan checks.
+    // For multiple targets, catch later access failures before earlier targets write.
+    if !args.preview && prepared_targets.len() > 1 {
+        for (_, manifest, apply_mode, _) in &prepared_targets {
+            if !kernel
+                .preflight_compiled_outputs_access(&project_root, manifest, apply_mode)
+                .map_err(state_error)?
+            {
+                break;
+            }
+        }
+    }
+    for (target, manifest, apply_mode, note) in prepared_targets {
         if let Some(note) = note {
             notes.push(note);
         }

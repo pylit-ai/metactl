@@ -47,7 +47,7 @@ Recommended next improvements, in order:
 1. **Destination and recovery preflight: implemented.** Apply now probes changed
    destinations, new backup paths and state/journal storage before managed-file
    mutation. See [access failures and recovery](apply-access-preflight.md).
-   Checks are per target and best effort; access can change afterward, so
+   CLI apply checks all selected targets upfront; access can change afterward, so
    snapshots and compensation remain necessary.
 2. **Real fleet preview.** Current fleet preview reports selection and readiness;
    it does not execute each project's sync preview. Run per-project planning with

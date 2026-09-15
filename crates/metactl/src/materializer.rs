@@ -755,6 +755,34 @@ pub(crate) fn apply_manifest(
     apply_manifest_bound(project_root, manifest, apply_mode, None)
 }
 
+/// Probe access without applying a target or persisting its plan. The caller
+/// must still rebuild the review plan immediately before each target apply.
+/// False means a known conflict: let normal apply report it before considering
+/// any later targets, preserving the established error precedence.
+pub(crate) fn preflight_apply_access(
+    project_root: &Path,
+    manifest: &CompileManifest,
+    apply_mode: &ApplyMode,
+) -> Result<bool> {
+    let review_plan = build_apply_review_plan(project_root, manifest, apply_mode)?;
+    if review_plan
+        .actions
+        .iter()
+        .any(|action| action.classification == "content_conflict")
+    {
+        return Ok(false);
+    }
+    let state_path = state_path(project_root, &manifest.target);
+    let existing_state = load_state(&state_path)?;
+    let plans = plan_apply(project_root, manifest, apply_mode, existing_state.as_ref())?;
+    if collect_conflicts(&plans).is_some() {
+        return Ok(false);
+    }
+    let journal_path = apply_journal_path(project_root, &manifest.target, &review_plan.digest);
+    access_preflight::check_planned_access(project_root, &plans, &state_path, &journal_path)?;
+    Ok(true)
+}
+
 pub(crate) fn apply_manifest_bound(
     project_root: &Path,
     manifest: &CompileManifest,
@@ -848,27 +876,7 @@ pub(crate) fn apply_manifest_bound(
     }
 
     let journal_path = apply_journal_path(project_root, &manifest.target, &review_plan.digest);
-    let mut write_paths = Vec::new();
-    for plan in plans.iter().filter_map(|plan| plan.as_ref().ok()) {
-        if !matches!(plan.kind, ActionKind::Noop) {
-            write_paths.push(project_root.join(destination_path_fallback(&plan.output)));
-            if plan.existed_before
-                && matches!(
-                    plan.kind,
-                    ActionKind::MergeJsonUnmanaged
-                        | ActionKind::PatchUnmanaged
-                        | ActionKind::TakeoverUnmanaged
-                )
-            {
-                if let Some(backup_path) = &plan.backup_path {
-                    write_paths.push(backup_path.clone());
-                }
-            }
-        }
-    }
-    write_paths.push(state_path.clone());
-    write_paths.push(journal_path.clone());
-    access_preflight::check_write_paths(project_root, &write_paths)?;
+    access_preflight::check_planned_access(project_root, &plans, &state_path, &journal_path)?;
     append_apply_journal(&journal_path, &review_plan.digest, "", "preflight_ok", None)?;
 
     // Capture every path before the first mutation. This makes a later failure

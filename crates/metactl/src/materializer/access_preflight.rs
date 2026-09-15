@@ -5,12 +5,41 @@
 //! They cannot guarantee later writes: races and target-specific restrictions
 //! still require the materializer's snapshots and compensation.
 
-use super::ensure_contained_regular_path;
+use super::{destination_path_fallback, ensure_contained_regular_path, ActionKind, PlannedAction};
 use anyhow::{anyhow, Context, Result};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+pub(super) fn check_planned_access(
+    root: &Path,
+    plans: &[Result<PlannedAction>],
+    state_path: &Path,
+    journal_path: &Path,
+) -> Result<()> {
+    let mut write_paths = Vec::new();
+    for plan in plans.iter().filter_map(|plan| plan.as_ref().ok()) {
+        if !matches!(plan.kind, ActionKind::Noop) {
+            write_paths.push(root.join(destination_path_fallback(&plan.output)));
+            if plan.existed_before
+                && matches!(
+                    plan.kind,
+                    ActionKind::MergeJsonUnmanaged
+                        | ActionKind::PatchUnmanaged
+                        | ActionKind::TakeoverUnmanaged
+                )
+            {
+                if let Some(backup_path) = &plan.backup_path {
+                    write_paths.push(backup_path.clone());
+                }
+            }
+        }
+    }
+    write_paths.push(state_path.to_path_buf());
+    write_paths.push(journal_path.to_path_buf());
+    check_write_paths(root, &write_paths)
+}
 
 pub(super) fn check_write_paths(root: &Path, paths: &[PathBuf]) -> Result<()> {
     let mut checked_parents = BTreeSet::new();

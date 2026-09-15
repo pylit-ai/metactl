@@ -6,6 +6,8 @@
    Add one private access-check module; collect only actual write paths.
 3. Probe before journal creation and snapshots. Preserve the action loop and
    its compensation behavior for failures that preflight cannot predict.
+   Prepare all CLI target manifests/modes and probe all before the first target;
+   do not freeze review digests or run probes in preview.
 4. Exercise actual CLI text/JSON/agent refusal, repair/retry, repeated apply,
    permission and obstruction fixtures, cleanup, no-op and replacement semantics.
 5. Run the full workspace suite and public-boundary gate; independent review
