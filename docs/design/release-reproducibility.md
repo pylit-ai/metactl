@@ -61,6 +61,14 @@ File size alone is not the next refactoring criterion. The extracted fleet and
 instruction modules already provide useful boundaries. The next work should
 make partial success and recovery understandable to callers.
 
+The bookkeeping failure was reproduced with the released CLI in a disposable
+project: initialize a Codex target, add `python-refactor`, compile, then replace
+the empty `.metactl/history` directory with a regular file and run
+`apply --mode copy --json --no-input`. The command exited 1 with only `ok: false`
+and a history-creation message, although `AGENTS.md`, skill files and the target's
+applied state existed. The operation lock was released. This demonstrates loss
+of outcome information; it does not imply the materializer failed to apply.
+
 | Order | Concrete failure | Ownership and smallest change | Required regression evidence |
 | --- | --- | --- | --- |
 | Immediate, separate fix | Inline instruction snippets cut at byte 197 can panic when that offset splits a UTF-8 character. | Keep byte-budget truncation inside `library_instruction_format::inline_snippet`, ending at a character boundary. | Real CLI compilation with CJK, emoji and mixed text crossing the cutoff; unchanged ASCII behavior and output byte limit. |
