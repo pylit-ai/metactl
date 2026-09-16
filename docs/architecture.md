@@ -42,3 +42,6 @@ release checks enforce the same rule. Limits are guardrails, not proof of sound 
 preserve observable contracts and have tests for user-facing failure paths.
 See the [fleet extraction contract](design/fleet-module/spec.md) and
 [registry boundaries](design/registry-boundary.md).
+
+The next maintenance priorities are described in the
+[release and failure-behavior audit](design/release-reproducibility.md).
