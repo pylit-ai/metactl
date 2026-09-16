@@ -40,4 +40,7 @@ check_file() {
 }
 
 check_file "crates/metactl/src/main.rs" 11750 300
+check_file "crates/metactl/src/cli_fleet.rs" 1000 40
 check_file "crates/metactl/src/library_registry.rs" 3375 121
+check_file "crates/metactl/src/library_discovery.rs" 400 16
+check_file "crates/metactl/src/library_instruction_format.rs" 350 18
