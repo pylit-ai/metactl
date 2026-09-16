@@ -85,7 +85,11 @@ pub(super) fn summarize_inline_snippet(snippet: &str) -> String {
     if compact.len() <= 200 {
         compact
     } else {
-        format!("{}...", &compact[..197])
+        let mut end = 197;
+        while !compact.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &compact[..end])
     }
 }
 
