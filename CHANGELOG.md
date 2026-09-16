@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Make fleet preview resolve and compile real member inputs in temporary storage,
+  report expected files and skills, and detect destination conflicts without
+  changing controller/member files. Preserve lock exclusion for controller
+  self-members and preserve applied outcomes when fleet logging fails. See
+  [fleet preview behavior](docs/user/fleet-preview-safety.md).
 - Distinguish operation-lock contention from permission and other filesystem
   failures, preserving the OS cause in text and machine output without unrelated
   lock-deletion advice. Existing contention codes and exit status 10 remain stable.
