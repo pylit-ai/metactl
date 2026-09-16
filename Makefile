@@ -37,6 +37,7 @@ metactl-skill-eval: $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) -c 'import json, pathlib, sys; sys.path.insert(0, str(pathlib.Path("scripts").resolve())); import validate_contracts; root = pathlib.Path(".").resolve(); registry = validate_contracts.schema_registry(); data = json.loads((root / "tmp/starter-skill-eval.json").read_text()); validate_contracts.validate_instance(data, root / "contracts/schemas/metactl/skill_eval_artifact.schema.json", registry); print("validated: tmp/starter-skill-eval.json")'
 
 metactl-surface-benchmark: $(VALIDATE_STAMP)
+	$(PYTHON) scripts/test_surface_benchmarks.py
 	$(CARGO) build -p metactl
 	$(PYTHON) scripts/evaluate_surface_benchmarks.py --metactl-bin ./target/debug/metactl --output tmp/starter-surface-benchmark.json
 	$(VALIDATE_PYTHON) -c 'import json, pathlib, sys; sys.path.insert(0, str(pathlib.Path("scripts").resolve())); import validate_contracts; root = pathlib.Path(".").resolve(); registry = validate_contracts.schema_registry(); data = json.loads((root / "tmp/starter-surface-benchmark.json").read_text()); validate_contracts.validate_instance(data, root / "contracts/schemas/metactl/surface_benchmark_artifact.schema.json", registry); print("validated: tmp/starter-surface-benchmark.json")'
@@ -102,7 +103,7 @@ verify-release-consumers:
 	bash scripts/test_verify_github_attestation.sh
 	npm --prefix packaging/npm test --ignore-scripts
 
-verify-v1-release-gate: verify-architecture-metrics verify-release-consumers $(VALIDATE_STAMP)
+verify-v1-release-gate: verify-architecture-metrics verify-release-consumers metactl-surface-benchmark $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/verify_v1_release_gate.py
 
 verify-v1-lightweight-control-plane: $(VALIDATE_STAMP)

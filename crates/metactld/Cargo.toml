@@ -9,7 +9,7 @@ repository = "https://github.com/pylit-ai/metactl"
 readme = "../../README.md"
 
 [dependencies]
-anyhow = "1"
+anyhow = "1.0.103"
 clap = { version = "4", features = ["derive"] }
 metactl = { version = "0.1.21", path = "../metactl" }
 serde_json = "1"
