@@ -100,6 +100,7 @@ verify-mcp-adversarial:
 	$(PYTHON) scripts/verify_mcp_adversarial.py
 
 verify-release-consumers:
+	$(PYTHON) scripts/test_package_release.py
 	bash scripts/test_verify_github_attestation.sh
 	npm --prefix packaging/npm test --ignore-scripts
 
