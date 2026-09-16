@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Preserve UTF-8 character boundaries when shortening inline instruction snippets,
+  preventing compilation panics for long multilingual text while retaining the
+  200-byte summary limit.
+
 ## 0.1.21 - 2026-09-16
 
 ### Fixed
