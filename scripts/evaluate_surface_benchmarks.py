@@ -84,7 +84,15 @@ def metactl_version(bin_path: Path) -> str:
 
 def output_size(project_root: Path, output: dict[str, Any]) -> int:
     path = project_root / output["path"]
-    return path.stat().st_size
+    contents = path.read_bytes()
+    destination = output.get("destination_path") or output["path"]
+    if (
+        output.get("kind") == "skill_folder"
+        and Path(destination).name == "SKILL.md"
+        and not contents.strip()
+    ):
+        raise ValueError(f"empty skill body: {path}")
+    return len(contents)
 
 
 def compile_mode(bin_path: Path, fixture: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -177,7 +185,9 @@ def evaluate_task_cases(
             True if not expected_command else expected_command in auto_paths
         )
         body_read_route_available = any(
-            path.startswith(f".codex/skills/{expected_pack}/") for path in auto_paths
+            path.startswith(f".agents/skills/{expected_pack}/")
+            and path.endswith("/SKILL.md")
+            for path in auto_paths
         )
         false_negative = (
             not recall_at_3 or not expected_command_available or not body_read_route_available
