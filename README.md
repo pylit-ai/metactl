@@ -58,7 +58,7 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | --- | --- | --- |
 | Prebuilt release | `cargo binstall metactl` | Fast, verified native install on Linux x86_64 or Apple Silicon. |
 | Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
-| npm shim | `npm install -g @pylit-ai/metactl` | JavaScript toolchains; downloads and verifies the matching release archive. |
+| npm shim (unpublished) | See [`packaging/npm`](packaging/npm) | Installer scaffold; the npm package is not yet published. |
 | crates.io | `cargo install metactl --version 0.1.21 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 

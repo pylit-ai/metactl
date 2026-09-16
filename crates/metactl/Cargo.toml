@@ -15,7 +15,7 @@ pkg-fmt = "tgz"
 bin-dir = "{ name }-v{ version }-{ target }/{ bin }{ binary-ext }"
 
 [dependencies]
-anyhow = "1"
+anyhow = "1.0.103"
 clap = { version = "4", features = ["derive", "env"] }
 include_dir = "0.7.4"
 serde = { version = "1", features = ["derive"] }

@@ -1,10 +1,28 @@
 # Release Readiness
 
-Last local verification: 2026-07-03.
+Release preparation: 2026-09-16. The release unit is the GitHub binary archives
+and the `metactl` / `metactld` crates. The npm installer remains an unpublished
+scaffold; publishing a new npm distribution is not part of this release.
 
-## 0.1.21 Pre-Publication Status
+## 0.1.21 Verification
 
-- `make verify`: passed locally on the `0.1.21` release-prep branch.
+The release includes the lock diagnostic repair and PRs #29, #28, and #30,
+integrated in that order. The combined production code matches the independently
+reviewed validation tree. Tests cover permission denial and recovery, project
+root aliases, path containment, genuine lock contention, real fleet previews,
+missing inputs, and partial fleet failures. Run the gates below on the final
+release candidate; command outcomes and published commit identity belong in
+the release notes.
+
+### Release-candidate evidence
+
+Fresh checks on the release candidate:
+
+- `cargo test --workspace --locked`: 372 tests passed.
+- `cargo audit`: passed with no advisories after updating the patched `anyhow` dependency.
+- `make verify-v1-release-gate`: passed, including Docker installation from the packaged crate and the full surface benchmark (recall at three results: 1.0; false negatives: 0).
+- Public boundary, documentation links and commands, version consistency, architecture budgets, adversarial MCP checks, and contract validation: passed.
+- `make smoke-stdio smoke-cli smoke-dogfood`: passed, including installation and real command workflows.
 - `cargo package -p metactl --list`: passed.
 - `cargo package -p metactld --list`: passed.
 - `cargo publish -p metactl --dry-run --locked`: passed.
@@ -28,7 +46,7 @@ License summary from Cargo metadata:
 | License expression | Package count |
 | --- | ---: |
 | `MIT OR Apache-2.0` | 56 |
-| `MIT` | 13 |
+| `MIT` | 15 |
 | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | 13 |
 | `Apache-2.0 OR MIT` | 5 |
 | `Apache-2.0` | 2 |
@@ -47,7 +65,7 @@ Unknown license fields: 0.
 bash scripts/check_public_boundary.sh
 cargo fmt --check
 cargo check -p metactl -p metactld
-cargo test -p metactl
+cargo test --workspace --locked
 python3 scripts/verify_version_consistency.py
 make verify
 make verify-v1-release-gate

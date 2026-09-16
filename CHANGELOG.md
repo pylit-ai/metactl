@@ -2,7 +2,16 @@
 
 ## Unreleased
 
+## 0.1.21 - 2026-09-16
+
 ### Fixed
+
+- Require a patched `anyhow` release and update the lockfile to `1.0.104`,
+  addressing RUSTSEC-2026-0190 (`Error::downcast_mut` memory-safety warning).
+- Correct the Codex surface benchmark to inspect canonical `.agents/skills`
+  bodies; keep missing, blank and legacy-only routes failing the existing gate.
+- Run that benchmark and its regression tests through the release gate already
+  used by CI, so stale routing checks cannot remain hidden behind passing Rust tests.
 
 - Make fleet preview resolve and compile real member inputs in temporary storage,
   report expected files and skills, and detect destination conflicts without
@@ -16,6 +25,8 @@
   fails. Clarify that lock age alone does not prove abandonment. See
   [operation-lock recovery](docs/user/operation-locks.md).
 
+- Preflight destination, backup, state and journal access across selected targets before managed writes. Preserve root symlink aliases, conflict precedence, preview behavior and rollback protections.
+
 ### Added
 
 - Project declared Agent Skill companion resources from `references/`, `scripts/`, `templates/`, and `assets/` beside each generated `SKILL.md`, with package-relative paths and per-resource source and ownership receipts.
@@ -26,27 +37,6 @@
 - Added a versioned skill-card consumer and shared v1/v2 conformance corpus.
 - Added deterministic offline human simulation for canonical Codex skill writes,
   no-op repetition, stale-plan refusal, and legacy conflicts.
-
-### Changed
-
-- Separate fleet command ownership, library discovery, and instruction formatting
-  into focused internal modules without changing command behavior. Enforce the
-  existing architecture limits in CI and budget the extracted modules.
-
-- Fail skill compilation when a declared package companion is missing instead of synthesizing placeholder content.
-- Prune only outputs owned by the previous target compile manifest, retaining unmanaged neighboring files and removing empty managed directories.
-- Aligned the target capability schema with the existing `import_stub` mode and
-  `import_stub_path` compile-target field.
-- Codex repo-local skills now write canonically to `.agents/skills`; legacy
-  `.codex/skills` remains read-only reconciliation input and user-global Personal
-  skills remain under `~/.codex/skills`.
-- Hardened generated, destination, backup, restore, and symlink path containment.
-- Scoped duplicate-trigger diagnostics to one consuming runtime so intentional
-  cross-target skill projections are not reported as conflicts.
-
-## 0.1.21 - 2026-07-03
-
-### Added
 
 - Added a working `metactl help --all` command that lists hidden advanced commands.
 - Added `verify` as an alias for `validate`.
@@ -68,6 +58,21 @@
 
 ### Changed
 
+- Separate fleet command ownership, library discovery, and instruction formatting
+  into focused internal modules without changing command behavior. Enforce the
+  existing architecture limits in CI and budget the extracted modules.
+
+- Fail skill compilation when a declared package companion is missing instead of synthesizing placeholder content.
+- Prune only outputs owned by the previous target compile manifest, retaining unmanaged neighboring files and removing empty managed directories.
+- Aligned the target capability schema with the existing `import_stub` mode and
+  `import_stub_path` compile-target field.
+- Codex repo-local skills now write canonically to `.agents/skills`; legacy
+  `.codex/skills` remains read-only reconciliation input and user-global Personal
+  skills remain under `~/.codex/skills`.
+- Hardened generated, destination, backup, restore, and symlink path containment.
+- Scoped duplicate-trigger diagnostics to one consuming runtime so intentional
+  cross-target skill projections are not reported as conflicts.
+
 - Reduced the default top-level CLI help to the daily porcelain commands while preserving existing advanced commands for scripts and expert workflows.
 - Rewrote the README onboarding path around the individual developer workflow: define agent instructions once, review generated files, and work across supported coding agents.
 - Promoted Cursor and Gemini CLI support-matrix entries from Tier 2 preview to Tier 1 conformance-covered.
@@ -76,11 +81,9 @@
 
 ### Documented
 
-- Added a private spec slice for per-pack managed blocks in brownfield documents.
 - Documented the CLI porcelain consolidation proposal and measured warm-checkout time-to-value evidence.
 
 ### Not Included
 
 - No runtime implementation of per-pack managed blocks.
 - No proprietary-runtime end-to-end execution inside Cursor, Gemini CLI, or OpenCode.
-- No publishing, Git tag, or GitHub release action.
