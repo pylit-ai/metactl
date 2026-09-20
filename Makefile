@@ -16,6 +16,15 @@ validate-contracts: $(VALIDATE_STAMP)
 
 metactl-validate-contracts: validate-contracts
 
+.PHONY: metactl-skill-discovery-test metactl-skill-discovery-benchmark
+metactl-skill-discovery-test:
+	$(CARGO) build -p metactl
+	$(PYTHON) -m unittest discover -s tests -p test_skill_discovery_host.py -v
+
+metactl-skill-discovery-benchmark:
+	$(CARGO) build -p metactl
+	$(PYTHON) scripts/benchmark_skill_discovery.py --repeats 3 --distractors 200
+
 metactl-test:
 	$(CARGO) test -p metactl
 

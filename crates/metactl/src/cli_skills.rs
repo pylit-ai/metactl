@@ -10,8 +10,65 @@ pub(super) fn cmd_skills(
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
         SkillsCommand::Audit(audit_args) => cmd_skills_audit(cli, audit_args),
         SkillsCommand::Route(route_args) => cmd_skills_route(cli, route_args),
+        SkillsCommand::Catalog | SkillsCommand::Discover(_) | SkillsCommand::Load(_) => {
+            cmd_skill_discovery(cli, &args.command)
+        }
         SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
     }
+}
+
+fn cmd_skill_discovery(
+    cli: &Cli,
+    command: &SkillsCommand,
+) -> std::result::Result<CommandOutput, CliError> {
+    let root = project_root(cli).map_err(internal_error)?;
+    let context = load_required_context(cli, &root)?;
+    let config = context
+        .effective_config(&ConfigOverrides::default())
+        .map_err(state_error)?;
+    let registry = context
+        .registry
+        .as_ref()
+        .ok_or_else(|| CliError::new(EXIT_STATE, "No configured library"))?;
+    let value = match command {
+        SkillsCommand::Catalog => serde_json::to_value(
+            registry
+                .skill_catalog(&config, context.overlay.as_ref())
+                .map_err(state_error)?,
+        ),
+        SkillsCommand::Discover(args) => {
+            use std::io::Read;
+            let mut query = args.query.clone().unwrap_or_default();
+            if args.query_stdin {
+                std::io::stdin()
+                    .take(8193)
+                    .read_to_string(&mut query)
+                    .map_err(internal_error)?;
+            }
+            serde_json::to_value(
+                registry
+                    .discover_skills(
+                        &config,
+                        context.overlay.as_ref(),
+                        &query,
+                        args.limit,
+                        &args.excluded.iter().cloned().collect(),
+                    )
+                    .map_err(state_error)?,
+            )
+        }
+        SkillsCommand::Load(args) => serde_json::to_value(
+            registry
+                .load_discovered_skill(&config, context.overlay.as_ref(), &args.id, &args.digest)
+                .map_err(state_error)?,
+        ),
+        _ => unreachable!(),
+    }
+    .map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: serde_json::to_string_pretty(&value).map_err(internal_error)?,
+        json: success_json("skills", Some(&root), json!({"result":value})),
+    })
 }
 
 fn cmd_skills_route(

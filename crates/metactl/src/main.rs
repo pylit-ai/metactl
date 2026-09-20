@@ -848,6 +848,12 @@ enum SkillsCommand {
     Audit(SkillsAuditArgs),
     /// Explain a read-only route from a task description to declared skill resources
     Route(SkillsRouteArgs),
+    /// List eligible plain-instruction metadata for an external discovery host (read-only)
+    Catalog,
+    /// Find eligible plain-instruction skills without model access (read-only)
+    Discover(SkillsDiscoverArgs),
+    /// Read original eligible instructions after checking their package digest
+    Load(SkillsLoadArgs),
     /// Save an Auto-mode surface decision in machine-local project configuration
     Select(SkillsSelectArgs),
 }
@@ -1112,6 +1118,30 @@ struct SkillsRouteArgs {
     /// Maximum candidate skills to return
     #[arg(long, short = 'n', default_value_t = 10)]
     limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsDiscoverArgs {
+    #[arg(
+        required_unless_present = "query_stdin",
+        conflicts_with = "query_stdin"
+    )]
+    query: Option<String>,
+    /// Read private query text from stdin instead of process arguments
+    #[arg(long)]
+    query_stdin: bool,
+    /// Host-owned disabled IDs/names, applied before result truncation
+    #[arg(long = "exclude")]
+    excluded: Vec<String>,
+    #[arg(long, default_value_t = 5)]
+    limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsLoadArgs {
+    id: String,
+    #[arg(long)]
+    digest: String,
 }
 
 #[derive(Debug, Args)]
@@ -2056,6 +2086,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::Remove(_) => Some("skills remove"),
             SkillsCommand::Audit(_) => Some("skills audit"),
             SkillsCommand::Route(_) => None,
+            SkillsCommand::Catalog | SkillsCommand::Discover(_) | SkillsCommand::Load(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {
