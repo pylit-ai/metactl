@@ -10,8 +10,128 @@ pub(super) fn cmd_skills(
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
         SkillsCommand::Audit(audit_args) => cmd_skills_audit(cli, audit_args),
         SkillsCommand::Route(route_args) => cmd_skills_route(cli, route_args),
+        SkillsCommand::Catalog | SkillsCommand::Discover(_) | SkillsCommand::Load(_) => {
+            cmd_skill_discovery(cli, &args.command)
+        }
         SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
+        SkillsCommand::Host(_) => unreachable!("host has a dedicated stdio entrypoint"),
     }
+}
+
+pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
+    if cli.quiet && !(args.status || args.check || args.client_config) {
+        eprintln!("--quiet is incompatible with MCP protocol mode.");
+        return ExitCode::FAILURE;
+    }
+    fn launch(cli: &Cli, args: &SkillsHostArgs) -> anyhow::Result<std::process::ExitStatus> {
+        use std::io::Write;
+        let mut script = tempfile::Builder::new().suffix(".py").tempfile()?;
+        script.write_all(include_bytes!("../assets/skill_discovery_host.py"))?;
+        script.flush()?;
+        let mut command = std::process::Command::new(&args.python);
+        command
+            .arg(script.path())
+            .arg("--metactl")
+            .arg(std::env::current_exe()?)
+            .arg("--project")
+            .arg(project_root(cli)?)
+            .arg("--ranker")
+            .arg(&args.ranker)
+            .arg("--max-provider-calls")
+            .arg(args.max_provider_calls.to_string())
+            .arg("--provider-deadline")
+            .arg(args.provider_deadline.to_string());
+        for (enabled, flag) in [
+            (args.status, "--status"),
+            (args.check, "--check"),
+            (args.client_config, "--client-config"),
+            (args.allow_provider_data, "--allow-provider-data"),
+        ] {
+            if enabled {
+                command.arg(flag);
+            }
+        }
+        for excluded in &args.exclude_skill {
+            command.arg("--exclude-skill").arg(excluded);
+        }
+        if cli.no_profile {
+            command.arg("--no-profile");
+        }
+        if let Some(profile) = &cli.profile {
+            command.arg("--profile").arg(profile);
+        }
+        if let Some(config) = &cli.config {
+            command.arg("--config").arg(config);
+        }
+        if let Some(overlay) = &cli.overlay {
+            command.arg("--overlay").arg(overlay);
+        }
+        if cli.quiet {
+            command.stdout(std::process::Stdio::null());
+        }
+        command.status().map_err(Into::into)
+    }
+    match launch(cli, args) {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(_) => {
+            eprintln!("Discovery host could not start. Install Python 3.10+ on PATH and check the project path. No provider request was confirmed.");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cmd_skill_discovery(
+    cli: &Cli,
+    command: &SkillsCommand,
+) -> std::result::Result<CommandOutput, CliError> {
+    let root = project_root(cli).map_err(internal_error)?;
+    let context = load_required_context(cli, &root)?;
+    let config = context
+        .effective_config(&ConfigOverrides::default())
+        .map_err(state_error)?;
+    let registry = context
+        .registry
+        .as_ref()
+        .ok_or_else(|| CliError::new(EXIT_STATE, "No configured library"))?;
+    let value = match command {
+        SkillsCommand::Catalog => serde_json::to_value(
+            registry
+                .skill_catalog(&config, context.overlay.as_ref())
+                .map_err(state_error)?,
+        ),
+        SkillsCommand::Discover(args) => {
+            use std::io::Read;
+            let mut query = args.query.clone().unwrap_or_default();
+            if args.query_stdin {
+                std::io::stdin()
+                    .take(8193)
+                    .read_to_string(&mut query)
+                    .map_err(internal_error)?;
+            }
+            serde_json::to_value(
+                registry
+                    .discover_skills(
+                        &config,
+                        context.overlay.as_ref(),
+                        &query,
+                        args.limit,
+                        &args.excluded.iter().cloned().collect(),
+                    )
+                    .map_err(state_error)?,
+            )
+        }
+        SkillsCommand::Load(args) => serde_json::to_value(
+            registry
+                .load_discovered_skill(&config, context.overlay.as_ref(), &args.id, &args.digest)
+                .map_err(state_error)?,
+        ),
+        _ => unreachable!(),
+    }
+    .map_err(internal_error)?;
+    Ok(CommandOutput {
+        human: serde_json::to_string_pretty(&value).map_err(internal_error)?,
+        json: success_json("skills", Some(&root), json!({"result":value})),
+    })
 }
 
 fn cmd_skills_route(

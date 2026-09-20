@@ -848,8 +848,43 @@ enum SkillsCommand {
     Audit(SkillsAuditArgs),
     /// Explain a read-only route from a task description to declared skill resources
     Route(SkillsRouteArgs),
+    /// List eligible plain-instruction metadata for an external discovery host (read-only)
+    Catalog,
+    /// Find eligible plain-instruction skills without model access (read-only)
+    Discover(SkillsDiscoverArgs),
+    /// Read original eligible instructions after checking their package digest
+    Load(SkillsLoadArgs),
+    /// Packaged optional discovery host (Python 3.10+); status and live verification
+    Host(SkillsHostArgs),
     /// Save an Auto-mode surface decision in machine-local project configuration
     Select(SkillsSelectArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsHostArgs {
+    /// Python 3.10+ executable; useful where system python3 is older
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    /// Offline readiness report; never contacts the provider
+    #[arg(long, conflicts_with_all = ["check", "client_config"])]
+    status: bool,
+    /// One synthetic request; nonzero unless Jev answers validly
+    #[arg(long, conflicts_with = "client_config")]
+    check: bool,
+    /// Print a no-secret MCP registration snippet without installing it
+    #[arg(long)]
+    client_config: bool,
+    #[arg(long, default_value = "deterministic", value_parser = ["deterministic", "jev"], env = "METACTL_SKILL_RANKER")]
+    ranker: String,
+    #[arg(long, env = "METACTL_JEV_ALLOW_DATA")]
+    allow_provider_data: bool,
+    /// Per-process request ceiling, including failures; not a dollar quota
+    #[arg(long, default_value_t = 0, env = "METACTL_JEV_MAX_CALLS")]
+    max_provider_calls: u32,
+    #[arg(long, default_value_t = 1.5)]
+    provider_deadline: f64,
+    #[arg(long)]
+    exclude_skill: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1112,6 +1147,30 @@ struct SkillsRouteArgs {
     /// Maximum candidate skills to return
     #[arg(long, short = 'n', default_value_t = 10)]
     limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsDiscoverArgs {
+    #[arg(
+        required_unless_present = "query_stdin",
+        conflicts_with = "query_stdin"
+    )]
+    query: Option<String>,
+    /// Read private query text from stdin instead of process arguments
+    #[arg(long)]
+    query_stdin: bool,
+    /// Host-owned disabled IDs/names, applied before result truncation
+    #[arg(long = "exclude")]
+    excluded: Vec<String>,
+    #[arg(long, default_value_t = 5)]
+    limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsLoadArgs {
+    id: String,
+    #[arg(long)]
+    digest: String,
 }
 
 #[derive(Debug, Args)]
@@ -1876,6 +1935,12 @@ fn main() -> ExitCode {
         }
         Err(error) => error.exit(),
     };
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Host(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_host(&cli, args);
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
@@ -2056,6 +2121,10 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::Remove(_) => Some("skills remove"),
             SkillsCommand::Audit(_) => Some("skills audit"),
             SkillsCommand::Route(_) => None,
+            SkillsCommand::Catalog
+            | SkillsCommand::Discover(_)
+            | SkillsCommand::Load(_)
+            | SkillsCommand::Host(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {

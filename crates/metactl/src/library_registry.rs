@@ -50,6 +50,8 @@ mod library_hooks;
 mod library_instruction;
 #[path = "library_validation.rs"]
 mod library_validation;
+#[path = "skill_discovery.rs"]
+pub mod skill_discovery;
 
 use library_frontmatter::{render_frontmatter, wrap_with_frontmatter};
 use library_hooks::{

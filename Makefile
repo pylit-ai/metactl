@@ -16,6 +16,15 @@ validate-contracts: $(VALIDATE_STAMP)
 
 metactl-validate-contracts: validate-contracts
 
+.PHONY: metactl-skill-discovery-test metactl-skill-discovery-benchmark
+metactl-skill-discovery-test:
+	$(CARGO) build -p metactl
+	$(PYTHON) -m unittest discover -s tests -p test_skill_discovery_host.py -v
+
+metactl-skill-discovery-benchmark:
+	$(CARGO) build -p metactl
+	$(PYTHON) scripts/benchmark_skill_discovery.py --repeats 3 --distractors 200
+
 metactl-test:
 	$(CARGO) test -p metactl
 
@@ -104,7 +113,7 @@ verify-release-consumers:
 	bash scripts/test_verify_github_attestation.sh
 	npm --prefix packaging/npm test --ignore-scripts
 
-verify-v1-release-gate: verify-architecture-metrics verify-release-consumers metactl-surface-benchmark $(VALIDATE_STAMP)
+verify-v1-release-gate: verify-architecture-metrics verify-release-consumers metactl-surface-benchmark metactl-skill-discovery-test $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/verify_v1_release_gate.py
 
 verify-v1-lightweight-control-plane: $(VALIDATE_STAMP)
