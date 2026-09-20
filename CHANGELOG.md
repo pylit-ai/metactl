@@ -21,6 +21,9 @@
 
 ### Fixed
 
+- Avoid a broken-pipe false failure when dogfood checks inspect large source
+  inventories under shell pipefail.
+
 - Preserve UTF-8 character boundaries when shortening inline instruction snippets,
   preventing compilation panics for long multilingual text while retaining the
   200-byte summary limit.
