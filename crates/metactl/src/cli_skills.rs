@@ -28,7 +28,7 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
         let mut script = tempfile::Builder::new().suffix(".py").tempfile()?;
         script.write_all(include_bytes!("../assets/skill_discovery_host.py"))?;
         script.flush()?;
-        let mut command = std::process::Command::new("python3");
+        let mut command = std::process::Command::new(&args.python);
         command
             .arg(script.path())
             .arg("--metactl")

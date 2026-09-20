@@ -862,6 +862,9 @@ enum SkillsCommand {
 
 #[derive(Debug, Args)]
 struct SkillsHostArgs {
+    /// Python 3.10+ executable; useful where system python3 is older
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
     /// Offline readiness report; never contacts the provider
     #[arg(long, conflicts_with_all = ["check", "client_config"])]
     status: bool,

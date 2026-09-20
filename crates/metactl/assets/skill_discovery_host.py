@@ -293,7 +293,7 @@ def main():
             cli_args.extend(["--" + key, os.path.abspath(value) if key in ("config", "overlay") else value])
     host = Host(args.metactl, os.path.realpath(args.project), ranker, args.exclude_skill, cli_args=cli_args)
     if args.client_config:
-        command_args = ["--project", host.project, *cli_args, "skills", "host", "--ranker", args.ranker,
+        command_args = ["--project", host.project, *cli_args, "skills", "host", "--python", sys.executable, "--ranker", args.ranker,
                         "--max-provider-calls", str(args.max_provider_calls),
                         "--provider-deadline", str(args.provider_deadline)]
         if args.allow_provider_data:
@@ -344,6 +344,7 @@ def readiness(ranker):
             "reason": reason, "key_present": bool(ranker.key), "data_authorized": ranker.allow_data,
             "remaining_calls": ranker.remaining, "model": MODEL, "deadline_seconds": ranker.deadline,
             "budget_scope": "process", "native_catalog_suppressed": False,
+            "python_executable": sys.executable, "python_version": sys.version.split()[0],
             "next": "Use --check for one synthetic request; inspect real discover_skills metrics for actual use."}
 
 

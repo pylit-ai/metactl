@@ -46,6 +46,11 @@ The host is embedded in both crate and binary distributions. Install Python 3.10
 on PATH; no SDK or repository checkout is required. Existing direct-script usage
 below remains supported for developers.
 
+If system `python3` is older (common on macOS), select an existing compatible
+interpreter with `skills host --python /path/to/python3.12` or
+`METACTL_DISCOVERY_PYTHON`. Status reports its version/path and generated client
+configuration pins that interpreter. MetaCTL does not install Python automatically.
+
 1. In a configured project, run `metactl skills host --status`. This reads local
    readiness only. First use may materialize the bundled library cache; it does
    not send provider data or change native skill roots.

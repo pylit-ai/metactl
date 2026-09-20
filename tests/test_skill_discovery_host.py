@@ -230,6 +230,7 @@ class CliTests(unittest.TestCase):
         config = json.loads(result.stdout)["mcpServers"]["metactl-skills"]
         self.assertEqual(config["command"], str(BINARY))
         self.assertIn("--no-profile", config["args"])
+        self.assertIn("--python", config["args"])
         wire = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n"
         result = subprocess.run(command, env=env, input=wire, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
