@@ -113,7 +113,7 @@ verify-release-consumers:
 	bash scripts/test_verify_github_attestation.sh
 	npm --prefix packaging/npm test --ignore-scripts
 
-verify-v1-release-gate: verify-architecture-metrics verify-release-consumers metactl-surface-benchmark $(VALIDATE_STAMP)
+verify-v1-release-gate: verify-architecture-metrics verify-release-consumers metactl-surface-benchmark metactl-skill-discovery-test $(VALIDATE_STAMP)
 	$(VALIDATE_PYTHON) scripts/verify_v1_release_gate.py
 
 verify-v1-lightweight-control-plane: $(VALIDATE_STAMP)

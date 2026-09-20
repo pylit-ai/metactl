@@ -14,6 +14,69 @@ pub(super) fn cmd_skills(
             cmd_skill_discovery(cli, &args.command)
         }
         SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
+        SkillsCommand::Host(_) => unreachable!("host has a dedicated stdio entrypoint"),
+    }
+}
+
+pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
+    if cli.quiet && !(args.status || args.check || args.client_config) {
+        eprintln!("--quiet is incompatible with MCP protocol mode.");
+        return ExitCode::FAILURE;
+    }
+    fn launch(cli: &Cli, args: &SkillsHostArgs) -> anyhow::Result<std::process::ExitStatus> {
+        use std::io::Write;
+        let mut script = tempfile::Builder::new().suffix(".py").tempfile()?;
+        script.write_all(include_bytes!("../assets/skill_discovery_host.py"))?;
+        script.flush()?;
+        let mut command = std::process::Command::new("python3");
+        command
+            .arg(script.path())
+            .arg("--metactl")
+            .arg(std::env::current_exe()?)
+            .arg("--project")
+            .arg(project_root(cli)?)
+            .arg("--ranker")
+            .arg(&args.ranker)
+            .arg("--max-provider-calls")
+            .arg(args.max_provider_calls.to_string())
+            .arg("--provider-deadline")
+            .arg(args.provider_deadline.to_string());
+        for (enabled, flag) in [
+            (args.status, "--status"),
+            (args.check, "--check"),
+            (args.client_config, "--client-config"),
+            (args.allow_provider_data, "--allow-provider-data"),
+        ] {
+            if enabled {
+                command.arg(flag);
+            }
+        }
+        for excluded in &args.exclude_skill {
+            command.arg("--exclude-skill").arg(excluded);
+        }
+        if cli.no_profile {
+            command.arg("--no-profile");
+        }
+        if let Some(profile) = &cli.profile {
+            command.arg("--profile").arg(profile);
+        }
+        if let Some(config) = &cli.config {
+            command.arg("--config").arg(config);
+        }
+        if let Some(overlay) = &cli.overlay {
+            command.arg("--overlay").arg(overlay);
+        }
+        if cli.quiet {
+            command.stdout(std::process::Stdio::null());
+        }
+        command.status().map_err(Into::into)
+    }
+    match launch(cli, args) {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(_) => {
+            eprintln!("Discovery host could not start. Install Python 3.10+ on PATH and check the project path. No provider request was confirmed.");
+            ExitCode::FAILURE
+        }
     }
 }
 

@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current crate version: `0.1.21`
+Current crate version: `0.1.22`
 
 `metactl` lets an individual developer define agent instructions once, review the generated files, and work across supported coding agents without hand-copying prompt state.
 
@@ -59,7 +59,7 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Prebuilt release | `cargo binstall metactl` | Fast, verified native install on Linux x86_64 or Apple Silicon. |
 | Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
 | npm shim (unpublished) | See [`packaging/npm`](packaging/npm) | Installer scaffold; the npm package is not yet published. |
-| crates.io | `cargo install metactl --version 0.1.21 --locked` | Portable source build. |
+| crates.io | `cargo install metactl --version 0.1.22 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 
 All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Action also verifies GitHub build provenance when the runner provides a compatible GitHub CLI. The npm shim emits an explicit warning and supports [manual provenance verification](docs/user/install-verification.md). `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
@@ -69,9 +69,9 @@ All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Ac
 Install the CLI from crates.io:
 
 ```bash
-cargo install metactl --version 0.1.21 --locked
+cargo install metactl --version 0.1.22 --locked
 metactl version
-# metactl 0.1.21 (metactl/v2alpha1)
+# metactl 0.1.22 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -128,7 +128,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.21 (metactl/v2alpha1)
+# metactl 0.1.22 (metactl/v2alpha1)
 ```
 
 </details>
@@ -139,14 +139,40 @@ metactl version
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
 
 ```bash
-cargo install metactld --version 0.1.21 --locked
+cargo install metactld --version 0.1.22 --locked
 metactld --version
-# metactld 0.1.21
+# metactld 0.1.22
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
 
 </details>
+
+## Optional skill discovery and Jev
+
+Discover specialist instructions on demand without requiring a model provider.
+The packaged host requires Python 3.10+ on PATH; no source checkout or Python
+package installation is needed:
+
+```bash
+metactl --project /path/to/project skills host --status
+metactl --project /path/to/project skills host --client-config
+```
+
+The second command prints a no-secret MCP registration snippet; review it and
+register it in your coding client. It does not modify the client automatically.
+Jev is **optional and off by default**. Follow the [activation and verification
+guide](docs/user/skill-discovery.md#install-enable-and-prove-jev-is-active) for
+secret injection, data consent, bounded requests, status, live checks and rollback.
+
+In a frozen 12-query, 208-descriptor development fixture, deterministic discovery
+found **75% versus 35%** of relevant skills in the first five results. Median
+lookup latency increased from **59.4 to 126.2 ms**. The synthetic metadata
+interface fell from **32,002 to 1,051 bytes**, but this is not proof of actual
+agent prompt-token savings. These are **not Jev results**: no provider was used.
+Task success, total session speed and cost savings remain unmeasured. See the
+[raw benchmark and limitations](reports/skill-discovery-development-benchmark.md).
+Keep the interface opt-in; native skill catalogs are not automatically hidden.
 
 ## Daily Workflow
 
@@ -639,7 +665,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.21` for both `metactl` and `metactld`.
+Current public crate version: `0.1.22` for both `metactl` and `metactld`.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 

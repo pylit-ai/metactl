@@ -48,4 +48,7 @@ docker exec "$CONTAINER" bash -lc \
 docker exec "$CONTAINER" bash -lc \
   'export PATH=/usr/local/cargo/bin:$PATH; mkdir -p /sandbox/bad-target && cd /sandbox/bad-target && ! metactl init -t made-up-target --no-input >/tmp/bad-target.out 2>&1'
 
+docker exec "$CONTAINER" bash -lc \
+  'export PATH=/usr/local/cargo/bin:$PATH; cd /sandbox/use-pack && metactl skills host --status | python3 -c '\''import json,sys; d=json.load(sys.stdin); assert d["project_ready"] and not d["provider_verified"]'\'' && metactl skills host --client-config | python3 -m json.tool >/dev/null && ! metactl skills host --ranker jev --allow-provider-data --max-provider-calls 1 --check >/tmp/jev-check.json'
+
 echo "smoke-packaged-metactl: OK"

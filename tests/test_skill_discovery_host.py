@@ -86,6 +86,24 @@ def response(choice="b" * 64):
 
 
 class RankerTests(unittest.TestCase):
+    def test_embedded_host_matches_canonical_source(self):
+        self.assertEqual((ROOT / "scripts/skill_discovery_host.py").read_bytes(),
+                         (ROOT / "crates/metactl/assets/skill_discovery_host.py").read_bytes())
+
+    def test_status_is_not_provider_proof(self):
+        ranker = host.Ranker(True, True, 1, key="not-a-real-key", sender=lambda *a: self.fail("network"))
+        state = host.readiness(ranker)
+        self.assertTrue(state["provider_ready"])
+        self.assertFalse(state["provider_verified"])
+        self.assertNotIn("not-a-real-key", json.dumps(state))
+        self.assertFalse(host.readiness(host.Ranker())["provider_ready"])
+
+    def test_synthetic_check_validates_provider_and_preserves_fallback(self):
+        ranker = host.Ranker(True, True, 1, key="not-a-real-key", sender=lambda *a: response())
+        self.assertTrue(host.check_provider(ranker)["provider_verified"])
+        self.assertFalse(host.check_provider(ranker)["provider_verified"])
+        self.assertFalse(host.check_provider(host.Ranker())["provider_verified"])
+
     def test_caller_deadline_does_not_depend_on_communicate_timeout(self):
         real_popen = subprocess.Popen
         def stalled_worker(argv, **kwargs):
@@ -196,6 +214,47 @@ class RankerTests(unittest.TestCase):
 
 @unittest.skipUnless(BINARY.exists(), "build CLI before running end-user-path tests")
 class CliTests(unittest.TestCase):
+    def test_packaged_host_status_config_and_fail_closed_check(self):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("METACTL_") and k != "TYPESAFE_API_KEY"}
+        env["XDG_CONFIG_HOME"] = str(self.fx.root / "config")
+        command = [str(BINARY), "--project", str(self.fx.project), "--no-profile", "skills", "host"]
+        result = subprocess.run(command + ["--status"], env=env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads(result.stdout)
+        self.assertTrue(state["project_ready"])
+        self.assertFalse(state["provider_verified"])
+        result = subprocess.run(command + ["--check", "--ranker", "jev", "--allow-provider-data", "--max-provider-calls", "1"], env=env, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 1)
+        self.assertFalse(json.loads(result.stdout)["provider_verified"])
+        result = subprocess.run(command + ["--client-config"], env=env, capture_output=True, text=True, timeout=20)
+        config = json.loads(result.stdout)["mcpServers"]["metactl-skills"]
+        self.assertEqual(config["command"], str(BINARY))
+        self.assertIn("--no-profile", config["args"])
+        wire = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n"
+        result = subprocess.run(command, env=env, input=wire, capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(result.stdout.splitlines()), 1)
+        self.assertEqual(json.loads(result.stdout)["result"]["serverInfo"]["name"], "metactl-skill-discovery")
+
+    def test_packaged_registration_paths_exclusions_and_quiet(self):
+        self.fx.add("excluded", "A hidden specialist")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("METACTL_") and k != "TYPESAFE_API_KEY"}
+        env["XDG_CONFIG_HOME"] = str(self.fx.root / "config")
+        command = [str(BINARY), "--project", str(self.fx.project), "--no-profile", "--config", "metactl.yaml", "skills", "host"]
+        result = subprocess.run(command + ["--client-config"], cwd=self.fx.project, env=env, capture_output=True, text=True)
+        config = json.loads(result.stdout)["mcpServers"]["metactl-skills"]
+        emitted_path = Path(config["args"][config["args"].index("--config") + 1])
+        self.assertTrue(emitted_path.is_absolute())
+        self.assertEqual(emitted_path.resolve(), (self.fx.project / "metactl.yaml").resolve())
+        replay = [config["command"], *config["args"], "--exclude-skill", "excluded", "--status"]
+        result = subprocess.run(replay, cwd=self.fx.root, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["eligible_skills"], 0)
+        result = subprocess.run(replay + ["--quiet"], cwd=self.fx.root, env=env, capture_output=True, text=True)
+        self.assertEqual((result.returncode, result.stdout), (0, ""))
+        result = subprocess.run([config["command"], *config["args"], "--quiet"], cwd=self.fx.root, env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+
     def test_core_only_projection_keeps_specialists_discoverable(self):
         self.fx.add("specialist-sentinel", "reconnect failures")
         source = ROOT / "library/starter/packs"

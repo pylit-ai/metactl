@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.1.22 - 2026-09-20
+
+### Added
+
+- Opt-in plain-instruction skill discovery with policy-aware catalog, search and
+  original-body loading. Native skills and default compilation remain unchanged.
+- Packaged `skills host` MCP entrypoint (Python 3.10+), offline `--status`, explicit
+  synthetic `--check` and no-secret `--client-config` activation guidance.
+- Optional, explicitly consented and request-bounded Jev reranking with deterministic
+  fallback; unavailable providers never become required for discovery.
+- Reproducible offline development benchmark and release-gated discovery tests.
+  Relevant-skill recall at five rose from 35% to 75% on 12 authored cases, while
+  median lookup increased from 59.4 to 126.2 ms. These are deterministic results,
+  not Jev performance or native token/session-cost savings.
+
+### Changed
+
+- Release archive metadata is normalized for reproducible packaging.
 
 ### Fixed
 

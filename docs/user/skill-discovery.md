@@ -39,7 +39,66 @@ whose native restrictions have not been mapped. Plain text retrieval is not nati
 activation and never grants tool permissions. Exact skill names can be searched;
 ambiguous same-name results retain their distinct IDs and source digests.
 
-## Optional Jev
+## Install, enable and prove Jev is active
+
+Install the released CLI using the [README installation choices](../../README.md#install).
+The host is embedded in both crate and binary distributions. Install Python 3.10+
+on PATH; no SDK or repository checkout is required. Existing direct-script usage
+below remains supported for developers.
+
+1. In a configured project, run `metactl skills host --status`. This reads local
+   readiness only. First use may materialize the bundled library cache; it does
+   not send provider data or change native skill roots.
+2. Make `TYPESAFE_API_KEY` available through your approved runtime secret injector.
+   Do not paste keys into commands, client configuration, transcripts or repos.
+   A secret-manager reference resolving successfully is not API verification.
+3. Explicitly choose data consent and a per-process request ceiling:
+
+   ```sh
+   metactl --project /path/to/project skills host --ranker jev \
+     --allow-provider-data --max-provider-calls 20 --status
+   metactl --project /path/to/project skills host --ranker jev \
+     --allow-provider-data --max-provider-calls 1 --check
+   ```
+
+   `--check` sends only a fixed synthetic example, not project content. Exit 0
+   requires a validated provider answer; missing key, disabled integration,
+   deadline or invalid response exits 1. A valid `none` answer proves availability,
+   not task quality. Status alone always reports `provider_verified: false`.
+4. Run the same enabled command with `--client-config` instead of `--status`.
+   Review the printed `mcpServers.metactl-skills` command/arguments and add them
+   through the client's supported MCP settings. The snippet contains no key.
+   Inject the key into the child process using the client's supported secret
+   environment mechanism. Restart that connection; an existing running child
+   will not pick up environment or binary changes automatically.
+5. Ask the client to call `discover_skills` for an ambiguous task with at least
+   two eligible results. Confirm its returned `metrics.provider_calls: 1`, the
+   pinned `metrics.model`, and non-null validated usage. `metrics.ranker: jev`
+   means accepted advisory ordering. `reason: abstained` means a valid provider
+   answer retained the baseline. Disabled, missing-credential, budget, deadline
+   and schema failures are explicit fallback—not evidence Jev was active.
+
+| Signal | What it proves |
+| --- | --- |
+| `configured_ranker: jev` | Operator selected the optional route |
+| `provider_ready: true` | Local prerequisites present, not API availability |
+| `--check` exit 0, `provider_verified: true` | One synthetic call passed now |
+| Real tool metrics with model, usage, one call | That actual discovery request reached a validated provider result |
+
+For managed environments, `METACTL_SKILL_RANKER=jev`,
+`METACTL_JEV_ALLOW_DATA=true`, and `METACTL_JEV_MAX_CALLS=20` configure the packaged
+CLI. Explicit flags override values. These variables are not secrets. A budget
+resets with each child process; this is not a shared daily or dollar limit.
+Use a properly admitted project gateway when organizational policy requires one;
+this direct-provider adapter does not implement that gateway's project auth.
+Never distribute a shared provider key merely to make remote checks pass.
+
+Rollback: remove the MCP registration or set `--ranker deterministic`, then
+restart the connection. Deterministic catalog/discover/load commands never use
+Jev, even when the host environment enables it. Enabling Jev does not make every
+MetaCTL command or conversational turn call a model.
+
+## Direct-script optional Jev
 
 Only after approving outbound task/description data and a provider request budget:
 
