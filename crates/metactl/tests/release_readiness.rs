@@ -752,11 +752,10 @@ fn target_native_pack_resources() {
             "release-manager",
             "release-policy",
             "codex-cli",
-            // Spec 019 plus Codex command support.
+            // Fresh Codex projects use skills, not unsupported command files.
             vec![
                 "AGENTS.md",
                 ".agents/skills/unit-test-loop/unit-test-loop/SKILL.md",
-                ".codex/commands/run-targeted-tests.md",
             ],
         ),
         (

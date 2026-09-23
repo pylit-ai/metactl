@@ -222,6 +222,14 @@ pub(crate) fn stage_outputs(
         });
     }
 
+    retain_installed_codex_commands(
+        project_root,
+        &stage_root,
+        target,
+        previous_manifest.as_ref(),
+        &mut outputs,
+    )?;
+
     let expected_paths = outputs
         .iter()
         .map(|output| output.path.clone())
@@ -252,6 +260,70 @@ pub(crate) fn stage_outputs(
     .with_context(|| format!("write {}", manifest_path.display()))?;
 
     Ok(manifest)
+}
+
+fn retain_installed_codex_commands(
+    project_root: &Path,
+    stage_root: &Path,
+    target: &Ref,
+    previous_manifest: Option<&CompileManifest>,
+    outputs: &mut Vec<GeneratedOutput>,
+) -> Result<()> {
+    if target.id != "codex-cli" {
+        return Ok(());
+    }
+    let Some(previous_manifest) = previous_manifest else {
+        return Ok(());
+    };
+    for previous in &previous_manifest.generated_outputs {
+        let Some(destination) = previous.destination_path.as_deref() else {
+            continue;
+        };
+        if !destination.starts_with(".codex/commands/")
+            || outputs.iter().any(|output| output.path == previous.path)
+        {
+            continue;
+        }
+        validate_relative_output_path("legacy Codex command destination", destination)?;
+        ensure_contained_regular_path(project_root, Path::new(destination), true)?;
+        if outputs
+            .iter()
+            .any(|output| output.destination_path.as_deref() == Some(destination))
+        {
+            return Err(anyhow!(
+                "legacy Codex command destination collides with a new output: {destination}"
+            ));
+        }
+        let installed = project_root.join(destination);
+        match fs::symlink_metadata(&installed) {
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err).with_context(|| format!("stat {}", installed.display())),
+            Ok(metadata) if !metadata.is_file() && !metadata.file_type().is_symlink() => {
+                return Err(anyhow!(
+                    "legacy Codex command destination is not a file or symlink: {}",
+                    installed.display()
+                ));
+            }
+            Ok(_) => {}
+        }
+        let staged = safe_staged_output_path(project_root, stage_root, &previous.path)?;
+        ensure_contained_regular_path(project_root, Path::new(&previous.path), false)?;
+        let staged_digest = sha256_path(&staged)
+            .with_context(|| format!("verify retained Codex command {}", staged.display()))?;
+        if previous.digest.as_deref() != Some(staged_digest.as_str()) {
+            return Err(anyhow!(
+                "retained Codex command staged bytes changed: {}; preserve and reconcile before recompiling",
+                staged.display()
+            ));
+        }
+        let mut retained = previous.clone();
+        let reason = "unsupported_codex_command_retained_for_compatibility";
+        if !retained.degradation_codes.iter().any(|code| code == reason) {
+            retained.degradation_codes.push(reason.to_string());
+        }
+        outputs.push(retained);
+    }
+    Ok(())
 }
 
 fn load_compile_manifest_if_present(path: &Path) -> Result<Option<CompileManifest>> {
@@ -406,14 +478,34 @@ fn build_apply_review_plan_from_staging(
         };
         let staged_digest = digest_if_regular(&staging_root.join(&output.path), false)?;
         let destination_exists = destination_abs.exists();
-        let (classification, reason_code, consequence, approval_required) = classify_review_action(
-            destination_is_managed,
-            destination_exists,
-            before_digest.as_deref(),
-            legacy_digest.as_deref(),
-            staged_digest.as_deref(),
-            legacy_path.is_some(),
-        );
+        let (classification, reason_code, consequence, approval_required) =
+            if retained_codex_command(output) {
+                if destination_exists {
+                    (
+                        "retained_legacy_noop",
+                        "unsupported_codex_command_preserved",
+                        "Preserve installed command bytes without rewriting them; Codex does not invoke this file.",
+                        false,
+                    )
+                } else {
+                    (
+                        "content_conflict",
+                        "retained_command_disappeared",
+                        "Installed command vanished after compilation; recompile before apply.",
+                        true,
+                    )
+                }
+            } else {
+                classify_review_action(
+                    destination_is_managed,
+                    destination_exists,
+                    before_digest.as_deref(),
+                    legacy_digest.as_deref(),
+                    staged_digest.as_deref(),
+                    legacy_path.is_some(),
+                    apply_mode,
+                )
+            };
         actions.push(ApplyReviewAction {
             destination_path: destination.to_string(),
             staged_path: output.path.clone(),
@@ -492,6 +584,7 @@ fn classify_review_action<'a>(
     legacy_digest: Option<&str>,
     staged_digest: Option<&str>,
     has_legacy_path: bool,
+    apply_mode: &ApplyMode,
 ) -> (&'a str, &'a str, &'a str, bool) {
     if managed {
         return (
@@ -502,12 +595,23 @@ fn classify_review_action<'a>(
         );
     }
     if destination_exists {
+        if matches!(apply_mode, ApplyMode::Patch)
+            && before_digest.is_some()
+            && before_digest == staged_digest
+        {
+            return (
+                "canonical_matches_desired",
+                "exact_staged_match",
+                "Adopt the existing canonical bytes in patch mode; preserve any legacy bytes.",
+                false,
+            );
+        }
         if has_legacy_path && before_digest.is_some() && before_digest == legacy_digest {
             return (
-                "identical_duplicate",
-                "identical_cross_root_bytes",
-                "Preserve both roots; canonical bytes already exist.",
-                false,
+                "unmanaged_canonical",
+                "legacy_matches_canonical_but_not_adoptable",
+                "Canonical and legacy bytes match, but this apply mode cannot silently adopt the destination or the desired bytes differ.",
+                true,
             );
         }
         return (
@@ -1528,6 +1632,28 @@ fn plan_apply_from_staging(
             continue;
         }
 
+        if retained_codex_command(output) {
+            if path_identity(project_root, &destination_abs)? == "missing" {
+                plans.push(Err(conflict_json(
+                    destination_path,
+                    ReasonCode::ConflictDetected,
+                    "Retained Codex command disappeared after compilation; recompile before apply.",
+                )));
+                continue;
+            }
+            let state_output = managed.get(destination_path);
+            plans.push(Ok(PlannedAction {
+                output: output.clone(),
+                kind: ActionKind::Noop,
+                backup_path: state_output
+                    .and_then(|item| item.backup_path.as_ref())
+                    .map(|item| project_root.join(item)),
+                patch_marker: state_output.and_then(|item| item.patch_marker.clone()),
+                existed_before: state_output.map_or(true, |item| item.existed_before),
+            }));
+            continue;
+        }
+
         if let Some(state_output) = managed.get(destination_path) {
             let managed_instruction_marker =
                 managed_instruction_patch_marker(output, destination_path, state_output);
@@ -1805,6 +1931,13 @@ fn plan_apply_from_staging(
         }
     }
     Ok(plans)
+}
+
+fn retained_codex_command(output: &GeneratedOutput) -> bool {
+    output
+        .degradation_codes
+        .iter()
+        .any(|code| code == "unsupported_codex_command_retained_for_compatibility")
 }
 
 fn conflict_json(
@@ -2451,6 +2584,42 @@ mod tests {
     }
 
     #[test]
+    fn review_plan_does_not_confuse_legacy_equality_with_desired_equality() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let manifest = codex_skill_manifest(project.path());
+        let legacy = project.path().join(".codex/skills/demo/SKILL.md");
+        let canonical = project.path().join(".agents/skills/demo/SKILL.md");
+        fs::create_dir_all(legacy.parent().expect("legacy parent")).expect("legacy directory");
+        fs::create_dir_all(canonical.parent().expect("canonical parent"))
+            .expect("canonical directory");
+        let desired = fs::read(project.path().join(&manifest.generated_outputs[0].path))
+            .expect("staged skill");
+        fs::write(&legacy, &desired).expect("legacy skill");
+        fs::write(&canonical, &desired).expect("canonical skill");
+
+        let patch = build_apply_review_plan(project.path(), &manifest, &ApplyMode::Patch)
+            .expect("patch review plan");
+        assert_eq!(patch.actions[0].classification, "canonical_matches_desired");
+        assert!(!patch.actions[0].approval_required);
+
+        let copy = build_apply_review_plan(project.path(), &manifest, &ApplyMode::Copy)
+            .expect("copy review plan");
+        assert_eq!(copy.actions[0].classification, "unmanaged_canonical");
+        assert!(copy.actions[0].approval_required);
+
+        fs::write(&legacy, "customized legacy and canonical bytes").expect("legacy edit");
+        fs::write(&canonical, "customized legacy and canonical bytes").expect("canonical edit");
+        let divergent = build_apply_review_plan(project.path(), &manifest, &ApplyMode::Patch)
+            .expect("divergent review plan");
+        assert_eq!(divergent.actions[0].classification, "unmanaged_canonical");
+        assert!(divergent.actions[0].approval_required);
+        assert_eq!(
+            divergent.actions[0].reason_code,
+            "legacy_matches_canonical_but_not_adoptable"
+        );
+    }
+
+    #[test]
     fn review_plan_refuses_divergent_legacy_shadow() {
         let project = tempfile::tempdir().expect("tempdir");
         let manifest = codex_skill_manifest(project.path());
@@ -2666,6 +2835,128 @@ mod tests {
             assert!(
                 safe_staged_output_path(project.path(), &stage_root, unsafe_path).is_err(),
                 "unsafe prune path was accepted: {unsafe_path}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retired_codex_command_keeps_existing_symlink_readable() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let target = Ref {
+            kind: RefKind::Target,
+            id: "codex-cli".to_string(),
+            version: None,
+        };
+        let command = StagedOutputInput {
+            id: Some("ponytail".to_string()),
+            destination_path: ".codex/commands/ponytail.md".to_string(),
+            kind: GeneratedOutputKind::ResourceFile,
+            contents: b"# Legacy Ponytail command\n".to_vec(),
+            instruction_mode: None,
+            pack_ref: None,
+            surface_id: None,
+            surface_slug: None,
+            source_resource_paths: Vec::new(),
+            merge_status: None,
+            degradation_codes: Vec::new(),
+            ownership_token: None,
+            materialize_as_regular_file: false,
+        };
+        let params = |inputs| StageOutputsParams {
+            inputs,
+            surface_selection_mode: None,
+            surface_selection: Vec::new(),
+            apply_modes_supported: vec![ApplyMode::Symlink],
+            brownfield_mode: None,
+            degradations: Vec::new(),
+            durable: true,
+        };
+        let old = stage_outputs(project.path(), &target, params(vec![command]))
+            .expect("compile old target");
+        apply_manifest(project.path(), &old, &ApplyMode::Symlink).expect("install old command");
+        let installed = project.path().join(".codex/commands/ponytail.md");
+        assert!(installed.is_symlink());
+
+        let updated = stage_outputs(project.path(), &target, params(Vec::new()))
+            .expect("compile target without command support");
+        assert!(updated.pruned_outputs.is_empty());
+        assert_eq!(updated.generated_outputs.len(), 1);
+        assert!(updated.generated_outputs[0]
+            .degradation_codes
+            .iter()
+            .any(|code| code == "unsupported_codex_command_retained_for_compatibility"));
+        assert_eq!(
+            fs::read_to_string(&installed).expect("retained command is readable"),
+            "# Legacy Ponytail command\n"
+        );
+        apply_manifest(project.path(), &updated, &ApplyMode::Symlink)
+            .expect("reapply retained command without breaking link");
+        assert!(installed.is_symlink());
+
+        fs::remove_file(&installed).expect("retire test command link");
+        fs::remove_dir(project.path().join(".codex/commands"))
+            .expect("retire test command directory");
+        let retired = stage_outputs(project.path(), &target, params(Vec::new()))
+            .expect("compile after command directory removal");
+        assert!(retired.generated_outputs.is_empty());
+        assert_eq!(
+            retired.pruned_outputs,
+            vec![old.generated_outputs[0].path.clone()]
+        );
+    }
+
+    #[test]
+    fn retired_codex_command_never_overwrites_customized_copy() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let target = Ref {
+            kind: RefKind::Target,
+            id: "codex-cli".to_string(),
+            version: None,
+        };
+        let command = StagedOutputInput {
+            id: Some("ponytail".to_string()),
+            destination_path: ".codex/commands/ponytail.md".to_string(),
+            kind: GeneratedOutputKind::ResourceFile,
+            contents: b"# Legacy Ponytail command\n".to_vec(),
+            instruction_mode: None,
+            pack_ref: None,
+            surface_id: None,
+            surface_slug: None,
+            source_resource_paths: Vec::new(),
+            merge_status: None,
+            degradation_codes: Vec::new(),
+            ownership_token: None,
+            materialize_as_regular_file: false,
+        };
+        let params = |inputs| StageOutputsParams {
+            inputs,
+            surface_selection_mode: None,
+            surface_selection: Vec::new(),
+            apply_modes_supported: vec![ApplyMode::Copy],
+            brownfield_mode: None,
+            degradations: Vec::new(),
+            durable: true,
+        };
+        let old = stage_outputs(project.path(), &target, params(vec![command]))
+            .expect("compile old target");
+        apply_manifest(project.path(), &old, &ApplyMode::Copy).expect("install old command");
+        let installed = project.path().join(".codex/commands/ponytail.md");
+        fs::write(&installed, "# Customized command\n").expect("customize installed copy");
+
+        for _ in 0..2 {
+            let updated = stage_outputs(project.path(), &target, params(Vec::new()))
+                .expect("compile new target");
+            let retained = &updated.generated_outputs[0];
+            assert_eq!(retained.degradation_codes.len(), 1);
+            let review = build_apply_review_plan(project.path(), &updated, &ApplyMode::Copy)
+                .expect("review retired command");
+            assert_eq!(review.actions[0].classification, "retained_legacy_noop");
+            apply_manifest(project.path(), &updated, &ApplyMode::Copy)
+                .expect("apply must preserve customized command");
+            assert_eq!(
+                fs::read_to_string(&installed).expect("installed copy"),
+                "# Customized command\n"
             );
         }
     }

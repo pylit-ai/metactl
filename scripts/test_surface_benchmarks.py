@@ -66,7 +66,7 @@ class SurfaceBenchmarkEvidenceTests(unittest.TestCase):
             "auto_generated_surface_reduction": 1.0,
             "auto_skill_body_reduction": 1.0,
             "expected_pack_recall_at_3": 1.0,
-            "expected_command_availability": 1.0,
+            "expected_skill_availability": 1.0,
             "false_negative_count": int(self.route_result([])["false_negative"]),
         }
         verdict = benchmark.verdict(metrics, fixture["thresholds"])

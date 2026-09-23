@@ -2321,6 +2321,28 @@ fn codex_skill_entry_json(entry: &CodexSkillEntry) -> Value {
 fn codex_skill_visibility_json(project_root: &Path) -> Result<Value> {
     let repo_root = project_root.join(".agents").join("skills");
     let repo_entries = discover_codex_skill_entries(&repo_root)?;
+    let legacy_root = project_root.join(".codex").join("skills");
+    let legacy_entries = discover_codex_skill_entries(&legacy_root)?;
+    let mut repo_by_name: BTreeMap<&str, Vec<&CodexSkillEntry>> = BTreeMap::new();
+    for entry in &repo_entries {
+        repo_by_name.entry(&entry.name).or_default().push(entry);
+    }
+    let mut legacy_overlap_count = 0;
+    let mut legacy_identical_instruction_count = 0;
+    let mut legacy_ambiguous_canonical_count = 0;
+    let mut legacy_only_count = 0;
+    for legacy in &legacy_entries {
+        if let Some(canonical_matches) = repo_by_name.get(legacy.name.as_str()) {
+            legacy_overlap_count += 1;
+            if canonical_matches.len() != 1 {
+                legacy_ambiguous_canonical_count += 1;
+            } else if fs::read(&legacy.skill_md)? == fs::read(&canonical_matches[0].skill_md)? {
+                legacy_identical_instruction_count += 1;
+            }
+        } else {
+            legacy_only_count += 1;
+        }
+    }
     let user_root = codex_user_skill_root();
     let user_entries = match user_root.as_ref() {
         Some(root) => discover_codex_skill_entries(root)?,
@@ -2353,6 +2375,16 @@ fn codex_skill_visibility_json(project_root: &Path) -> Result<Value> {
         "target": "codex-cli",
         "repo_scope": "repo",
         "repo_root": repo_root.to_string_lossy(),
+        "legacy_repo_root": legacy_root.to_string_lossy(),
+        "legacy_repo_count": legacy_entries.len(),
+        "legacy_overlap_count": legacy_overlap_count,
+        "legacy_identical_instruction_count": legacy_identical_instruction_count,
+        "legacy_ambiguous_canonical_count": legacy_ambiguous_canonical_count,
+        "legacy_divergent_instruction_count": legacy_overlap_count - legacy_identical_instruction_count - legacy_ambiguous_canonical_count,
+        "legacy_only_count": legacy_only_count,
+        "host_discovery_verified": false,
+        "project_slash_commands_supported": false,
+        "legacy_project_command_root": project_root.join(".codex/commands").to_string_lossy(),
         "user_scope": "user",
         "user_root": user_root.as_ref().map(|root| root.to_string_lossy().to_string()),
         "repo_local_count": repo_entries.len(),
@@ -2381,6 +2413,21 @@ fn append_codex_skill_visibility_lines(lines: &mut Vec<String>, visibility: &Val
         "    user-global: {user_count} skill(s) under {}",
         visibility["user_root"].as_str().unwrap_or("HOME not set")
     ));
+    let legacy_count = visibility["legacy_repo_count"].as_u64().unwrap_or(0);
+    if legacy_count > 0 {
+        lines.push(format!(
+            "    legacy .codex/skills: {legacy_count} skill(s); {} same-name overlap(s), {} divergent instruction(s), {} ambiguous canonical match(es), {} legacy-only skill(s)",
+            visibility["legacy_overlap_count"].as_u64().unwrap_or(0),
+            visibility["legacy_divergent_instruction_count"]
+                .as_u64()
+                .unwrap_or(0),
+            visibility["legacy_ambiguous_canonical_count"]
+                .as_u64()
+                .unwrap_or(0),
+            visibility["legacy_only_count"].as_u64().unwrap_or(0)
+        ));
+        lines.push("    warning: files in both roots may crowd host skill discovery; inspect and preserve customized packages before reconciliation".to_string());
+    }
     if missing_count > 0 {
         let missing = visibility["missing_user_global"]
             .as_array()
@@ -2396,6 +2443,14 @@ fn append_codex_skill_visibility_lines(lines: &mut Vec<String>, visibility: &Val
         lines.push("    next: metactl skills add <repo-skill-path> --scope user".to_string());
     }
     lines.push(format!("    note: {CODEX_SKILL_SCOPE_NOTE}"));
+    lines.push(
+        "    host discovery: not verified by metactl; check the actual Codex prompt catalog"
+            .to_string(),
+    );
+    lines.push(
+        "    project slash commands: unsupported; .codex/commands files are not invocable in Codex (use $skill-name)"
+            .to_string(),
+    );
 }
 
 fn should_show_codex_skill_visibility(
@@ -2503,7 +2558,7 @@ fn validate_skill_name(name: &str) -> Result<()> {
 }
 
 fn validate_skill_description(description: &str) -> Result<()> {
-    if description.trim().is_empty() || description.len() > 512 {
+    if description.trim().is_empty() || description.chars().count() > 512 {
         return Err(anyhow!("frontmatter.description must be 1..512 characters"));
     }
     Ok(())
@@ -2558,8 +2613,11 @@ fn skill_import_safety_findings(
 ) -> Vec<String> {
     let mut findings = Vec::new();
     let total_bytes: u64 = files.iter().map(|file| file.byte_len).sum();
-    if total_bytes > 2 * 1024 * 1024 {
-        findings.push(format!("oversized Agent Skill bundle: {total_bytes} bytes"));
+    const MAX_SKILL_BUNDLE_BYTES: u64 = 2 * 1024 * 1024;
+    if total_bytes > MAX_SKILL_BUNDLE_BYTES {
+        findings.push(format!(
+            "oversized Agent Skill bundle: {total_bytes} bytes (limit {MAX_SKILL_BUNDLE_BYTES} bytes)"
+        ));
     }
     for file in files {
         let lower = file.relative_path.to_ascii_lowercase();

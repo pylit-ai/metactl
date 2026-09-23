@@ -812,6 +812,80 @@ Run release verification and produce a handoff.
 }
 
 #[test]
+fn cli_skills_add_reports_frontmatter_limit_and_counts_characters() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let skill_root = project.path().join("description-skill");
+    fs::create_dir_all(&skill_root).expect("skill dir");
+    fs::write(
+        skill_root.join("SKILL.md"),
+        format!(
+            "---\nname: description-skill\ndescription: {}\n---\n\n# Skill\n",
+            "x".repeat(513)
+        ),
+    )
+    .expect("overlong description");
+    let rejected = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(!rejected.status.success());
+    let rejected_json = json_output(&rejected);
+    assert!(rejected_json["details"][0]
+        .as_str()
+        .unwrap_or_default()
+        .contains("frontmatter.description must be 1..512 characters"));
+
+    fs::write(
+        skill_root.join("SKILL.md"),
+        "---\nname: description-skill\ndescription: [unclosed\n---\n\n# Skill\n",
+    )
+    .expect("malformed YAML");
+    let malformed = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(!malformed.status.success());
+    let malformed_json = json_output(&malformed);
+    assert!(
+        malformed_json["details"][0]
+            .as_str()
+            .unwrap_or_default()
+            .contains("line"),
+        "{malformed_json}"
+    );
+
+    fs::write(
+        skill_root.join("SKILL.md"),
+        format!(
+            "---\nname: description-skill\ndescription: {}\n---\n\n# Skill\n",
+            "é".repeat(512)
+        ),
+    )
+    .expect("512-character description");
+    let accepted = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(accepted.status.success(), "{}", stderr(&accepted));
+}
+
+#[test]
 fn cli_pack_import_skill_rejects_unsafe_agent_skill_fixtures() {
     let project = TempDir::new().expect("tempdir");
 
@@ -1386,19 +1460,15 @@ fn cli_target_native_harness_outputs() {
 
     let sync = run_cli(project.path(), &["sync"]);
     assert!(sync.status.success(), "{}", stderr(&sync));
-    // Spec 019 plus Codex command support: codex-cli emits AGENTS.md,
-    // .agents/skills/..., and project slash commands under .codex/commands.
-    // Other .codex/* paths (rules, plugins, scripts, hooks, config.toml)
-    // are not real Codex project surfaces and remain removed.
+    // Codex emits AGENTS.md and project skills under .agents/skills.
+    // Legacy .codex/commands output is not generated in new projects.
+    // Existing installations retain it until a separate safe migration.
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
         .join(".agents/skills/unit-test-loop/unit-test-loop/SKILL.md")
         .exists());
-    assert!(project
-        .path()
-        .join(".codex/commands/run-targeted-tests.md")
-        .exists());
+    assert!(!project.path().join(".codex/commands").exists());
     assert!(!project.path().join(".codex/config.toml").exists());
     assert!(!project.path().join(".codex/rules").exists());
     assert!(!project.path().join(".codex/plugins").exists());
