@@ -45,7 +45,7 @@ fn cmd_pack_import_skill(
     let skill_md = skill_dir.join("SKILL.md");
     let frontmatter = read_skill_frontmatter(&skill_md).map_err(|err| {
         CliError::new(EXIT_VALIDATION, "Agent Skill frontmatter is invalid.")
-            .with_details(error_details(&err))
+            .with_details(vec![format!("{err:#}")])
     })?;
     let files = collect_skill_files(&skill_dir).map_err(|err| {
         CliError::new(EXIT_VALIDATION, "Agent Skill import safety check failed.")
