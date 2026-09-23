@@ -166,6 +166,22 @@ description: Portable release manager skill for verification handoffs.
 "#,
     )
     .expect("write repo skill");
+    let matching_legacy = project
+        .path()
+        .join(".codex/skills/team-pack/release-manager");
+    fs::create_dir_all(&matching_legacy).expect("matching legacy dir");
+    fs::copy(
+        repo_skill_root.join("SKILL.md"),
+        matching_legacy.join("SKILL.md"),
+    )
+    .expect("matching legacy skill");
+    let legacy_only = project.path().join(".codex/skills/old-pack/legacy-only");
+    fs::create_dir_all(&legacy_only).expect("legacy-only dir");
+    fs::write(
+        legacy_only.join("SKILL.md"),
+        "---\nname: legacy-only\ndescription: Legacy workflow.\n---\n\n# Legacy\n",
+    )
+    .expect("legacy-only skill");
 
     let status = run_cli(project.path(), &["--json", "status"]);
     assert!(status.status.success(), "{}", stderr(&status));
@@ -181,6 +197,21 @@ description: Portable release manager skill for verification handoffs.
         json!(true)
     );
     assert_eq!(json["skill_visibility"]["repo_local_count"], json!(1));
+    assert_eq!(json["skill_visibility"]["legacy_repo_count"], json!(2));
+    assert_eq!(json["skill_visibility"]["legacy_overlap_count"], json!(1));
+    assert_eq!(
+        json["skill_visibility"]["legacy_identical_instruction_count"],
+        json!(1)
+    );
+    assert_eq!(json["skill_visibility"]["legacy_only_count"], json!(1));
+    assert_eq!(
+        json["skill_visibility"]["legacy_ambiguous_canonical_count"],
+        json!(0)
+    );
+    assert_eq!(
+        json["skill_visibility"]["host_discovery_verified"],
+        json!(false)
+    );
     assert_eq!(
         json["skill_visibility"]["missing_user_global_count"],
         json!(1)
@@ -197,8 +228,40 @@ description: Portable release manager skill for verification handoffs.
     assert!(text.contains("Agent artifact stewardship:"));
     assert!(text.contains("policy: portable-first"));
     assert!(text.contains("repo-local: 1 skill(s)"));
+    assert!(text.contains("legacy .codex/skills: 2 skill(s)"));
+    assert!(text.contains("host discovery: not verified"));
     assert!(text.contains("user-global: 0 skill(s)"));
     assert!(text.contains("metactl skills add <repo-skill-path> --scope user"));
+}
+
+#[test]
+fn status_reports_ambiguous_canonical_skill_names() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    for pack in ["one", "two"] {
+        let dir = project.path().join(format!(".agents/skills/{pack}/shared"));
+        fs::create_dir_all(&dir).expect("canonical skill dir");
+        fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: shared\ndescription: Test.\n---\n\n# {pack}\n"),
+        )
+        .expect("canonical skill");
+    }
+    let legacy = project.path().join(".codex/skills/old/shared");
+    fs::create_dir_all(&legacy).expect("legacy skill dir");
+    fs::copy(
+        project.path().join(".agents/skills/one/shared/SKILL.md"),
+        legacy.join("SKILL.md"),
+    )
+    .expect("legacy skill");
+
+    let status = run_cli(project.path(), &["--json", "status"]);
+    assert!(status.status.success(), "{}", stderr(&status));
+    let visibility = &json_output(&status)["skill_visibility"];
+    assert_eq!(visibility["legacy_overlap_count"], json!(1));
+    assert_eq!(visibility["legacy_identical_instruction_count"], json!(0));
+    assert_eq!(visibility["legacy_divergent_instruction_count"], json!(0));
+    assert_eq!(visibility["legacy_ambiguous_canonical_count"], json!(1));
 }
 
 #[test]

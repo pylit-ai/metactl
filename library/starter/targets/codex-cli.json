@@ -54,7 +54,7 @@
   ],
   "local_projection": {
     "support": "degraded",
-    "notes": "Codex CLI does not natively support a local instruction overlay file; project slash commands are emitted under .codex/commands."
+    "notes": "Codex CLI does not natively support a local instruction overlay file or project slash commands under .codex/commands. The .codex/commands projection is retained temporarily for existing installations, not Codex invocation. Reusable project workflows are emitted as Agent Skills under .agents/skills and invoked with $skill-name."
   },
   "metadata": {
     "starter_status": "stable",

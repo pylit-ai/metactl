@@ -450,7 +450,7 @@ metactl fleet sync --preview
 
 Expected result: `status` reports linked project readiness, and `sync --preview` shows planned project updates without applying them.
 
-Fleet Sync updates repo-local generated surfaces in linked projects. It does not install Codex skills into the user-global Personal picker source. Use `metactl skills add <repo-skill-path> --scope user` when an operator-facing skill should also appear under the backward-compatible `~/.codex/skills` root.
+Fleet Sync updates repo-local generated surfaces in linked projects. It does not install Codex skills into the user-global Personal picker source. Use `metactl skills add <repo-skill-path> --scope user` when an operator-facing skill should also appear under the backward-compatible `~/.codex/skills` root. `metactl status` separately reports legacy `.codex/skills` overlaps; file presence is not proof that Codex's live skill catalog includes a skill, and MetaCTL never deletes legacy packages during sync.
 
 > **Expected output**
 >

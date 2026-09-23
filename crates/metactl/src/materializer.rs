@@ -413,6 +413,7 @@ fn build_apply_review_plan_from_staging(
             legacy_digest.as_deref(),
             staged_digest.as_deref(),
             legacy_path.is_some(),
+            apply_mode,
         );
         actions.push(ApplyReviewAction {
             destination_path: destination.to_string(),
@@ -492,6 +493,7 @@ fn classify_review_action<'a>(
     legacy_digest: Option<&str>,
     staged_digest: Option<&str>,
     has_legacy_path: bool,
+    apply_mode: &ApplyMode,
 ) -> (&'a str, &'a str, &'a str, bool) {
     if managed {
         return (
@@ -502,12 +504,23 @@ fn classify_review_action<'a>(
         );
     }
     if destination_exists {
+        if matches!(apply_mode, ApplyMode::Patch)
+            && before_digest.is_some()
+            && before_digest == staged_digest
+        {
+            return (
+                "canonical_matches_desired",
+                "exact_staged_match",
+                "Adopt the existing canonical bytes in patch mode; preserve any legacy bytes.",
+                false,
+            );
+        }
         if has_legacy_path && before_digest.is_some() && before_digest == legacy_digest {
             return (
-                "identical_duplicate",
-                "identical_cross_root_bytes",
-                "Preserve both roots; canonical bytes already exist.",
-                false,
+                "unmanaged_canonical",
+                "legacy_matches_canonical_but_not_adoptable",
+                "Canonical and legacy bytes match, but this apply mode cannot silently adopt the destination or the desired bytes differ.",
+                true,
             );
         }
         return (
@@ -2448,6 +2461,42 @@ mod tests {
         assert!(report.conflicts.is_empty());
         assert_eq!(fs::read(&legacy).expect("legacy after"), legacy_before);
         assert!(project.path().join(".agents/skills/demo/SKILL.md").exists());
+    }
+
+    #[test]
+    fn review_plan_does_not_confuse_legacy_equality_with_desired_equality() {
+        let project = tempfile::tempdir().expect("tempdir");
+        let manifest = codex_skill_manifest(project.path());
+        let legacy = project.path().join(".codex/skills/demo/SKILL.md");
+        let canonical = project.path().join(".agents/skills/demo/SKILL.md");
+        fs::create_dir_all(legacy.parent().expect("legacy parent")).expect("legacy directory");
+        fs::create_dir_all(canonical.parent().expect("canonical parent"))
+            .expect("canonical directory");
+        let desired = fs::read(project.path().join(&manifest.generated_outputs[0].path))
+            .expect("staged skill");
+        fs::write(&legacy, &desired).expect("legacy skill");
+        fs::write(&canonical, &desired).expect("canonical skill");
+
+        let patch = build_apply_review_plan(project.path(), &manifest, &ApplyMode::Patch)
+            .expect("patch review plan");
+        assert_eq!(patch.actions[0].classification, "canonical_matches_desired");
+        assert!(!patch.actions[0].approval_required);
+
+        let copy = build_apply_review_plan(project.path(), &manifest, &ApplyMode::Copy)
+            .expect("copy review plan");
+        assert_eq!(copy.actions[0].classification, "unmanaged_canonical");
+        assert!(copy.actions[0].approval_required);
+
+        fs::write(&legacy, "customized legacy and canonical bytes").expect("legacy edit");
+        fs::write(&canonical, "customized legacy and canonical bytes").expect("canonical edit");
+        let divergent = build_apply_review_plan(project.path(), &manifest, &ApplyMode::Patch)
+            .expect("divergent review plan");
+        assert_eq!(divergent.actions[0].classification, "unmanaged_canonical");
+        assert!(divergent.actions[0].approval_required);
+        assert_eq!(
+            divergent.actions[0].reason_code,
+            "legacy_matches_canonical_but_not_adoptable"
+        );
     }
 
     #[test]

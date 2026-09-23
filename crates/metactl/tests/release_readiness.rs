@@ -752,7 +752,7 @@ fn target_native_pack_resources() {
             "release-manager",
             "release-policy",
             "codex-cli",
-            // Spec 019 plus Codex command support.
+            // Legacy output retained until safe migration of installed symlinks.
             vec![
                 "AGENTS.md",
                 ".agents/skills/unit-test-loop/unit-test-loop/SKILL.md",

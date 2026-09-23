@@ -15,12 +15,12 @@ Also available as [MP4](assets/demos/quickstart-hero.mp4) and [WebM](assets/demo
 | Asset | Best location | Shows |
 |---|---|---|
 | `quickstart-hero.gif` | README hero, launch posts | `setup --plan`, explicit setup, `use`, `status`, and generated agent commands |
-| `agent-native-surfaces.gif` | Agent workflow docs | Codex command, Claude command, and Gemini skill surfaces generated from one pack |
+| `agent-native-surfaces.gif` | Historical adapter demo | Shows a Codex command file retained for compatibility, plus Claude command and Gemini skill surfaces; current Codex invocation uses Agent Skills |
 | `safe-repair.gif` | Safety and maintenance docs | Generated-root diagnostics, repair plan, explicit untracking guardrail |
 
 ## Native Agent Surfaces
 
-After sync, developers do not have to mentally translate metactl concepts into each agent runtime. The repo contains the native files those tools already know how to read.
+After sync, developers do not have to mentally translate metactl concepts into each agent runtime. Current Codex project workflows are emitted as `.agents/skills` and invoked with `$skill-name`. The demo also shows a `.codex/commands` file retained for compatibility with existing installations; Codex does not register it as a project slash command. Do not remove this projection until a preservation-safe upgrade can retire existing symlinks.
 
 ![Native agent surfaces](assets/demos/agent-native-surfaces.gif)
 
