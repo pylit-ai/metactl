@@ -350,6 +350,7 @@ dependencies = [
  "hex",
  "include_dir",
  "pretty_assertions",
+ "rustix",
  "serde",
  "serde_json",
  "serde_yaml",
