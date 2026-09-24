@@ -280,6 +280,10 @@ def summarize(events, runtime=None, arm=None):
         known_calls = [e["provider_calls"] for e in discovers if e["provider_calls"] is not None]
         known_cost = [e["cost_usd"] for e in outcomes if e.get("cost_usd") is not None]
         known_task_ms = [e["task_ms"] for e in outcomes if e.get("task_ms") is not None]
+        known_task_input = [e["input_tokens"] for e in outcomes if e.get("input_tokens") is not None]
+        known_task_output = [e["output_tokens"] for e in outcomes if e.get("output_tokens") is not None]
+        known_interventions = [e["human_interventions"] for e in outcomes
+                               if e.get("human_interventions") is not None]
         cohorts.append({
             "runtime": rt, "arm": cohort_arm, "sessions": len(sessions),
             "discoveries": len(discovers), "loads": len(loads), "outcomes": len(outcomes),
@@ -296,8 +300,8 @@ def summarize(events, runtime=None, arm=None):
             "provider_calls_known": len(known_calls),
             "uncertain_provider_attempts": sum(e["provider_attempts"] for e in discovers) - sum(known_calls),
             "usage_known": len(known_usage),
-            "input_tokens_reported": sum(u["input_tokens"] for u in known_usage),
-            "output_tokens_reported": sum(u["output_tokens"] for u in known_usage),
+            "input_tokens_reported": sum(u["input_tokens"] for u in known_usage) if known_usage else None,
+            "output_tokens_reported": sum(u["output_tokens"] for u in known_usage) if known_usage else None,
             "discover_ms_p50": _percentile([e["elapsed_ms"] for e in discovers], .5),
             "discover_ms_p95": _percentile([e["elapsed_ms"] for e in discovers], .95),
             "rank_ms_p50": _percentile([e["rank_ms"] for e in discovers], .5),
@@ -310,42 +314,86 @@ def summarize(events, runtime=None, arm=None):
             "task_ms_known": len(known_task_ms),
             "task_ms_p50": _percentile(known_task_ms, .5),
             "task_ms_p95": _percentile(known_task_ms, .95),
+            "task_input_tokens_known": len(known_task_input),
+            "task_input_tokens_reported": sum(known_task_input) if known_task_input else None,
+            "task_output_tokens_known": len(known_task_output),
+            "task_output_tokens_reported": sum(known_task_output) if known_task_output else None,
             "cost_usd_known": len(known_cost),
-            "cost_usd_reported": round(sum(known_cost), 6),
-            "human_interventions_known": sum(e.get("human_interventions") is not None for e in outcomes),
+            "cost_usd_reported": round(sum(known_cost), 6) if known_cost else None,
+            "human_interventions_known": len(known_interventions),
+            "human_interventions_reported": sum(known_interventions) if known_interventions else None,
         })
     return {"schema": SCHEMA, "event_count": len(selected), "cohorts": cohorts,
             "interpretation": "Descriptive, unmatched cohorts. No causal savings or native catalog suppression established. Result bytes are not prompt tokens. Costs cover independently supplied outcomes only."}
 
 
 def render_html(report):
-    columns = ["runtime", "arm", "sessions", "discoveries", "loads", "outcomes",
-               "outcome_sessions",
-               "sessions_without_outcome", "pass", "fail", "unknown", "fallback",
-               "reordered", "abstained", "provider_attempts", "provider_calls_observed",
-               "uncertain_provider_attempts",
-            "provider_calls_known", "usage_known", "input_tokens_reported",
-               "output_tokens_reported", "discover_ms_p50", "discover_ms_p95",
-               "rank_ms_p50", "rank_ms_p95",
-               "load_ms_p50", "load_ms_p95", "discovery_result_bytes",
-               "load_result_bytes", "repeated_loads", "task_ms_known", "task_ms_p50",
-               "task_ms_p95", "cost_usd_known", "cost_usd_reported",
-               "human_interventions_known"]
-    esc = lambda value: html.escape("unknown" if value is None else str(value), quote=True)
-    heads = "".join(f"<th scope='col'>{esc(key.replace('_', ' '))}</th>" for key in columns)
-    body = "".join("<tr>" + "".join(f"<td>{esc(row[key])}</td>" for key in columns) + "</tr>"
-                   for row in report["cohorts"])
+    def esc(value):
+        return html.escape("unknown" if value is None else str(value), quote=True)
+
+    def coverage(value, known, total):
+        return f"{esc(value)} <small>({esc(known)}/{esc(total)} known)</small>"
+
+    def table(title, columns, values):
+        heads = "".join(f"<th scope='col'>{esc(label)}</th>" for label in columns)
+        body = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>"
+                       for row in values)
+        return f"<section><h2>{esc(title)}</h2><table><thead><tr>{heads}</tr></thead><tbody>{body}</tbody></table></section>"
+
+    cohorts = report["cohorts"]
+    overview = table("Overview", ["Runtime", "Arm", "Sessions", "Discoveries", "Loads",
+                                   "Outcomes", "Missing outcomes", "Repeated loads"],
+                     [[esc(r[k]) for k in ("runtime", "arm", "sessions", "discoveries", "loads",
+                                             "outcomes", "sessions_without_outcome", "repeated_loads")]
+                      for r in cohorts])
+    latency = table("Latency and returned bytes", ["Runtime", "Arm", "Discover p50 / p95 ms",
+                                                   "Rank p50 / p95 ms", "Load p50 / p95 ms",
+                                                   "Discover / load bytes"],
+                    [[esc(r["runtime"]), esc(r["arm"]),
+                      f"{esc(r['discover_ms_p50'])} / {esc(r['discover_ms_p95'])}",
+                      f"{esc(r['rank_ms_p50'])} / {esc(r['rank_ms_p95'])}",
+                      f"{esc(r['load_ms_p50'])} / {esc(r['load_ms_p95'])}",
+                      esc(f"{r['discovery_result_bytes']} / {r['load_result_bytes']}")]
+                     for r in cohorts])
+    provider = table("Provider and returned data", ["Runtime", "Arm", "Fallback / reorder / abstain",
+                                                    "Attempts", "Validated calls", "Uncertain attempts",
+                                                    "Usage coverage", "Input / output tokens"],
+                     [[esc(r["runtime"]), esc(r["arm"]),
+                       esc(f"{r['fallback']} / {r['reordered']} / {r['abstained']}"),
+                       esc(r["provider_attempts"]),
+                       coverage(r["provider_calls_observed"] if r["provider_calls_known"] else None,
+                                r["provider_calls_known"], r["discoveries"]),
+                       esc(r["uncertain_provider_attempts"]),
+                       esc(f"{r['usage_known']}/{r['discoveries']} discoveries"),
+                       (f"{esc(r['input_tokens_reported'])} / {esc(r['output_tokens_reported'])}"
+                        if r["usage_known"] else "unknown")]
+                      for r in cohorts])
+    outcomes = table("Task outcomes and cost", ["Runtime", "Arm", "Pass / fail / unknown",
+                                                "Outcome coverage", "Task p50 / p95 ms",
+                                                "Task input / output tokens", "Cost USD", "Interventions"],
+                     [[esc(r["runtime"]), esc(r["arm"]),
+                       esc(f"{r['pass']} / {r['fail']} / {r['unknown']}"),
+                       esc(f"{r['outcome_sessions']}/{r['sessions']} sessions"),
+                       (f"{esc(r['task_ms_p50'])} / {esc(r['task_ms_p95'])} "
+                        f"<small>({esc(r['task_ms_known'])}/{esc(r['outcomes'])} known)</small>"),
+                       (f"in {coverage(r['task_input_tokens_reported'], r['task_input_tokens_known'], r['outcomes'])}<br>"
+                        f"out {coverage(r['task_output_tokens_reported'], r['task_output_tokens_known'], r['outcomes'])}"),
+                       coverage(r["cost_usd_reported"], r["cost_usd_known"], r["outcomes"]),
+                       coverage(r["human_interventions_reported"], r["human_interventions_known"], r["outcomes"]) ]
+                      for r in cohorts])
     return ("<!doctype html><html lang='en'><meta charset='utf-8'>"
             "<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'\">"
             "<title>Private skill discovery trial</title>"
-            "<style>body{font:14px system-ui;max-width:100%;margin:2rem;color:#202830}"
-            "table{border-collapse:collapse;display:block;overflow-x:auto}th,td{padding:.5rem;border:1px solid #aab}"
-            "th{background:#edf1f5;white-space:nowrap}p{max-width:70rem}</style>"
+            "<style>body{font:14px system-ui;max-width:78rem;margin:2rem auto;padding:0 1rem;color:#202830}"
+            "section{margin:2rem 0}table{border-collapse:collapse;width:100%;display:block;overflow-x:auto}"
+            "th,td{padding:.55rem;text-align:left;border-bottom:1px solid #ccd3dc;white-space:nowrap}"
+            "th{background:#edf1f5}tbody tr:nth-child(even){background:#f7f9fb}"
+            "small{color:#536274}p{max-width:70rem}</style>"
             "<h1>Private skill discovery trial</h1>"
             f"<p>Events: {esc(report['event_count'])}. {esc(report['interpretation'])}</p>"
             "<p>Known coverage fields give counts with measured values; all other values are unknown. "
             "Compare arms only after independently checking task matching or randomization.</p>"
-            f"<table><thead><tr>{heads}</tr></thead><tbody>{body}</tbody></table></html>")
+            f"{overview}{latency}{provider}{outcomes}</html>")
 
 
 def _write_private(path, content):

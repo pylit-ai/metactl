@@ -109,7 +109,8 @@ class TrialTests(unittest.TestCase):
         rows = [event(), event("load"),
                 event("load", repeat_load=True, result_bytes=600),
                 event("outcome", success="pass", verifier_ref="f" * 64,
-                      task_ms=1000, cost_usd=0.25),
+                      task_ms=1000, cost_usd=0.25, input_tokens=123,
+                      output_tokens=45, human_interventions=0),
                 event(runtime="pi", arm="advisory", transport="direct",
                       reason="reordered", provider_attempts=1, provider_calls=1,
                       usage={"input_tokens": 10, "output_tokens": 2}, model="jev-1.13.0",
@@ -123,9 +124,22 @@ class TrialTests(unittest.TestCase):
                           baseline["outcomes"], baseline["cost_usd_reported"]),
                          ("codex", 1, 1, .25))
         self.assertEqual((baseline["usage_known"], baseline["discover_ms_p95"]), (0, 12.0))
+        self.assertIsNone(baseline["input_tokens_reported"])
+        self.assertEqual((baseline["task_input_tokens_reported"], baseline["task_input_tokens_known"],
+                          baseline["task_output_tokens_reported"], baseline["task_output_tokens_known"],
+                          baseline["human_interventions_reported"], baseline["human_interventions_known"]),
+                         (123, 1, 45, 1, 0, 1))
         self.assertEqual((advisory["runtime"], advisory["provider_calls_observed"],
                           advisory["sessions_without_outcome"]), ("pi", 1, 1))
         self.assertEqual(advisory["uncertain_provider_attempts"], 0)
+        self.assertIsNone(advisory["cost_usd_reported"])
+        self.assertIsNone(advisory["task_input_tokens_reported"])
+        self.assertIsNone(advisory["human_interventions_reported"])
+        html_output = trial.render_html(report)
+        self.assertEqual(html_output.count("<table>"), 4)
+        self.assertEqual(html_output.count("<th scope='col'>"), 30)
+        self.assertIn("unknown <small>(0/0 known)</small>", html_output)
+        self.assertIn("unknown / unknown", html_output)
         self.assertEqual(trial.summarize(rows, runtime="pi")["event_count"], 1)
         self.assertIn("No causal savings", report["interpretation"])
 
