@@ -657,13 +657,18 @@ fn fleet_project_status_json(project: &LinkedProject) -> Value {
             Ok(context) => {
                 let fleet_sync_adopt = fleet_sync_adopt_from_context(&context);
                 let stale = metactl::project::lock_stale_reason(&context).ok().flatten();
+                let library_source_comparison = library_content_comparison(&context);
                 value["lock_stale"] = json!(stale.is_some());
                 value["stale_reason"] = json!(stale);
+                value["library_source_comparison"] = json!(library_source_comparison);
                 value["targets"] = json!(context.config_file.targets);
                 value["packs"] = json!(context.config_file.packs);
                 value["fleet_sync_adopt"] = json!(fleet_sync_adopt_label(fleet_sync_adopt));
-                value["needs_sync"] =
-                    json!(context.lock.targets.is_empty() || value["lock_stale"] == true);
+                value["needs_sync"] = json!(
+                    context.lock.targets.is_empty()
+                        || value["lock_stale"] == true
+                        || library_source_comparison != "current"
+                );
                 attach_codex_skill_visibility(&mut value, &project.path);
             }
             Err(err) => {

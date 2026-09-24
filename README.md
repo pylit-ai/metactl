@@ -245,6 +245,7 @@ metactl validate
 | `metactl use <pack>` | Resolve, add, sync, and validate a pack-oriented workflow. |
 | `metactl sync --preview` | Compile generated surfaces without applying runtime files. |
 | `metactl status` | Show readiness, target state, drift posture, and next actions. |
+| `metactl --json git plan` | Read-only per-path comparison of saved MetaCTL ownership, installed bytes, and Git tracking. |
 | `metactl validate` | Check generated and applied outputs against target validators. |
 | `metactl doctor` | Run local health checks. |
 | `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
@@ -278,6 +279,26 @@ metactl validate
 | `metactl audit sources` | Diagnose private source cache, lock, and public-example exposure failures. |
 
 </details>
+
+`status` reports `library_source_comparison` as `current`, `drifted`, or
+`unverifiable`. A local library content change makes `needs_sync` true even
+when the selected profile file is unchanged. Locks written by older MetaCTL
+versions lack the content snapshot and report `unverifiable` until a sync
+refreshes the lock. Status reads local source content; it does not fetch a
+remote Git ref.
+
+Before committing generated agent surfaces, run `metactl --json git plan`.
+Each path is classified as `managed_unchanged`, `managed_edited`, `missing`,
+`unowned`, or `unsafe_alias`, with `tracked`, `untracked`, or `not_git` Git
+context. Staged Git changes and differences between the index and worktree
+are reported per path; a staged authored version makes a managed path edited.
+`path_kind` makes symlinks visible; paths resolving outside the project are
+classified `unsafe_alias` and are never read.
+The JSON path list is complete by default. Authored
+files inside `.agents`, `.codex`, `.claude`, `.cursor`, `.gemini`, or
+`.opencode` remain `unowned` even beside MetaCTL outputs. This command changes
+neither the worktree nor the Git index. Review its per-path evidence before
+using any ignore or index repair command.
 
 If metactl reports that no starter library is available, first run `metactl doctor`. Use `--starter-library <path>` only for custom/local starter libraries or when troubleshooting a cache materialization failure.
 
