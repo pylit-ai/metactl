@@ -289,7 +289,12 @@ remote Git ref.
 
 Before committing generated agent surfaces, run `metactl --json git plan`.
 Each path is classified as `managed_unchanged`, `managed_edited`, `missing`,
-or `unowned`, with `tracked`, `untracked`, or `not_git` Git context. Authored
+`unowned`, or `unsafe_alias`, with `tracked`, `untracked`, or `not_git` Git
+context. Staged Git changes and differences between the index and worktree
+are reported per path; a staged authored version makes a managed path edited.
+`path_kind` makes symlinks visible; paths resolving outside the project are
+classified `unsafe_alias` and are never read.
+The JSON path list is complete by default. Authored
 files inside `.agents`, `.codex`, `.claude`, `.cursor`, `.gemini`, or
 `.opencode` remain `unowned` even beside MetaCTL outputs. This command changes
 neither the worktree nor the Git index. Review its per-path evidence before

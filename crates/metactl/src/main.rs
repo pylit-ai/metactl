@@ -1961,7 +1961,10 @@ fn main() -> ExitCode {
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
-                let json = bounded_machine_json(output.json, cli.full);
+                let json = bounded_machine_json(
+                    output.json,
+                    cli.full || matches!(&cli.command, Commands::Git(_)),
+                );
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
@@ -4421,9 +4424,9 @@ fn cmd_git(cli: &Cli, args: &GitArgs) -> std::result::Result<CommandOutput, CliE
             let counts = &plan["counts"];
             Ok(CommandOutput {
                 human: format!(
-                    "Projection Git plan (read-only): {} managed unchanged, {} managed edited, {} missing, {} unowned.\nReview paths with `metactl --json git plan`; no Git changes were made.",
+                    "Projection Git plan (read-only): {} managed unchanged, {} managed edited, {} missing, {} unowned, {} unsafe aliases.\nReview every path with `metactl --json git plan`; no Git changes were made.",
                     counts["managed_unchanged"], counts["managed_edited"],
-                    counts["missing"], counts["unowned"]
+                    counts["missing"], counts["unowned"], counts["unsafe_alias"]
                 ),
                 json: success_json("git", Some(&project_root), plan),
             })

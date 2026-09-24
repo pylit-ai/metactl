@@ -33,6 +33,16 @@ pub(super) fn build(root: &Path) -> Result<Value> {
     } else {
         BTreeSet::new()
     };
+    let staged_changes = if git {
+        git_paths(root, &["diff", "--cached", "--name-only", "-z", "--"], &[])?
+    } else {
+        BTreeSet::new()
+    };
+    let index_divergence = if git {
+        git_paths(root, &["diff", "--name-only", "-z", "--"], &[])?
+    } else {
+        BTreeSet::new()
+    };
     let mut paths = owners.keys().cloned().collect::<BTreeSet<_>>();
     if git {
         paths.extend(tracked.iter().filter(|p| in_agent_root(p)).cloned());
@@ -49,26 +59,55 @@ pub(super) fn build(root: &Path) -> Result<Value> {
 
     let mut entries = Vec::new();
     let mut counts = BTreeMap::<&str, usize>::new();
+    let root_canonical = root.canonicalize()?;
     for path in paths {
         let absolute = root.join(&path);
-        let exists = absolute.symlink_metadata().is_ok();
+        let metadata = match absolute.symlink_metadata() {
+            Ok(metadata) => Some(metadata),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err).with_context(|| format!("inspect {}", path)),
+        };
+        let exists = metadata.is_some();
+        let path_kind = match metadata.as_ref() {
+            Some(metadata) if metadata.file_type().is_symlink() => "symlink",
+            Some(metadata) if metadata.is_file() => "regular_file",
+            Some(metadata) if metadata.is_dir() => "directory",
+            Some(_) => "other",
+            None => "missing",
+        };
+        let contained = !exists
+            || absolute
+                .canonicalize()
+                .map(|resolved| resolved.starts_with(&root_canonical))
+                .unwrap_or(false);
         let owner = owners.get(&path);
-        let classification = match owner {
-            None => "unowned",
-            Some(_) if !exists => "missing",
-            Some(owner) => match owner.digest.as_deref() {
-                Some(expected) if file_digest(&absolute).as_deref() == Some(expected) => {
-                    "managed_unchanged"
-                }
-                _ => "managed_edited",
-            },
+        let index_differs = index_divergence.contains(&path);
+        let classification = if !contained {
+            "unsafe_alias"
+        } else {
+            match owner {
+                None => "unowned",
+                Some(_) if !exists => "missing",
+                Some(owner) => match owner.digest.as_deref() {
+                    Some(expected)
+                        if !index_differs
+                            && file_digest(&absolute).as_deref() == Some(expected) =>
+                    {
+                        "managed_unchanged"
+                    }
+                    _ => "managed_edited",
+                },
+            }
         };
         *counts.entry(classification).or_default() += 1;
         entries.push(json!({
             "path": path,
             "classification": classification,
             "present": exists,
+            "path_kind": path_kind,
             "git": if !git { "not_git" } else if tracked.contains(&path) { "tracked" } else { "untracked" },
+            "staged_change": staged_changes.contains(&path),
+            "index_differs_from_worktree": index_differs,
             "target": owner.map(|item| item.target.as_str()),
             "pack_ref": owner.map(|item| item.pack.clone()),
             "surface_id": owner.map(|item| item.surface.clone()),
@@ -82,6 +121,7 @@ pub(super) fn build(root: &Path) -> Result<Value> {
             "managed_edited": counts.get("managed_edited").copied().unwrap_or(0),
             "missing": counts.get("missing").copied().unwrap_or(0),
             "unowned": counts.get("unowned").copied().unwrap_or(0),
+            "unsafe_alias": counts.get("unsafe_alias").copied().unwrap_or(0),
         },
         "paths": entries,
     }))
@@ -93,6 +133,9 @@ fn read_owners(root: &Path) -> Result<BTreeMap<String, Owner>> {
     if !dir.is_dir() {
         return Ok(owners);
     }
+    if !dir.canonicalize()?.starts_with(root.canonicalize()?) {
+        return Err(anyhow!("MetaCTL state resolves outside the project"));
+    }
     let mut files = fs::read_dir(&dir)?.collect::<std::result::Result<Vec<_>, _>>()?;
     files.sort_by_key(|entry| entry.file_name());
     for file in files {
@@ -101,6 +144,9 @@ fn read_owners(root: &Path) -> Result<BTreeMap<String, Owner>> {
             || path.file_name().and_then(|n| n.to_str()) == Some("managed_files.json")
         {
             continue;
+        }
+        if !path.canonicalize()?.starts_with(root.canonicalize()?) {
+            return Err(anyhow!("MetaCTL state file resolves outside the project"));
         }
         let data: Value = serde_json::from_slice(&fs::read(&path)?)
             .with_context(|| format!("parse state {}", path.display()))?;
@@ -114,9 +160,8 @@ fn read_owners(root: &Path) -> Result<BTreeMap<String, Owner>> {
             let Some(raw) = output.get("destination_path").and_then(Value::as_str) else {
                 continue;
             };
-            let Some(relative) = safe_relative(root, raw) else {
-                continue;
-            };
+            let relative = safe_relative(root, raw)
+                .ok_or_else(|| anyhow!("MetaCTL state contains an unsafe destination path"))?;
             let owner = Owner {
                 target: target.to_string(),
                 digest: output
@@ -190,12 +235,21 @@ fn git_paths(root: &Path, prefix: &[&str], paths: &[&str]) -> Result<BTreeSet<St
 fn in_agent_root(path: &str) -> bool {
     AGENT_ROOTS
         .iter()
-        .any(|root| path.starts_with(&format!("{root}/")))
+        .any(|root| path == *root || path.starts_with(&format!("{root}/")))
 }
 
 fn collect_paths(root: &Path, dir: &Path, result: &mut BTreeSet<String>) -> Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
+    match dir.symlink_metadata() {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if let Ok(relative) = dir.strip_prefix(root) {
+                result.insert(relative.to_string_lossy().replace('\\', "/"));
+            }
+            return Ok(());
+        }
+        Ok(metadata) if !metadata.is_dir() => return Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err.into()),
+        _ => {}
     }
     for entry in fs::read_dir(dir)? {
         let entry = entry?;

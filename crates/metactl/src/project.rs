@@ -1431,6 +1431,25 @@ fn collect_library_content_files(
     dir: &Path,
     files: &mut Vec<(String, Vec<u8>)>,
 ) -> Result<()> {
+    collect_library_content_files_inner(root, dir, files, &mut Vec::new())
+}
+
+fn collect_library_content_files_inner(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+    active_dirs: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let physical = dir
+        .canonicalize()
+        .with_context(|| format!("resolve {}", dir.display()))?;
+    if active_dirs.contains(&physical) {
+        return Err(anyhow!(
+            "library resource directory cycle at {}",
+            dir.display()
+        ));
+    }
+    active_dirs.push(physical);
     for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
         let entry = entry?;
         let path = entry.path();
@@ -1484,7 +1503,7 @@ fn collect_library_content_files(
         }
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            collect_library_content_files(root, &path, files)?;
+            collect_library_content_files_inner(root, &path, files, active_dirs)?;
         } else if kind.is_file() {
             let relative = path
                 .strip_prefix(root)?
@@ -1494,8 +1513,29 @@ fn collect_library_content_files(
                 relative,
                 fs::read(&path).with_context(|| format!("read {}", path.display()))?,
             ));
+        } else if kind.is_symlink() {
+            let target = fs::metadata(&path)
+                .with_context(|| format!("follow library resource {}", path.display()))?;
+            if target.is_dir() {
+                collect_library_content_files_inner(root, &path, files, active_dirs)?;
+            } else if target.is_file() {
+                let relative = path
+                    .strip_prefix(root)?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                files.push((
+                    relative,
+                    fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+                ));
+            } else {
+                return Err(anyhow!(
+                    "library resource symlink has unsupported target: {}",
+                    path.display()
+                ));
+            }
         }
     }
+    active_dirs.pop();
     Ok(())
 }
 
