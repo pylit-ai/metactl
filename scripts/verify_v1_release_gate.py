@@ -30,6 +30,7 @@ REQUIRED_PATHS = [
 
 COMMANDS = [
     ["cargo", "build", "-p", "metactl", "-p", "metactld"],
+    [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_skill_discovery*.py", "-v"],
     [sys.executable, "scripts/verify_packaged_starter_mirror.py"],
     [sys.executable, "scripts/verify_v1_charter.py"],
     ["bash", "scripts/check_public_boundary.sh"],

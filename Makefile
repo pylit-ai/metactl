@@ -19,7 +19,7 @@ metactl-validate-contracts: validate-contracts
 .PHONY: metactl-skill-discovery-test metactl-skill-discovery-benchmark
 metactl-skill-discovery-test:
 	$(CARGO) build -p metactl
-	$(PYTHON) -m unittest discover -s tests -p test_skill_discovery_host.py -v
+	$(PYTHON) -m unittest discover -s tests -p 'test_skill_discovery*.py' -v
 
 metactl-skill-discovery-benchmark:
 	$(CARGO) build -p metactl
