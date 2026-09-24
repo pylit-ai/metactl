@@ -858,6 +858,16 @@ enum SkillsCommand {
     Host(SkillsHostArgs),
     /// Save an Auto-mode surface decision in machine-local project configuration
     Select(SkillsSelectArgs),
+    /// Private discovery event reports and session outcome recording
+    Trials(SkillsTrialsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsTrialsArgs {
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -885,6 +895,24 @@ struct SkillsHostArgs {
     provider_deadline: f64,
     #[arg(long)]
     exclude_skill: Vec<String>,
+    #[arg(long, default_value = "direct", value_parser = ["direct", "gateway"])]
+    jev_transport: String,
+    #[arg(long, default_value = "jev")]
+    gateway_command: String,
+    #[arg(long)]
+    gateway_project: Option<String>,
+    #[arg(long, value_parser = ["synthetic", "public-nonsensitive"])]
+    gateway_data_class: Option<String>,
+    #[arg(long, default_value = "advisory", value_parser = ["baseline", "shadow", "advisory"])]
+    trial_mode: String,
+    #[arg(long)]
+    event_log: Option<PathBuf>,
+    #[arg(long)]
+    session_id: Option<String>,
+    #[arg(long, default_value = "other", value_parser = ["codex", "omnigent", "pi", "other", "contract"])]
+    runtime: String,
+    #[arg(long, value_parser = ["discover_skills", "load_skill"], conflicts_with_all = ["status", "check", "client_config"])]
+    call_tool: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1941,6 +1969,12 @@ fn main() -> ExitCode {
     {
         return cli_skills::run_discovery_host(&cli, args);
     }
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Trials(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_trials(args);
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
@@ -2124,7 +2158,8 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::Catalog
             | SkillsCommand::Discover(_)
             | SkillsCommand::Load(_)
-            | SkillsCommand::Host(_) => None,
+            | SkillsCommand::Host(_)
+            | SkillsCommand::Trials(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {

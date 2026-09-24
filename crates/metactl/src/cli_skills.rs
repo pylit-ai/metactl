@@ -15,6 +15,7 @@ pub(super) fn cmd_skills(
         }
         SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
         SkillsCommand::Host(_) => unreachable!("host has a dedicated stdio entrypoint"),
+        SkillsCommand::Trials(_) => unreachable!("trials has a dedicated entrypoint"),
     }
 }
 
@@ -25,12 +26,18 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
     }
     fn launch(cli: &Cli, args: &SkillsHostArgs) -> anyhow::Result<std::process::ExitStatus> {
         use std::io::Write;
-        let mut script = tempfile::Builder::new().suffix(".py").tempfile()?;
+        let directory = tempfile::tempdir()?;
+        let script_path = directory.path().join("skill_discovery_host.py");
+        let mut script = fs::File::create(&script_path)?;
         script.write_all(include_bytes!("../assets/skill_discovery_host.py"))?;
         script.flush()?;
+        fs::write(
+            directory.path().join("skill_discovery_trials.py"),
+            include_bytes!("../assets/skill_discovery_trials.py"),
+        )?;
         let mut command = std::process::Command::new(&args.python);
         command
-            .arg(script.path())
+            .arg(&script_path)
             .arg("--metactl")
             .arg(std::env::current_exe()?)
             .arg("--project")
@@ -40,7 +47,28 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             .arg("--max-provider-calls")
             .arg(args.max_provider_calls.to_string())
             .arg("--provider-deadline")
-            .arg(args.provider_deadline.to_string());
+            .arg(args.provider_deadline.to_string())
+            .arg("--jev-transport")
+            .arg(&args.jev_transport)
+            .arg("--gateway-command")
+            .arg(&args.gateway_command)
+            .arg("--trial-mode")
+            .arg(&args.trial_mode)
+            .arg("--runtime")
+            .arg(&args.runtime);
+        for (value, flag) in [
+            (&args.gateway_project, "--gateway-project"),
+            (&args.gateway_data_class, "--gateway-data-class"),
+            (&args.session_id, "--session-id"),
+            (&args.call_tool, "--call-tool"),
+        ] {
+            if let Some(value) = value {
+                command.arg(flag).arg(value);
+            }
+        }
+        if let Some(value) = &args.event_log {
+            command.arg("--event-log").arg(value);
+        }
         for (enabled, flag) in [
             (args.status, "--status"),
             (args.check, "--check"),
@@ -75,6 +103,27 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
         Err(_) => {
             eprintln!("Discovery host could not start. Install Python 3.10+ on PATH and check the project path. No provider request was confirmed.");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+pub(super) fn run_discovery_trials(args: &SkillsTrialsArgs) -> ExitCode {
+    fn launch(args: &SkillsTrialsArgs) -> anyhow::Result<std::process::ExitStatus> {
+        use std::io::Write;
+        let mut script = tempfile::Builder::new().suffix(".py").tempfile()?;
+        script.write_all(include_bytes!("../assets/skill_discovery_trials.py"))?;
+        script.flush()?;
+        std::process::Command::new(&args.python)
+            .arg(script.path())
+            .args(&args.args)
+            .status()
+            .map_err(Into::into)
+    }
+    match launch(args) {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(_) => {
+            eprintln!("Discovery trial command could not start.");
             ExitCode::FAILURE
         }
     }

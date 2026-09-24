@@ -39,7 +39,45 @@ whose native restrictions have not been mapped. Plain text retrieval is not nati
 activation and never grants tool permissions. Exact skill names can be searched;
 ambiguous same-name results retain their distinct IDs and source digests.
 
-## Install, enable and prove Jev is active
+## Shared gateway and measured trials
+
+Use the approved scoped gateway client when your environment provides one. The
+client owns project authentication and shared quotas; MetaCTL never needs its
+credential or the upstream provider key. Install the gateway client through your
+organization's onboarding process first. MetaCTL does not provision it.
+
+```sh
+metactl --project /path/to/approved-project skills host \
+  --ranker jev --jev-transport gateway --gateway-command /path/to/jev \
+  --gateway-project APPROVED_PROJECT_ID --gateway-data-class public-nonsensitive \
+  --allow-provider-data --max-provider-calls 4 --provider-deadline 5 \
+  --trial-mode shadow --runtime codex \
+  --event-log /private/path/discovery.jsonl --status
+```
+
+Replace `--status` with `--check` for one fixed synthetic request, or omit it to
+run the persistent tool server. A check consumes the same gateway budget as a
+discovery attempt. Use `--client-config` to produce registration arguments and
+the [agent adapter guide](discovery-agent-adapters.md) for Codex, Omnigent and Pi.
+The data classification applies to **both the query and candidate descriptions**;
+do not label private project content as synthetic or public. If those inputs are
+not approved, use the deterministic baseline without provider consent.
+
+Choose `--trial-mode baseline` for no provider dispatch, `shadow` to record Jev's
+proposal while returning the baseline, or `advisory` to use validated ordering.
+Missing client/configuration, rejection, deadline and exhausted budgets retain
+the original candidates. No retry or interactive login occurs. The host attempt
+ceiling resets per process; the gateway must enforce cross-process monetary
+limits. Local readiness is not proof that gateway credentials are accepted.
+
+`--event-log` is opt-in private metadata recording. Check
+`metrics.telemetry_status`; a failed write does not interrupt discovery but must
+not be counted as a measured result. See [private trials](discovery-trials.md)
+for the local HTML dashboard and independently supplied task outcomes. Compare
+equivalent tasks across baseline, shadow and advisory sessions before claiming
+benefit; native catalog suppression and prompt-token savings remain unproven.
+
+## Direct-provider install and verification
 
 Install the released CLI using the [README installation choices](../../README.md#install).
 The host is embedded in both crate and binary distributions. Install Python 3.10+
@@ -94,8 +132,8 @@ For managed environments, `METACTL_SKILL_RANKER=jev`,
 `METACTL_JEV_ALLOW_DATA=true`, and `METACTL_JEV_MAX_CALLS=20` configure the packaged
 CLI. Explicit flags override values. These variables are not secrets. A budget
 resets with each child process; this is not a shared daily or dollar limit.
-Use a properly admitted project gateway when organizational policy requires one;
-this direct-provider adapter does not implement that gateway's project auth.
+Use the gateway transport above when organizational policy requires a properly
+admitted project gateway; direct transport does not implement project auth.
 Never distribute a shared provider key merely to make remote checks pass.
 
 Rollback: remove the MCP registration or set `--ranker deterministic`, then
@@ -182,7 +220,7 @@ python3 -m unittest discover -s tests -p test_skill_discovery_host.py -v
 python3 scripts/benchmark_skill_discovery.py --repeats 3 --distractors 200
 ```
 
-Metrics travel in tool responses, with no automatic external logging. They include
+Metrics travel in tool responses, with optional private local logging. They include
 local latency, returned bytes/count, repeated-load flag, catalog digest, ranker,
 fallback reason, provider calls, validated model and reported usage. They exclude
 raw queries, credentials and bodies. Failure may have incurred a provider charge

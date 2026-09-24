@@ -16,6 +16,15 @@ As of 2026-04-23, the recommended shape is to keep MCP setup as an optional onbo
 
 ## One-Line Install
 
+For the separate, opt-in `metactl skills host` stdio server, see
+[skill discovery](../user/skill-discovery.md) and its
+[Codex, Omnigent and Pi adapters](../user/discovery-agent-adapters.md). It exposes
+only `discover_skills` and `load_skill`. Deterministic mode is local; optional
+Jev direct/gateway ranking requires explicit data consent and a call ceiling.
+The private [trial report](../user/discovery-trials.md) records measured metadata
+without queries or instruction bodies. This server does not replace `metactld`
+or suppress a client's native skill catalog.
+
 Run these from the metactl repository root. They install `metactld` onto `PATH` with Cargo, then add a `metactl` MCP server entry for the selected agent.
 
 By default the project-scoped commands write config into the current metactl checkout. To install into another greenfield or brownfield repository, add `MCP_PROJECT_ROOT=/path/to/repo`, or run from that repository with `make -C /path/to/metactl ... MCP_PROJECT_ROOT="$PWD"`.

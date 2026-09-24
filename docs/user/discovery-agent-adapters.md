@@ -68,9 +68,10 @@ failure. Pi's native skill commands remain available.
 Only after the project's gateway policy, credential injection, data class, and
 per-process request ceiling are approved, add explicit host arguments such as
 `--ranker jev --jev-transport gateway --gateway-command /absolute/path/to/jev
---gateway-project PROJECT_ID --gateway-data-class synthetic --trial-mode shadow
---allow-provider-data --max-provider-calls 20`. Use `public-nonsensitive` only
-for data cleared for that route. Keep keys out of arguments and configuration;
+--gateway-project PROJECT_ID --gateway-data-class public-nonsensitive --trial-mode shadow
+--allow-provider-data --max-provider-calls 4`. Both task queries and candidate
+descriptions must be cleared for that route. The `synthetic` classification is
+reserved for fixed `--check` requests. Keep keys out of arguments and configuration;
 use the approved runtime injector. Shadow mode can record private evaluation
 events without changing skill order; advisory mode may reorder a candidate.
 Record only an opaque `--session-id`, and keep any `--event-log` path in a private
@@ -81,3 +82,7 @@ provider path, and real tool metrics show whether a task call used Jev.
 These registrations add an external discovery interface. They do not establish
 that any client suppressed native skill descriptors before model request
 construction; measure that separately before claiming context savings.
+
+For Omnigent Codex sessions choose either the inherited Codex registration or the
+inline Omnigent MCP configuration, then verify the live tool list. Enabling both
+can duplicate the same tool names.
