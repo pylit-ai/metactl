@@ -5,10 +5,30 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from test_skill_discovery_host import host, baseline, response
+from test_skill_discovery_host import host, baseline, response, Fixture, BINARY
 
 
 class GatewayTrials(unittest.TestCase):
+    @unittest.skipUnless(BINARY.exists(), "build metactl first")
+    def test_health_check_is_not_a_task_event_and_synthetic_is_check_only(self):
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        with tempfile.TemporaryDirectory() as root:
+            ledger = Path(root).resolve() / "events.jsonl"
+            script = self.client(root, "import sys\nsys.stdin.read()\nprint(" + repr(json.dumps({"available": True, "response": response()})) + ")\n")
+            args = [str(BINARY), "--project", str(fixture.project), "--no-profile", "skills", "host",
+                    "--ranker", "jev", "--jev-transport", "gateway", "--gateway-command", script,
+                    "--gateway-data-class", "synthetic", "--allow-provider-data", "--max-provider-calls", "1",
+                    "--event-log", str(ledger)]
+            result = subprocess.run(args + ["--check"], capture_output=True, text=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(json.loads(result.stdout)["provider_verified"])
+            self.assertFalse(ledger.exists())
+            rejected = subprocess.run(args + ["--call-tool", "discover_skills"], input='{"query":"task"}',
+                                      capture_output=True, text=True, timeout=10)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("reserved for --check", rejected.stderr)
+
     def test_oversized_gateway_output_is_terminated_before_deadline(self):
         with tempfile.TemporaryDirectory() as root:
             script = self.client(root, "import sys,time\nsys.stdin.read()\nsys.stdout.write('x'*2097152)\nsys.stdout.flush()\ntime.sleep(10)\n")
