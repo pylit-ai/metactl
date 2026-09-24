@@ -13,6 +13,8 @@ mod error_paths_workflow;
 mod explain_status_workflow;
 #[path = "cli_workflow/fleet.rs"]
 mod fleet_workflow;
+#[path = "cli_workflow/git.rs"]
+mod git_workflow;
 #[path = "cli_workflow/ignore.rs"]
 mod ignore_workflow;
 #[path = "cli_workflow/plugin.rs"]

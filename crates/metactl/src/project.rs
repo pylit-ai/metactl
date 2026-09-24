@@ -193,6 +193,8 @@ pub struct LockedTarget {
 pub struct ProjectLock {
     pub api_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_content_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay_path: Option<String>,
@@ -220,6 +222,7 @@ impl Default for ProjectLock {
     fn default() -> Self {
         Self {
             api_version: crate::types::API_VERSION.to_string(),
+            library_content_digest: None,
             config_digest: None,
             overlay_path: None,
             overlay_digest: None,
@@ -1390,6 +1393,110 @@ pub fn digest_bytes(bytes: &[u8]) -> String {
 pub fn digest_path(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     Ok(digest_bytes(&bytes))
+}
+
+/// Fingerprint library inputs used by compilation, independent of Git metadata.
+/// This is intentionally broader than selected packs: a false positive requests
+/// a new sync, while omitting a selected resource would incorrectly claim freshness.
+pub fn library_content_digest(roots: &[PathBuf]) -> Result<String> {
+    let mut hasher = Sha256::new();
+    for (index, root) in roots.iter().enumerate() {
+        hasher.update(index.to_le_bytes());
+        let mut files = Vec::new();
+        collect_library_content_files(root, root, &mut files)?;
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        for (relative, bytes) in files {
+            hasher.update(relative.as_bytes());
+            hasher.update([0]);
+            hasher.update(bytes);
+            hasher.update([0]);
+        }
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+pub fn library_content_comparison(context: &ProjectContext) -> &'static str {
+    match library_content_digest(&context.library_roots) {
+        Ok(current) => match context.lock.library_content_digest.as_deref() {
+            Some(recorded) if recorded == current => "current",
+            Some(_) => "drifted",
+            None => "unverifiable",
+        },
+        Err(_) => "unverifiable",
+    }
+}
+
+fn collect_library_content_files(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> Result<()> {
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        // Fleet controllers and Git checkouts contain runtime state that is
+        // never a library input. Other source folders may have arbitrary
+        // names, so keep them in the fingerprint.
+        if dir == root
+            && matches!(
+                name.to_str(),
+                Some(
+                    ".agents"
+                        | ".claude"
+                        | ".codex"
+                        | ".cursor"
+                        | ".gemini"
+                        | ".github"
+                        | ".omc"
+                        | ".opendream"
+                        | "fleet"
+                        | "notepads"
+                        | "quarantine"
+                        | "reports"
+                        | "evals"
+                        | "tests"
+                        | "metactl.yaml"
+                        | "metactl.lock.json"
+                        | "AGENTS.md"
+                        | "CLAUDE.md"
+                        | "CLAUDE.local.md"
+                        | "README.md"
+                        | ".gitignore"
+                        | ".gitmodules"
+                )
+            )
+        {
+            continue;
+        }
+        if matches!(
+            name.to_str(),
+            Some(
+                ".git"
+                    | ".metactl"
+                    | "target"
+                    | "tmp"
+                    | ".DS_Store"
+                    | ".metactl-bundled-starter.complete"
+            )
+        ) {
+            continue;
+        }
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            collect_library_content_files(root, &path, files)?;
+        } else if kind.is_file() {
+            let relative = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push((
+                relative,
+                fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub fn digest_json<T: Serialize>(value: &T) -> Result<String> {
