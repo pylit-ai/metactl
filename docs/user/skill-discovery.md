@@ -4,6 +4,7 @@ Experimental, opt-in, plain-instruction adapter. Deterministic mode is the defau
 and requires no provider, account, API credits, SDK or network access. Existing
 compilation, native skill menus and installed skill folders are unchanged.
 
+<a id="quick-start"></a>
 ## First-run workflow
 
 There are three separate steps: make a project catalog available, register the
@@ -15,8 +16,8 @@ No `metactl skills enable` command currently performs the client registration.
    `metactl --project /absolute/path/to/project skills host --status --ranker deterministic --trial-mode baseline`.
    Look for `project_ready: true` and an eligible-skill count. `provider_verified:
    false` is expected in baseline mode; status makes no provider request. If
-   your machine default profile is unrelated to this project, explicitly place
-   `--no-profile` before `skills` and repeat the check.
+   your machine default profile is unrelated to this project, repeat with
+   `metactl --project /absolute/path/to/project --no-profile skills host --status --ranker deterministic --trial-mode baseline`.
 2. Generate registration data with the same project and mode using
    `metactl --project /absolute/path/to/project skills host --client-config --ranker deterministic --trial-mode baseline --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl`.
    It prints a client-neutral `mcpServers` JSON object and does **not** edit
@@ -40,7 +41,8 @@ the host:
 > `routing_receipt`. If discovery was not called, say so when reporting routing.
 
 This line influences agent tool choice. It does not install a server, change
-Jev consent, or prove that an agent called the tool. The starter
+Jev consent or client permissions and approval settings, or prove that an agent
+called the tool. The starter
 `skill-discovery` pack carries the reusable agent instructions for projects
 that select it. Its current starter-pack projection is limited to `codex-cli`;
 other supported MCP clients can register the host separately. An `AGENTS.md` line

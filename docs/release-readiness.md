@@ -1,19 +1,20 @@
 # Release Readiness
 
-Release candidate: **0.1.22**, prepared September 20, 2026. Distribution unit:
+Release candidate: **0.1.23**, prepared September 25, 2026. Distribution unit:
 GitHub native binary archives and existing metactl/metactld crates, in dependency
 order. npm remains an unpublished scaffold; no new registry distribution.
 
-This release adds opt-in deterministic skill discovery with optional Jev ranking,
-a packaged Python 3.10+ host entrypoint, offline status, an explicit synthetic
-provider check, and no-secret client configuration output. Native defaults remain
-unchanged. See [activation](user/skill-discovery.md) and the [development benchmark](../reports/skill-discovery-development-benchmark.md).
+This release adds bounded gateway-backed discovery trials, routing receipts,
+private event inspection and first-run activation guidance. It also includes
+Codex projection safety and library source-drift planning since v0.1.22. Native
+defaults remain unchanged. See [activation](user/skill-discovery.md),
+[trial modes](user/discovery-trials.md), and the [changelog](../CHANGELOG.md).
 
 ## Evidence and claims
 
-The previous discovery implementation passed 373 Rust and 19 Python tests. This
-candidate adds activation tests and includes the discovery suite in the release
-gate. Run all final gates on the release commit; completed test counts, CI,
+The v0.1.22 discovery implementation passed 373 Rust and 19 Python tests.
+This candidate adds gateway trials and onboarding guidance. Run all final
+gates on the release commit; completed test counts, CI,
 checksums, attestations and publication identity belong in its release notes.
 No provider quality, native prompt-token or session-cost improvement is claimed.
 
@@ -42,10 +43,10 @@ before publishing. See [install verification](user/install-verification.md).
 ## Publication order and recovery
 
 1. Push candidate and require green exact-head CI; merge through normal PR flow.
-2. Verify merged main, then push an annotated v0.1.22 tag. Never move a published tag.
+2. Verify merged main, then push an annotated v0.1.23 tag. Never move a published tag.
 3. Verify workflow and draft assets before public release.
 4. Publish metactl to crates.io after its dry-run passes.
-5. Wait for metactl 0.1.22 to be visible; dry-run and publish metactld next.
+5. Wait for metactl 0.1.23 to be visible; dry-run and publish metactld next.
 6. Verify both registry versions and installed binary provenance.
 
 A private overlay records the same public version and tag, never a competing

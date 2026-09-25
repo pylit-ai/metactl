@@ -109,7 +109,15 @@ fresh Codex session and inspect its available tools for
 task, then load one returned ID and digest. Confirm its `routing_receipt` says
 `mode=baseline`, `provider_calls=0`, and `log=recorded` when a private log is
 configured. Inspect the event with `metactl skills trials inspect` using the
-returned session and run IDs. The log is separate from Codex's transcript.
+returned session and run IDs:
+
+```sh
+metactl skills trials inspect --log /private/path/discovery-events.jsonl \
+  --session-id SESSION_SHA256 --run-id RUN_UUID_HEX
+```
+
+The run filter is optional; the log is separate from Codex's transcript.
+Confirm the returned metrics and unchanged native skill catalog.
 
 For more predictable use, add the optional, conditional `AGENTS.md` instruction
 in the [first-run workflow](skill-discovery.md#first-run-workflow). Avoid an
@@ -117,7 +125,6 @@ unconditional “before every coding task” instruction: exact known skills and
 tasks without specialist needs do not require discovery. Server registration,
 agent invocation, Jev use and task benefit have separate evidence.
 
-Confirm the returned metrics and unchanged native skill catalog.
 `codex mcp remove metactl-skills` reverses a CLI-added registration; remove only
 this server block to reverse a project-local registration.
 Omnigent Codex native sessions copy the user's Codex configuration at launch;

@@ -1,6 +1,6 @@
 {
   "name": "@pylit-ai/metactl",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "description": "Verified release-binary installer for metactl",
   "license": "Apache-2.0",
   "private": false,
