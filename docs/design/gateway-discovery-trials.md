@@ -17,7 +17,7 @@ wall-clock deadline. Public code must contain no deployment names, secrets or
 private evaluation results. Permitted-data declarations apply to the complete
 task query and all candidate descriptions, not just the query.
 
-Record per discovery: arm, runtime, opaque session/run/decision identity,
+Record per discovery: arm, runtime, opaque session/run/event identity,
 baseline/effective/proposed IDs, catalog digest, result bytes, latency, outcome,
 attempts, validated provider calls/model/usage and unknown billing. Record loads
 and independently supplied session outcomes separately. Never infer prompt

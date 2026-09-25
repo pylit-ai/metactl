@@ -24,7 +24,19 @@ class DiscoveryHost {
   private fail(): void {
     if (this.poisoned) return;
     this.poisoned = true;
-    this.child?.kill();
+    const child = this.child;
+    if (child) {
+      // EOF lets the Rust wrapper reap Python and remove its temporary files.
+      child.stdin.end();
+      const timer = setTimeout(() => {
+        try {
+          if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+          else child.kill();
+        } catch { /* Already exited. */ }
+      }, 1000);
+      timer.unref();
+      child.once("exit", () => clearTimeout(timer));
+    }
     for (const item of this.pending.values()) {
       clearTimeout(item.timer);
       item.reject();
@@ -83,9 +95,11 @@ class DiscoveryHost {
     if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string") || args.length === 0) {
       this.fail(); throw new Error(ERROR);
     }
-    this.child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], shell: false });
+    this.child = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"], shell: false,
+      detached: process.platform !== "win32" });
     this.child.stdout.on("data", (chunk: Buffer) => this.onData(chunk));
     this.child.stderr.resume(); // Never echo host diagnostics or environment.
+    this.child.stdin.on("error", () => this.fail());
     this.child.on("error", () => this.fail());
     this.child.on("exit", () => this.fail());
     const reply = await this.request("initialize", {

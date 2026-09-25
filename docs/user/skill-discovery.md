@@ -216,13 +216,16 @@ references are not thereby admitted or verified.
 
 ```sh
 cargo build -p metactl
-python3 -m unittest discover -s tests -p test_skill_discovery_host.py -v
+python3 -m unittest discover -s tests -p 'test_skill_discovery*.py' -v
 python3 scripts/benchmark_skill_discovery.py --repeats 3 --distractors 200
 ```
 
 Metrics travel in tool responses, with optional private local logging. They include
 local latency, returned bytes/count, repeated-load flag, catalog digest, ranker,
-fallback reason, provider calls, validated model and reported usage. They exclude
+fallback reason, provider attempts, validated provider calls, model and reported usage. `provider_calls`
+is `null` for an uncertain attempt (previously counted as a call); inspect
+`provider_attempts` as well. Shadow responses hide the proposal and use the
+`shadow` reason; the private ledger preserves the underlying ranking reason. They exclude
 raw queries, credentials and bodies. Failure may have incurred a provider charge
 even when usage is unknown. No cost is invented from unknown usage.
 

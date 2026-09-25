@@ -31,7 +31,9 @@ REASONS = frozenset({"baseline", "disabled", "data_not_authorized", "missing_cre
                      "budget_exhausted", "unambiguous", "payload_budget",
                      "abstained", "reordered", "unchanged", "deadline",
                      "provider_or_schema_failure"})
-RUNTIMES = frozenset({"codex", "omnigent", "pi", "other", "contract"})
+RUNTIMES = frozenset({"claude-code", "codex-cli", "cursor", "filesystem-agent",
+                      "gemini-cli", "openclaw", "opencode",
+                      "codex", "omnigent", "pi", "other", "contract"})
 ARMS = frozenset({"baseline", "shadow", "advisory"})
 TRANSPORTS = frozenset({"direct", "gateway", "none"})
 COMMON = {"schema", "kind", "event_id", "session_id", "run_id", "runtime",
@@ -213,7 +215,7 @@ def _unique_object(pairs):
 def read_events(path):
     fd = _open_ledger(path, create=False)
     try:
-        fcntl.flock(fd, fcntl.LOCK_SH)
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
         return _read_locked(fd)
     finally:
         os.close(fd)
@@ -227,7 +229,7 @@ def record_event(path, event):
         raise ValueError("event exceeds size bound")
     fd = _open_ledger(path, create=True)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         old = _read_locked(fd)
         for existing in old:
             if existing["event_id"] == event["event_id"]:
@@ -292,7 +294,8 @@ def summarize(events, runtime=None, arm=None):
             "pass": sum(e["success"] == "pass" for e in outcomes),
             "fail": sum(e["success"] == "fail" for e in outcomes),
             "unknown": sum(e["success"] == "unknown" for e in outcomes),
-            "fallback": sum(e["reason"] not in {"baseline", "reordered", "unchanged", "abstained"} for e in discovers),
+            "fallback": sum(e["reason"] not in {"baseline", "disabled", "unambiguous", "reordered", "unchanged", "abstained"} for e in discovers),
+            "skipped": sum(e["reason"] in {"disabled", "unambiguous"} for e in discovers),
             "reordered": sum(e["reason"] == "reordered" and e["proposed_ids"] != e["baseline_ids"] for e in discovers),
             "abstained": sum(e["reason"] == "abstained" for e in discovers),
             "provider_attempts": sum(e["provider_attempts"] for e in discovers),
@@ -430,6 +433,10 @@ def main(argv=None):
     report.add_argument("--json-output")
     report.add_argument("--runtime", choices=sorted(RUNTIMES))
     report.add_argument("--arm", choices=sorted(ARMS))
+    inspect = sub.add_parser("inspect", help="show recorded calls for one private session")
+    inspect.add_argument("--log", required=True)
+    inspect.add_argument("--session-id", required=True)
+    inspect.add_argument("--run-id")
     outcome = sub.add_parser("outcome", help="attach independently verified task outcome")
     outcome.add_argument("--log", required=True)
     outcome.add_argument("--session-id", required=True)
@@ -445,7 +452,15 @@ def main(argv=None):
     outcome.add_argument("--human-interventions", type=int)
     outcome.add_argument("--verifier-ref", help="opaque SHA-256 identifier only")
     args = parser.parse_args(argv)
-    if args.command == "report":
+    if args.command == "inspect":
+        _hex(args.session_id, HEX64, "session_id")
+        if args.run_id is not None:
+            _hex(args.run_id, UUIDHEX, "run_id")
+        rows = [e for e in read_events(args.log) if e["session_id"] == args.session_id
+                and (args.run_id is None or e["run_id"] == args.run_id)]
+        print(json.dumps({"status": "recorded" if rows else "no_recorded_events",
+                          "events": rows, "summary": summarize(rows)}, sort_keys=True))
+    elif args.command == "report":
         paths = [os.path.abspath(args.log), os.path.abspath(args.output)]
         if args.json_output:
             paths.append(os.path.abspath(args.json_output))

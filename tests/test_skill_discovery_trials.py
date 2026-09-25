@@ -39,6 +39,55 @@ def event(kind="discover", **changes):
 
 
 class TrialTests(unittest.TestCase):
+    def test_busy_ledger_fails_without_waiting_and_skips_are_not_fallbacks(self):
+        import fcntl
+        import time
+        trial.record_event(self.log, event())
+        with self.log.open("rb") as locked:
+            fcntl.flock(locked, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            start = time.monotonic()
+            with self.assertRaises(BlockingIOError):
+                trial.record_event(self.log, event())
+            with self.assertRaises(BlockingIOError):
+                trial.read_events(self.log)
+            self.assertLess(time.monotonic() - start, 1)
+        summary = trial.summarize([event(reason="disabled"), event(reason="unambiguous")])
+        self.assertEqual(summary["cohorts"][0]["fallback"], 0)
+        self.assertEqual(summary["cohorts"][0]["skipped"], 2)
+
+    def test_all_canonical_targets_have_working_host_and_ledger_labels(self):
+        targets = [json.loads(p.read_text())["target_id"]
+                   for p in (ROOT / "library/starter/targets").glob("*.json")]
+        for runtime in targets:
+            with self.subTest(runtime=runtime):
+                trial.validate_event(event(runtime=runtime))
+                command = [str(ROOT / "target/debug/metactl"), "skills", "host",
+                           "--runtime", runtime, "--ranker", "deterministic",
+                           "--trial-mode", "baseline", "--session-id", "one-shot-private-key", "--client-config"]
+                result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                args = json.loads(result.stdout)["mcpServers"]["metactl-skills"]["args"]
+                self.assertEqual(args[args.index("--runtime") + 1], runtime)
+                self.assertNotIn("--session-id", args)
+
+    def test_inspect_filters_session_and_run_and_does_not_infer_nonuse(self):
+        one = event()
+        trial.record_event(self.log, one)
+        trial.record_event(self.log, event(session_id="f" * 64))
+        trial.record_event(self.log, event(run_id="c" * 32))
+        command = [sys.executable, str(SCRIPT), "inspect", "--log", str(self.log),
+                   "--session-id", one["session_id"], "--run-id", one["run_id"]]
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["status"], "recorded")
+        self.assertEqual(data["events"], [one])
+        command[-1] = "d" * 32
+        data = json.loads(subprocess.check_output(command, text=True))
+        self.assertEqual(data["status"], "no_recorded_events")
+        self.assertEqual(data["events"], [])
+        command[-1] = "invalid"
+        self.assertNotEqual(subprocess.run(command, capture_output=True).returncode, 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir="/private/tmp" if Path("/private/tmp").is_dir() else None)
         self.addCleanup(self.temp.cleanup)

@@ -7,6 +7,65 @@ map any host-disabled skills to repeatable `--exclude-skill` arguments. The
 [skill-discovery guide](skill-discovery.md) explains eligibility, digest checks,
 and provider proof.
 
+## Coverage of standard MetaCTL targets
+
+The canonical inventory is `library/starter/targets/*.json`. Projection support
+(generating a client's files) is separate from live discovery acceptance. The
+host accepts every canonical target ID as `--runtime`; that label attributes
+events and does not install, enable or prove the client's integration.
+
+| Target ID | Discovery connection | Acceptance boundary |
+| --- | --- | --- |
+| `codex-cli` | Stdio MCP registration below | Check both tools in a fresh native session. Legacy `codex` log label remains accepted. |
+| `claude-code` | Stdio MCP; `.mcp.json` or `claude mcp add` | Configuration recipe; live discover/load still required on the installed client. |
+| `cursor` | Stdio MCP in project `.cursor/mcp.json` | Configuration recipe; live discover/load still required. |
+| `gemini-cli` | Stdio MCP in `.gemini/settings.json` | Configuration recipe; live discover/load still required. |
+| `opencode` | Local MCP in `opencode.json` | Experimental target; different envelope described below. |
+| `openclaw` | Client/version-specific MCP bridge required | Descriptor advertises MCP, but its shipped runtime template has no server registration schema. No native bridge acceptance is claimed. Use baseline projected instructions until the installed bridge is verified. |
+| `filesystem-agent` | Projected instruction files | Descriptor declares no MCP or local-script capability. Automatic discovery is unavailable; an operator can separately run the CLI and attribute it to this label. |
+
+Pi and Omnigent below are additional adapters, not replacements for standard
+targets. `other` covers explicitly tested custom clients; `contract` is for
+protocol tests. Existing `codex` events are not rewritten or automatically
+combined with `codex-cli` cohorts.
+
+### Claude Code, Cursor and Gemini CLI
+
+Generate a baseline server entry with an absolute project and private log path:
+
+```sh
+metactl --project /absolute/path/to/project skills host --client-config \
+  --ranker deterministic --trial-mode baseline --runtime claude-code \
+  --event-log /private/path/discovery-events.jsonl
+```
+
+Merge the returned `mcpServers.metactl-skills` entry into the existing client
+configuration; preserve other settings. Use `--runtime cursor` or
+`--runtime gemini-cli` when generating their entries. Claude also supports:
+
+```sh
+claude mcp add --transport stdio --scope project metactl-skills -- \
+  metactl --project /absolute/path/to/project skills host \
+  --ranker deterministic --trial-mode baseline --runtime claude-code \
+  --event-log /private/path/discovery-events.jsonl
+```
+
+Review/trust the registration in the client, restart or reload its tools, call
+discover then load, and inspect the receipt. Remove only this server entry to
+roll back. Formats checked against upstream documentation on 2026-09-25:
+[Claude Code](https://code.claude.com/docs/en/mcp),
+[Cursor](https://prod.cursor.com/help/customization/mcp),
+[Gemini CLI](https://geminicli.com/docs/tools/mcp-server/).
+
+### OpenCode
+
+Generate the same entry with `--runtime opencode`. In `opencode.json`, merge an
+entry under `mcp.metactl-skills` with `type: "local"`, `enabled: true`, and a
+`command` array containing the generated command followed by every generated
+argument. Do not paste the `mcpServers` envelope into OpenCode. See the
+[OpenCode local MCP format](https://opencode.ai/docs/mcp-servers/).
+Verify both tools on the installed version before declaring native acceptance.
+
 ## Codex
 
 Use the installed CLI's stdio registration form. Replace the absolute project
@@ -14,7 +73,8 @@ path with a locally configured project and review the flags before registering:
 
 ```sh
 codex mcp add metactl-skills -- metactl --project /absolute/path/to/project \
-  skills host --ranker deterministic --runtime codex --trial-mode baseline
+  skills host --ranker deterministic --runtime codex-cli --trial-mode baseline \
+  --event-log /private/path/discovery-events.jsonl
 codex mcp get metactl-skills
 ```
 
@@ -60,6 +120,20 @@ the host. The bridge serializes calls, bounds request time and output, and
 closes the child at session shutdown. On timeout, cancellation, process exit,
 malformed response, or host error it fails closed for the rest of that Pi
 session. It does **not** restart a child and silently renew its per-process Jev
+request ceiling. Shutdown closes stdin for graceful host cleanup, then terminates
+the remaining POSIX process group after one second. A forced termination can
+leave a temporary script directory; it contains code, not credentials. Gateway
+workers enforce their own bounded deadlines. On Windows, process-tree cleanup
+is not accepted; the trial ledger itself requires POSIX. The Pi contract test
+requires an installed package and is intentionally a local optional gate,
+not native acceptance from generic CI. Run:
+
+```sh
+PI_PACKAGE_ROOT=/absolute/path/to/node_modules/@earendil-works/pi-coding-agent \
+  node tests/test_discovery_agent_adapters.mjs
+```
+
+The bridge does not automatically retry or renew the per-process Jev
 request ceiling. Start a new Pi session only after inspecting and resolving the
 failure. Pi's native skill commands remain available.
 

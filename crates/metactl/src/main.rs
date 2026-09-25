@@ -909,7 +909,7 @@ struct SkillsHostArgs {
     event_log: Option<PathBuf>,
     #[arg(long)]
     session_id: Option<String>,
-    #[arg(long, default_value = "other", value_parser = ["codex", "omnigent", "pi", "other", "contract"])]
+    #[arg(long, default_value = "other", value_parser = ["claude-code", "codex-cli", "cursor", "filesystem-agent", "gemini-cli", "openclaw", "opencode", "codex", "omnigent", "pi", "other", "contract"])]
     runtime: String,
     #[arg(long, value_parser = ["discover_skills", "load_skill"], conflicts_with_all = ["status", "check", "client_config"])]
     call_tool: Option<String>,

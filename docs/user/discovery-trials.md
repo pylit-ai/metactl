@@ -1,15 +1,91 @@
 # Private skill discovery trials
 
-This optional evaluation lane records bounded metadata for Codex, Omnigent and
-Pi skill discovery. It does not change native skill menus, provider consent or
+This optional evaluation lane records bounded metadata for all standard MetaCTL
+target labels and the additional Omnigent and Pi adapters. See the
+[compatibility boundaries](discovery-agent-adapters.md). It does not change native skill menus, provider consent or
 the deterministic route. Keep the ledger and every report outside the repository
 on an operator-controlled private volume. No data is sent by the report command.
 
 ## Run and inspect
 
+**Registration is not automatic routing.** If the coding agent never calls
+`discover_skills`, there is no discovery event and no Jev call through this
+host. `--ranker deterministic` or `--trial-mode baseline` makes zero provider
+calls. Shadow calls Jev when eligible but preserves baseline order; advisory
+can apply a validated order. This feature selects skills, not the coding
+agent's underlying model.
+
+Every discovery response includes a `routing_receipt`, for example:
+`Jev discovery: mode=shadow; reason=shadow; provider_calls=1; order_changed=False; log=recorded; event=<opaque ID>`.
+In shadow mode the response omits proposed IDs and masks the ranking reason as
+`shadow`, so the coding agent cannot follow the hidden proposal. The private
+ledger retains the proposal and original reason for later analysis.
+The host bootstrap asks the agent to surface it; a client may ignore that
+instruction or hide tool output, so inspect the actual tool response or ledger.
+No global hook or guarantee of discovery on every coding run is installed.
+
+| Evidence | Meaning |
+| --- | --- |
+| `provider_attempts=0`, `provider_calls=0` | Jev not called; inspect `reason` (baseline, disabled, unambiguous, budget, consent, etc.). |
+| `provider_calls=1`, model and usage present | Validated Jev response observed; this is not proof of useful task impact. |
+| `provider_calls=null` | Attempt occurred but provider completion is unknown; a charge may still have occurred. |
+| `reason=unchanged` | Valid Jev choice agreed with the first baseline candidate. |
+| `reason=abstained` | Jev returned no preference; baseline retained. |
+| Different proposed IDs | Suggested ordering changed; applied only in advisory mode. |
+| Different effective IDs | Returned ordering actually changed. |
+| `telemetry_status=recorded` | This event was appended to the private ledger. `failed` means inspect permissions/size locally; `disabled` means no path configured. |
+
+Keep `metrics.event_id`, `metrics.run_id` and `metrics.session_id` with the
+coding task's local trace to correlate records. `run_id` identifies a host
+process, not necessarily a whole coding task. Use a unique opaque
+`--session-id` when launching each trial and retain its returned digest. Do not
+put task text in identifiers. Native clients can reuse hosts across turns;
+their lifecycle is not automatically equivalent to a trial session.
+
+```sh
+metactl skills trials inspect --log /private/path/discovery-events.jsonl \
+  --session-id SESSION_SHA256 --run-id RUN_UUID_HEX
+```
+
+The run filter is optional. `no_recorded_events` means no matching evidence,
+not verified non-use: tools may not have run, logging may have failed, or the
+wrong ledger/session may have been selected. Missing or invalid ledgers fail
+with an error. Inspect prints validated private metadata; redirect only to a
+private destination. Report generation and inspection never call Jev.
+
+For visible operation, ask your agent: “For relevant skill discovery, call
+discover_skills and show its routing_receipt. If you do not call it, say
+discovery was not invoked. Report logging failures.” This is a visibility
+instruction, not permission to transmit private task or skill descriptions.
+
+### Storage and later analysis
+
+`--event-log` is explicit: there is no default central collection or upload.
+Use one durable private directory for logs, reports and your task-to-session
+mapping. Logs include time, runtime, mode, opaque identifiers and bounded
+metrics; never raw queries or skill bodies. The ledger is capped at 8 MiB;
+when full, recording reports `failed`. Choose a new private ledger at a session
+boundary and preserve the old one for analysis. No automatic rotation or
+deletion occurs. Coding-agent transcripts are separate client-owned records.
+
+The private trial ledger currently requires POSIX file ownership and `flock`
+(macOS/Linux); Windows is not supported. Use physical absolute paths: macOS
+`/tmp` and `/var` are symlinks, so use `/private/tmp` or resolve the chosen
+directory first. Symlink ancestry is rejected rather than silently followed.
+Concurrent lock contention fails immediately and is reported as logging
+failure; discovery still returns its normal result. Inspect again after the
+writer finishes. A static `--client-config` deliberately omits `--session-id`;
+default hosts get a fresh random session identity at launch.
+
+`skills host --call-tool discover_skills` accepts a JSON argument object on
+stdin for one-shot diagnostics. Every invocation starts a fresh process.
+Provider-enabled one-shot calls require gateway transport with an approved
+shared budget; direct provider transport is rejected for this mode. Baseline
+one-shot calls remain available without provider access.
+
 Give a host process a private ledger path using the host's trial option. The
-same path can collect baseline, shadow and advisory sessions. Use a unique run
-identifier for an evaluation run and compare equivalent tasks only after
+same path can collect baseline, shadow and advisory sessions. Use a unique session
+identifier at each trial launch and compare equivalent tasks only after
 checking how they were assigned. Each `metrics.session_id` identifier returned
 by the host and stored in the ledger is the SHA-256 digest of the private
 session key; it is not the original key.

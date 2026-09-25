@@ -37,7 +37,18 @@ for line in sys.stdin:
 `;
 const python = process.env.PYTHON || "python3";
 process.env.METACTL_DISCOVERY_COMMAND = python;
-process.env.METACTL_DISCOVERY_ARGS_JSON = JSON.stringify(["-u", "-c", mockHost]);
+// Match the real Rust-wrapper -> Python-host process shape.
+const wrapper = `import subprocess, sys\nsys.exit(subprocess.call([sys.executable, '-u', '-c', ${JSON.stringify(mockHost)}]))`;
+process.env.METACTL_DISCOVERY_ARGS_JSON = JSON.stringify(["-u", "-c", wrapper]);
+
+async function assertExited(pid) {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    try { process.kill(pid, 0); }
+    catch (error) { if (error.code === "ESRCH") return; throw error; }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.fail(`host descendant ${pid} survived shutdown`);
+}
 
 function extension() {
   const tools = new Map();
@@ -58,16 +69,19 @@ assert.equal(one.pid, two.pid, "calls must share one host and one request budget
 assert.equal(two.name, "load_skill");
 assert.equal(two.args.digest, "b".repeat(64));
 first.close();
+await assertExited(one.pid);
 
 const broken = extension();
 await assert.rejects(broken.tools.get("discover_skills").execute("c", { query: "malformed" }), /unavailable for this session/);
 await assert.rejects(broken.tools.get("discover_skills").execute("d", { query: "review" }), /unavailable for this session/);
 broken.close();
 const cancelled = extension();
+const cancelledPid = JSON.parse((await cancelled.tools.get("discover_skills").execute("start", { query: "review" })).content[0].text).pid;
 const controller = new AbortController();
 const inflight = cancelled.tools.get("discover_skills").execute("e", { query: "slow" }, controller.signal);
 setTimeout(() => controller.abort(), 30);
 await assert.rejects(inflight, /unavailable for this session/);
 await assert.rejects(cancelled.tools.get("discover_skills").execute("f", { query: "review" }), /unavailable for this session/);
 cancelled.close();
+await assertExited(cancelledPid);
 console.log("PASS: Pi tools share one MCP child, preserve output, and fail closed after malformed reply or cancellation");
