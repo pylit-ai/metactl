@@ -7,6 +7,21 @@ map any host-disabled skills to repeatable `--exclude-skill` arguments. The
 [skill-discovery guide](skill-discovery.md) explains eligibility, digest checks,
 and provider proof.
 
+For the five verified project configuration formats below, preview and apply
+the baseline connection directly:
+
+```sh
+metactl --project /absolute/project skills connect --target codex-cli
+metactl --project /absolute/project skills connect --target codex-cli --apply
+metactl --project /absolute/project skills doctor --target codex-cli
+```
+
+Replace `codex-cli` with `claude-code`, `cursor`, `gemini-cli`, or `opencode`.
+The connector refuses tracked machine-specific configuration files and
+conflicting existing server entries. `--scope user` is available only for Codex.
+To reverse an installed entry, run the preview's `--remove` command. Native
+client tool acceptance is still a fresh-session test.
+
 ## Coverage of standard MetaCTL targets
 
 The canonical inventory is `library/starter/targets/*.json`. Projection support

@@ -14,6 +14,12 @@ pub(super) fn cmd_skills(
             cmd_skill_discovery(cli, &args.command)
         }
         SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
+        SkillsCommand::Connect(connect_args) => {
+            cli_skill_discovery_connection::connect(cli, connect_args)
+        }
+        SkillsCommand::Doctor(doctor_args) => {
+            cli_skill_discovery_connection::doctor(cli, doctor_args)
+        }
         SkillsCommand::Host(_) => unreachable!("host has a dedicated stdio entrypoint"),
         SkillsCommand::Trials(_) => unreachable!("trials has a dedicated entrypoint"),
     }

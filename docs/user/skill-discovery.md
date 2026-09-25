@@ -11,7 +11,6 @@ The optional packaged host needs Python 3.10 or newer on the client machine.
 There are three separate steps: make a project catalog available, register the
 two-tool host in a coding client, and have an agent call it when specialist
 instructions are useful. Jev is an optional fourth step for authorized ranking.
-No `metactl skills enable` command currently performs the client registration.
 
 1. Point MetaCTL at an **absolute project path** and run
    `metactl --project /absolute/path/to/project skills host --status --ranker deterministic --trial-mode baseline`.
@@ -19,24 +18,27 @@ No `metactl skills enable` command currently performs the client registration.
    false` is expected in baseline mode; status makes no provider request. If
    your machine default profile is unrelated to this project, repeat with
    `metactl --project /absolute/path/to/project --no-profile skills host --status --ranker deterministic --trial-mode baseline`.
-2. Generate registration data with the same project and mode using
-   `metactl --project /absolute/path/to/project skills host --client-config --ranker deterministic --trial-mode baseline --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl`.
-   It prints a client-neutral `mcpServers` JSON object and does **not** edit
-   Codex, another client, or `AGENTS.md`. Use the [adapter guide](discovery-agent-adapters.md)
-   for the client's actual configuration format. Keep the log in a private
-   directory that already exists and is writable only by the intended user.
-   For example, run `mkdir -p -m 700 "$HOME/.local/state/metactl"` and
-   `chmod 700 "$HOME/.local/state/metactl"`, then use its resolved absolute
-   path for `--event-log`. Use the same profile choice in status and
-   registration. If status needed `--no-profile`, generate the entry with:
+2. Preview and apply a target-native registration with the same project and
+   profile choice. The preview names the exact file, mode, log and rollback;
+   it changes nothing. Apply writes only the `metactl-skills` server entry:
 
    ```sh
-   metactl --project /absolute/path/to/project --no-profile skills host \
-     --client-config --ranker deterministic --trial-mode baseline \
-     --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl
+   metactl --project /absolute/path/to/project skills connect --target codex-cli
+   metactl --project /absolute/path/to/project skills connect --target codex-cli --apply
+   metactl --project /absolute/path/to/project skills doctor --target codex-cli
    ```
 
-   The generated argument array retains `--no-profile`.
+   Use `--scope user` for a user-wide Codex registration that always points to
+   this one project. Project scope is the default; Codex loads project config
+   only when the project is trusted. The connector supports project config for
+   `codex-cli`, `claude-code`, `cursor`, `gemini-cli`, and `opencode`.
+   `openclaw`, `filesystem-agent`, Pi and Omnigent have manual adapters; the
+   connector reports that limitation explicitly. The entry is deterministic
+   baseline with `provider_calls=0`; it does not turn on Jev. A private event
+   log under the user's state directory is prepared on apply. If status needed
+   `--no-profile`, pass it before `skills connect` so the registration retains it.
+   The older `skills host --client-config` command remains available for custom
+   clients and explicitly approved gateway evaluation.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
    `load_skill` are available, then request one harmless ambiguous discovery
    and load a returned ID with its digest. The `routing_receipt` should say
@@ -47,8 +49,10 @@ If the tools are not visible, check that the project is trusted by the client,
 the registered project and executable paths are absolute and exist, Python
 3.10+ is available, and you opened a new agent session after registering.
 If discovery works but `log=failed`, check that the private log's parent
-directory already exists and is writable. `--status` confirms only local host
-readiness, not that the client loaded or called its tools.
+directory exists and is writable. `skills doctor` separates local host
+readiness, registration, observed discovery events, and unknown client or
+benefit states; it makes no provider call. A missing event does not prove the
+agent skipped discovery. `--status` confirms only local host readiness.
 
 For daily work, discover when the task or phase calls for unfamiliar specialist
 instructions; use an exact known skill directly when appropriate. A project may
@@ -100,7 +104,9 @@ Register that command and argument array using your client's supported MCP
 configuration. The project is fixed by the operator; model tool arguments cannot
 change it. The server exposes only `discover_skills(query)` and
 `load_skill(id, digest)`. It is session-bound, not an always-on service, and has no
-HTTP listener. No installation command modifies user/global client configuration.
+HTTP listener. `skills connect --scope user --apply` modifies Codex user
+configuration; the default project scope modifies only the selected project's
+client file.
 
 Host-disabled IDs or names must be mapped by the operator's adapter with repeatable
 `--exclude-skill NAME_OR_ID`. These restrictions apply to discovery and direct load.

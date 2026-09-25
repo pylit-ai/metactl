@@ -162,13 +162,16 @@ package installation is needed:
 
 ```bash
 metactl --project /path/to/project skills host --status
-metactl --project /path/to/project skills host --client-config
+metactl --project /path/to/project skills connect --target codex-cli
+metactl --project /path/to/project skills connect --target codex-cli --apply
+metactl --project /path/to/project skills doctor --target codex-cli
 ```
 
 The first command checks the project's catalog and local readiness without a
-provider call. The second prints a no-secret, client-neutral MCP registration
-snippet; review it and register it in your coding client. MetaCTL does not
-currently have a project-enabling command that writes your client's settings.
+provider call. `connect` previews then writes one target-native server entry;
+`doctor` separates configuration, local health, observed use and unknown states.
+The connector starts in deterministic baseline mode with zero Jev calls.
+`skills host --client-config` remains available for custom/manual adapters.
 Start a fresh agent session, verify that `discover_skills` and `load_skill` are
 available, then make one baseline discovery call and inspect its
 `routing_receipt`. Registration alone does not invoke discovery on every task.

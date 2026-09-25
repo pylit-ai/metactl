@@ -175,7 +175,7 @@ enum Commands {
     /// Import, export, and verify portable Agent Skill folders as metactl packs
     #[command(hide = true)]
     Pack(PackArgs),
-    /// Manage repo-local and user-global Codex Agent Skill visibility
+    /// Manage Agent Skills, optional discovery connections, and diagnostics
     #[command(hide = true)]
     Skills(SkillsArgs),
     /// Project packs into local runtime plugin marketplace bundles
@@ -860,6 +860,10 @@ enum SkillsCommand {
     Load(SkillsLoadArgs),
     /// Packaged optional discovery host (Python 3.10+); status and live verification
     Host(SkillsHostArgs),
+    /// Preview or install a target-native, deterministic discovery registration
+    Connect(SkillsConnectArgs),
+    /// Diagnose discovery readiness, registration, and observed use without provider calls
+    Doctor(SkillsDoctorArgs),
     /// Save an Auto-mode surface decision in machine-local project configuration
     Select(SkillsSelectArgs),
     /// Private discovery event reports and session outcome recording
@@ -917,6 +921,44 @@ struct SkillsHostArgs {
     runtime: String,
     #[arg(long, value_parser = ["discover_skills", "load_skill"], conflicts_with_all = ["status", "check", "client_config"])]
     call_tool: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct SkillsConnectArgs {
+    /// Canonical target ID (see docs/user/discovery-agent-adapters.md)
+    #[arg(long)]
+    target: String,
+    /// Project or user configuration scope; user scope is currently supported for Codex
+    #[arg(long, value_enum, default_value = "project")]
+    scope: DiscoveryScopeArg,
+    /// Python 3.10+ executable used by the packaged discovery host
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    /// Write the previewed registration; without this flag no files are changed
+    #[arg(long, conflicts_with = "remove")]
+    apply: bool,
+    /// Remove only a MetaCTL-managed registration
+    #[arg(long)]
+    remove: bool,
+}
+
+#[derive(Debug, Args)]
+struct SkillsDoctorArgs {
+    /// Canonical target ID
+    #[arg(long)]
+    target: String,
+    /// Configuration scope to inspect
+    #[arg(long, value_enum, default_value = "project")]
+    scope: DiscoveryScopeArg,
+    /// Python 3.10+ executable used by the packaged discovery host
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DiscoveryScopeArg {
+    Project,
+    User,
 }
 
 #[derive(Debug, Args)]
@@ -2180,7 +2222,10 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             | SkillsCommand::Discover(_)
             | SkillsCommand::Load(_)
             | SkillsCommand::Host(_)
+            | SkillsCommand::Doctor(_)
             | SkillsCommand::Trials(_) => None,
+            SkillsCommand::Connect(args) if args.apply || args.remove => Some("skills connect"),
+            SkillsCommand::Connect(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {
@@ -11387,6 +11432,7 @@ mod cli_hook;
 mod cli_pack;
 mod cli_plugin;
 mod cli_profile;
+mod cli_skill_discovery_connection;
 mod cli_skills;
 mod cli_source;
 

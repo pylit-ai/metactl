@@ -1,0 +1,121 @@
+"""Real CLI first-run checks for target-native discovery configuration."""
+
+import json
+import os
+import pathlib
+import subprocess
+import tempfile
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+BINARY = pathlib.Path(os.environ.get("METACTL_TEST_BINARY", ROOT / "target/debug/metactl")).resolve()
+PATHS = {
+    "codex-cli": ".codex/config.toml",
+    "claude-code": ".mcp.json",
+    "cursor": ".cursor/mcp.json",
+    "gemini-cli": ".gemini/settings.json",
+    "opencode": "opencode.json",
+}
+
+
+class ConnectionFirstRun(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="metactl-connect-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.base = pathlib.Path(self.temp.name)
+        self.project = self.base / "project"
+        self.project.mkdir()
+        self.env = dict(os.environ, XDG_CONFIG_HOME=str(self.base / "config"),
+                        XDG_STATE_HOME=str(self.base / "state"))
+        result = self.run_cli("init", "-t", "codex-cli", "--no-input")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def run_cli(self, *args, input_text=None):
+        return subprocess.run([str(BINARY), "--project", str(self.project), *args],
+                              env=self.env, text=True, capture_output=True, input=input_text,
+                              timeout=25)
+
+    def test_all_verified_formats_preview_apply_doctor_remove(self):
+        for target, relative in PATHS.items():
+            with self.subTest(target=target):
+                path = self.project / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                original = 'model = "kept"\n' if target == "codex-cli" else '{"other":{"kept":true}}\n'
+                path.write_text(original)
+                preview = self.run_cli("skills", "connect", "--target", target, "--json")
+                self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+                self.assertEqual(path.read_text(), original)
+                self.assertEqual(json.loads(preview.stdout)["provider_calls"], 0)
+                apply = self.run_cli("skills", "connect", "--target", target, "--apply", "--json")
+                self.assertEqual(apply.returncode, 0, apply.stdout + apply.stderr)
+                connected = path.read_text()
+                self.assertIn("metactl-skills", connected)
+                if target == "codex-cli":
+                    self.assertIn('model = "kept"', connected)
+                else:
+                    document = json.loads(connected)
+                    self.assertEqual(document["other"]["kept"], True)
+                    envelope = "mcp" if target == "opencode" else "mcpServers"
+                    self.assertIn("metactl-skills", document[envelope])
+                doctor = self.run_cli("skills", "doctor", "--target", target, "--json")
+                self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+                state = json.loads(doctor.stdout)
+                self.assertEqual(state["registration"], "configured")
+                self.assertEqual(state["host"], "ready")
+                self.assertEqual(state["routing"], "unknown_no_event")
+                self.assertEqual(state["agent_tools"], "unknown")
+                self.assertEqual(state["check_provider_calls"], 0)
+                remove = self.run_cli("skills", "connect", "--target", target, "--remove", "--json")
+                self.assertEqual(remove.returncode, 0, remove.stdout + remove.stderr)
+                self.assertNotIn("metactl-skills", path.read_text())
+                if target != "codex-cli":
+                    self.assertEqual(json.loads(path.read_text())["other"]["kept"], True)
+
+    def test_conflict_refusal_and_manual_targets(self):
+        path = self.project / ".codex/config.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[mcp_servers.metactl-skills]\ncommand = "other"\n')
+        result = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unmanaged", result.stderr)
+        self.assertIn('command = "other"', path.read_text())
+        manual = self.run_cli("skills", "connect", "--target", "openclaw")
+        self.assertNotEqual(manual.returncode, 0)
+        self.assertIn("manual adapter", manual.stderr)
+
+    def test_wrong_project_cannot_be_connected(self):
+        uninitialized = self.base / "uninitialized"
+        uninitialized.mkdir()
+        result = subprocess.run([str(BINARY), "--project", str(uninitialized), "skills", "connect",
+                                 "--target", "codex-cli", "--apply"], env=self.env, text=True,
+                                capture_output=True, timeout=25)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((uninitialized / ".codex/config.toml").exists())
+
+    def test_real_baseline_receipt_is_visible_in_doctor(self):
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        settings = json.loads(applied.stdout)
+        call = self.run_cli("skills", "host", "--ranker", "deterministic", "--runtime", "codex-cli",
+                            "--trial-mode", "baseline", "--event-log", settings["event_log"],
+                            "--call-tool", "discover_skills",
+                            input_text=json.dumps({"query": "Review a small CLI user workflow"}))
+        self.assertEqual(call.returncode, 0, call.stdout + call.stderr)
+        result = json.loads(call.stdout)
+        self.assertIn("mode=baseline", result["routing_receipt"])
+        self.assertIn("provider_calls=0", result["routing_receipt"])
+        self.assertIn("log=recorded", result["routing_receipt"])
+        doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        observed = json.loads(doctor.stdout)
+        self.assertEqual(observed["routing"], "observed")
+        self.assertEqual(observed["latest_discovery"]["provider_calls"], 0)
+        self.assertEqual(observed["matching_discoveries"], 1)
+        self.assertEqual(observed["agent_tools"], "unknown")
+
+
+if __name__ == "__main__":
+    if not BINARY.exists():
+        raise SystemExit(f"build metactl first: {BINARY}")
+    unittest.main()
