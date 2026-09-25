@@ -3,6 +3,7 @@
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -113,6 +114,72 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(observed["latest_discovery"]["provider_calls"], 0)
         self.assertEqual(observed["matching_discoveries"], 1)
         self.assertEqual(observed["agent_tools"], "unknown")
+
+    def test_no_profile_printed_rollback_and_doctor(self):
+        apply = self.run_cli("--no-profile", "skills", "connect", "--target", "claude-code",
+                             "--apply", "--json")
+        self.assertEqual(apply.returncode, 0, apply.stdout + apply.stderr)
+        receipt = json.loads(apply.stdout)
+        doctor = self.run_cli("skills", "doctor", "--target", "claude-code", "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        state = json.loads(doctor.stdout)
+        self.assertEqual(state["registration"], "configured")
+        self.assertEqual(state["host"], "ready")
+        self.assertEqual(state["registration_matches_requested_options"], False)
+        rollback = shlex.split(receipt["rollback"])
+        self.assertEqual(rollback.pop(0), "metactl")
+        removed = subprocess.run([str(BINARY), *rollback], env=self.env, text=True,
+                                 capture_output=True, timeout=25)
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertNotIn("metactl-skills", (self.project / ".mcp.json").read_text())
+
+    def test_binary_and_python_drift_can_be_updated_and_removed(self):
+        for target in ("codex-cli", "cursor"):
+            with self.subTest(target=target):
+                path = self.project / PATHS[target]
+                applied = self.run_cli("skills", "connect", "--target", target, "--apply")
+                self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+                content = path.read_text().replace(str(BINARY), "/old/metactl")
+                content = content.replace('"python3"', '"/old/python3"')
+                path.write_text(content)
+                doctor = self.run_cli("skills", "doctor", "--target", target, "--json")
+                self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+                state = json.loads(doctor.stdout)
+                self.assertEqual(state["registration"], "configured")
+                self.assertEqual(state["host"], "unavailable")
+                updated = self.run_cli("skills", "connect", "--target", target, "--apply", "--json")
+                self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
+                self.assertEqual(json.loads(updated.stdout)["action"], "updated")
+                self.assertNotIn("/old/metactl", path.read_text())
+                path.write_text(path.read_text().replace(str(BINARY), "/old/metactl"))
+                removed = self.run_cli("skills", "connect", "--target", target, "--remove")
+                self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+                self.assertNotIn("metactl-skills", path.read_text())
+
+    def test_missing_python_refuses_without_writing(self):
+        path = self.project / ".codex/config.toml"
+        result = self.run_cli("skills", "connect", "--target", "codex-cli",
+                              "--python", "/missing/python3", "--apply")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Python", result.stderr)
+        self.assertFalse(path.exists())
+
+    def test_tracked_config_and_symlink_are_refused(self):
+        path = self.project / ".codex/config.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('model = "kept"\n')
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.project), "add", "-f", ".codex/config.toml"],
+                       check=True, capture_output=True)
+        tracked = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertNotEqual(tracked.returncode, 0)
+        self.assertIn("tracked by Git", tracked.stderr)
+        self.assertEqual(path.read_text(), 'model = "kept"\n')
+        path.unlink()
+        path.symlink_to(self.base / "outside.toml")
+        linked = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertNotEqual(linked.returncode, 0)
+        self.assertIn("symlink", linked.stderr)
 
 
 if __name__ == "__main__":

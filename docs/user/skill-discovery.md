@@ -37,6 +37,15 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    baseline with `provider_calls=0`; it does not turn on Jev. A private event
    log under the user's state directory is prepared on apply. If status needed
    `--no-profile`, pass it before `skills connect` so the registration retains it.
+   If Python is outside `PATH`, add `--python /absolute/path/to/python3` to
+   `connect`; the path must remain available to the agent. The printed rollback
+   command recognizes the managed baseline entry even when the executable or
+   Python path later changes. `doctor` checks the registered command and reports
+   whether it matches the options in the current diagnostic invocation.
+   A user-wide Codex registration shares this one project's skill catalog and
+   event metadata across Codex sessions in other repositories; choose project
+   scope when catalogs or visibility should remain separate. The baseline
+   ledger does not store query text or skill bodies.
    The older `skills host --client-config` command remains available for custom
    clients and explicitly approved gateway evaluation.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and

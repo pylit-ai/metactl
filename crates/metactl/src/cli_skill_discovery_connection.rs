@@ -83,11 +83,12 @@ fn host_command(
     python: &Path,
 ) -> Result<(String, Vec<String>), CliError> {
     let exe = std::env::current_exe().map_err(internal_error)?;
-    let python = if python.components().count() > 1 {
-        python.canonicalize().map_err(internal_error)?
-    } else {
-        python.to_path_buf()
-    };
+    if python.components().count() > 1 && !python.is_absolute() {
+        return Err(CliError::new(
+            EXIT_VALIDATION,
+            "Use an absolute --python path or an executable name on PATH.",
+        ));
+    }
     let mut args = vec!["--project".into(), root.to_string_lossy().into_owned()];
     if cli.no_profile {
         args.push("--no-profile".into());
@@ -136,22 +137,113 @@ fn entry_key(target: &str) -> &'static str {
     }
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn codex_block(command: &str, args: &[String]) -> String {
     let command = serde_json::to_string(command).unwrap_or_default();
     let args = serde_json::to_string(args).unwrap_or_default();
     format!("{BEGIN}\n[mcp_servers.{SERVER}]\ncommand = {command}\nargs = {args}\n{END}\n")
 }
 
-fn read_config(path: &Path) -> Result<Option<String>, CliError> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    if path
-        .symlink_metadata()
-        .map_err(internal_error)?
-        .file_type()
-        .is_symlink()
+#[derive(Clone)]
+struct ManagedEntry {
+    command: String,
+    args: Vec<String>,
+    event_log: PathBuf,
+}
+
+fn managed_entry(
+    command: String,
+    args: Vec<String>,
+    root: &Path,
+    target: &str,
+) -> Option<ManagedEntry> {
+    if Path::new(&command).file_name()?.to_str()? != "metactl"
+        || args.len() < 12
+        || args.first()? != "--project"
+        || args.get(1)? != &root.to_string_lossy()
     {
+        return None;
+    }
+    let mut i = 2;
+    while args.get(i).map(String::as_str) != Some("skills") {
+        match args.get(i)?.as_str() {
+            "--no-profile" => i += 1,
+            "--profile" => {
+                args.get(i + 1)?;
+                i += 2;
+            }
+            "--config" | "--overlay" => {
+                if !Path::new(args.get(i + 1)?).is_absolute() {
+                    return None;
+                }
+                i += 2;
+            }
+            _ => return None,
+        }
+    }
+    if args.get(i + 1)?.as_str() != "host" {
+        return None;
+    }
+    i += 2;
+    if args.get(i).map(String::as_str) == Some("--python") {
+        let python = Path::new(args.get(i + 1)?);
+        if python.components().count() > 1 && !python.is_absolute() {
+            return None;
+        }
+        i += 2;
+    }
+    if args.get(i..i + 2)? != ["--ranker", "deterministic"]
+        || args.get(i + 2..i + 4)? != ["--runtime", target]
+        || args.get(i + 4..i + 6)? != ["--trial-mode", "baseline"]
+        || args.get(i + 6)?.as_str() != "--event-log"
+        || args.len() != i + 8
+    {
+        return None;
+    }
+    let event_log = PathBuf::from(args.get(i + 7)?);
+    if !event_log.is_absolute() {
+        return None;
+    }
+    Some(ManagedEntry {
+        command,
+        args,
+        event_log,
+    })
+}
+
+fn managed_json_entry(value: &Value, root: &Path, target: &str) -> Option<ManagedEntry> {
+    let map = value.as_object()?;
+    if target == "opencode" {
+        if map.len() != 3
+            || map.get("type")?.as_str()? != "local"
+            || map.get("enabled")?.as_bool()? != true
+        {
+            return None;
+        }
+        let mut command: Vec<String> = serde_json::from_value(map.get("command")?.clone()).ok()?;
+        if command.is_empty() {
+            return None;
+        }
+        return managed_entry(command.remove(0), command, root, target);
+    }
+    if map.len() != 2 {
+        return None;
+    }
+    let command = map.get("command")?.as_str()?.to_owned();
+    let args = serde_json::from_value(map.get("args")?.clone()).ok()?;
+    managed_entry(command, args, root, target)
+}
+
+fn read_config(path: &Path) -> Result<Option<String>, CliError> {
+    let metadata = match path.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(internal_error(error)),
+    };
+    if metadata.file_type().is_symlink() {
         return Err(CliError::new(
             EXIT_STATE,
             "Configuration is a symlink; refusing to edit it.",
@@ -224,8 +316,8 @@ fn write_private(path: &Path, body: &str) -> Result<(), CliError> {
 
 fn managed_codex_block<'a>(
     old: &'a str,
-    expected_args: &[String],
-) -> Result<Option<(usize, usize, &'a str)>, CliError> {
+    root: &Path,
+) -> Result<Option<(usize, usize, &'a str, ManagedEntry)>, CliError> {
     let header = format!("[mcp_servers.{SERVER}]");
     let starts = old.matches(BEGIN).count();
     let ends = old.matches(END).count();
@@ -254,21 +346,19 @@ fn managed_codex_block<'a>(
             .get(3)
             .and_then(|line| line.strip_prefix("args = "))
             .and_then(|value| serde_json::from_str::<Vec<String>>(value).ok());
-        let valid_args = old_args.as_ref().is_some_and(|values| {
-            values.len() == expected_args.len()
-                && values[..values.len() - 1] == expected_args[..expected_args.len() - 1]
-                && Path::new(values.last().unwrap()).is_absolute()
+        let entry = command.and_then(|command| {
+            old_args.and_then(|args| managed_entry(command, args, root, "codex-cli"))
         });
         if lines.len() != 5
             || lines[0] != BEGIN
             || lines[1] != header
             || lines[4] != END
-            || command.is_none()
-            || !valid_args
+            || old.matches(&header).count() != 1
+            || entry.is_none()
         {
             return Err(CliError::new(EXIT_STATE, "MetaCTL discovery block differs from the expected registration; review it manually."));
         }
-        return Ok(Some((begin, end, block)));
+        return Ok(Some((begin, end, block, entry.unwrap())));
     }
     Ok(None)
 }
@@ -276,11 +366,11 @@ fn managed_codex_block<'a>(
 fn edit_codex(
     old: &str,
     block: &str,
-    args: &[String],
+    root: &Path,
     remove: bool,
 ) -> Result<(String, &'static str), CliError> {
     let header = format!("[mcp_servers.{SERVER}]");
-    if let Some((begin, end, existing)) = managed_codex_block(old, args)? {
+    if let Some((begin, end, existing, _)) = managed_codex_block(old, root)? {
         if remove {
             let suffix = if old[end..].starts_with('\n') {
                 end + 1
@@ -317,6 +407,7 @@ fn edit_json(
     old: &str,
     target: &str,
     expected: Value,
+    root: &Path,
     remove: bool,
 ) -> Result<(String, &'static str), CliError> {
     let mut document: Value = if old.trim().is_empty() {
@@ -340,22 +431,29 @@ fn edit_json(
         )
     })?;
     match servers.get(SERVER) {
-        Some(value) if value != &expected => {
+        Some(value) if managed_json_entry(value, root, target).is_none() => {
             return Err(CliError::new(
                 EXIT_STATE,
-                "Existing metactl-skills server differs; review it manually.",
+                "Existing metactl-skills server is not a matching MetaCTL baseline registration for this project; review it manually.",
             ))
         }
         Some(_) if remove => {
             servers.remove(SERVER);
         }
-        Some(_) => return Ok((old.to_owned(), "already_connected")),
+        Some(value) if value == &expected => return Ok((old.to_owned(), "already_connected")),
+        Some(_) => { servers.insert(SERVER.into(), expected); },
         None if remove => return Ok((old.to_owned(), "already_absent")),
         None => {
             servers.insert(SERVER.into(), expected);
         }
     }
-    let action = if remove { "removed" } else { "connected" };
+    let action = if remove {
+        "removed"
+    } else if old.contains(SERVER) {
+        "updated"
+    } else {
+        "connected"
+    };
     let body = serde_json::to_string_pretty(&document).map_err(internal_error)? + "\n";
     Ok((body, action))
 }
@@ -406,12 +504,13 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
     ensure_safe_destination(&path)?;
     let old = read_config(&path)?.unwrap_or_default();
     let (new, action) = if options.target == "codex-cli" {
-        edit_codex(&old, &codex_block(&command, &args), &args, options.remove)?
+        edit_codex(&old, &codex_block(&command, &args), &root, options.remove)?
     } else {
         edit_json(
             &old,
             &options.target,
             expected_entry(&options.target, &command, &args),
+            &root,
             options.remove,
         )?
     };
@@ -446,10 +545,18 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         )
         .map_err(internal_error)?
     };
+    let codex_home = if options.scope == DiscoveryScopeArg::User {
+        std::env::var("CODEX_HOME")
+            .ok()
+            .map(|value| format!("CODEX_HOME={} ", shell_quote(&value)))
+    } else {
+        None
+    };
     let rollback = format!(
-        "metactl --project {} skills connect --target {} --scope {} --remove",
-        root.display(),
-        options.target,
+        "{}metactl --project {} skills connect --target {} --scope {} --remove",
+        codex_home.unwrap_or_default(),
+        shell_quote(&root.to_string_lossy()),
+        shell_quote(&options.target),
         if options.scope == DiscoveryScopeArg::User {
             "user"
         } else {
@@ -479,34 +586,39 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     let (root, path, ledger, command, args) =
         connection(cli, &options.target, options.scope, &options.python)?;
     let config = read_config(&path)?.unwrap_or_default();
-    let registration = if options.target == "codex-cli" {
-        if config.contains(&codex_block(&command, &args)) {
-            "configured"
-        } else if managed_codex_block(&config, &args).ok().flatten().is_some() {
-            "stale_registration"
-        } else if config.contains(&format!("[mcp_servers.{SERVER}]")) {
-            "conflict"
-        } else {
-            "missing"
+    let (registration, registered) = if options.target == "codex-cli" {
+        match managed_codex_block(&config, &root) {
+            Ok(Some((_, _, _, entry))) => ("configured", Some(entry)),
+            _ if config.contains(&format!("[mcp_servers.{SERVER}]")) || config.contains(BEGIN) => {
+                ("conflict", None)
+            }
+            _ => ("missing", None),
         }
     } else if config.trim().is_empty() {
-        "missing"
+        ("missing", None)
     } else {
         match serde_json::from_str::<Value>(&config) {
             Ok(value) => match value
                 .get(entry_key(&options.target))
                 .and_then(|v| v.get(SERVER))
             {
-                Some(actual) if actual == &expected_entry(&options.target, &command, &args) => {
-                    "configured"
-                }
-                Some(_) => "conflict",
-                None => "missing",
+                Some(actual) => match managed_json_entry(actual, &root, &options.target) {
+                    Some(entry) => ("configured", Some(entry)),
+                    None => ("conflict", None),
+                },
+                None => ("missing", None),
             },
-            Err(_) => "invalid_config",
+            Err(_) => ("invalid_config", None),
         }
     };
-    let (host, catalog) = offline_status(&command, &args);
+    let matches_requested = registered
+        .as_ref()
+        .is_some_and(|entry| entry.command == command && entry.args == args);
+    let (status_command, status_args, ledger) = match registered {
+        Some(entry) => (entry.command, entry.args, entry.event_log),
+        None => (command.clone(), args.clone(), ledger),
+    };
+    let (host, catalog) = offline_status(&status_command, &status_args);
     let mut latest = Value::Null;
     let mut observed = 0usize;
     let log_status = match fs::metadata(&ledger) {
@@ -556,8 +668,8 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     } else {
         "unknown_log_error"
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills\nRegistration: {} ({})\nLocal host: {} (offline status; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events)\nEvent log: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), host, routing, observed, log_status, ledger.display());
+    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills\nRegistration: {} ({})\nRequested options match registration: {}\nLocal host: {} (offline status of registered command; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events)\nEvent log: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), matches_requested, host, routing, observed, log_status, ledger.display());
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -565,7 +677,8 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
             Some(&root),
             json!({
                 "target": options.target, "config_path": path, "catalog_eligible_skills": catalog,
-                "registration": registration, "host": host, "agent_tools": "unknown",
+                "registration": registration, "registration_matches_requested_options": matches_requested,
+                "registered_command": status_command, "host": host, "agent_tools": "unknown",
                 "routing": routing, "matching_discoveries": observed, "latest_discovery": latest,
                 "event_log": ledger, "log_status": log_status, "benefit": "unknown", "check_provider_calls": 0
             }),
@@ -601,13 +714,16 @@ mod tests {
     fn codex_preserves_unrelated_settings_and_rolls_back() {
         let original = "model = \"test\"\n\n[mcp_servers.other]\ncommand = \"other\"\n";
         let block = codex_block("/tmp/metactl", &args());
-        let (connected, _) = edit_codex(original, &block, &args(), false).unwrap();
+        let (connected, _) =
+            edit_codex(original, &block, Path::new("/tmp/example"), false).unwrap();
         assert!(connected.starts_with(original));
         assert_eq!(
-            edit_codex(&connected, &block, &args(), false).unwrap().1,
+            edit_codex(&connected, &block, Path::new("/tmp/example"), false)
+                .unwrap()
+                .1,
             "already_connected"
         );
-        let (removed, _) = edit_codex(&connected, &block, &args(), true).unwrap();
+        let (removed, _) = edit_codex(&connected, &block, Path::new("/tmp/example"), true).unwrap();
         assert_eq!(removed, format!("{original}\n"));
     }
 
@@ -615,20 +731,30 @@ mod tests {
     fn codex_updates_old_binary_and_rejects_changed_policy() {
         let old_block = codex_block("/old/metactl", &args());
         let new_block = codex_block("/new/metactl", &args());
-        let (updated, action) = edit_codex(&old_block, &new_block, &args(), false).unwrap();
+        let (updated, action) =
+            edit_codex(&old_block, &new_block, Path::new("/tmp/example"), false).unwrap();
         assert_eq!(action, "updated");
         assert!(updated.contains("/new/metactl"));
         assert!(!updated.contains("/old/metactl"));
         let changed = old_block.replace("deterministic", "jev");
-        assert!(edit_codex(&changed, &new_block, &args(), true).is_err());
+        assert!(edit_codex(&changed, &new_block, Path::new("/tmp/example"), true).is_err());
     }
 
     #[test]
     fn json_targets_preserve_unrelated_values_and_reject_conflicts() {
         for target in ["claude-code", "cursor", "gemini-cli", "opencode"] {
-            let expected = expected_entry(target, "/tmp/metactl", &args());
+            let mut target_args = args();
+            target_args[7] = target.into();
+            let expected = expected_entry(target, "/tmp/metactl", &target_args);
             let original = "{\"other\":{\"enabled\":true}}";
-            let (connected, _) = edit_json(original, target, expected.clone(), false).unwrap();
+            let (connected, _) = edit_json(
+                original,
+                target,
+                expected.clone(),
+                Path::new("/tmp/example"),
+                false,
+            )
+            .unwrap();
             let value: Value = serde_json::from_str(&connected).unwrap();
             assert_eq!(value["other"]["enabled"], true);
             assert_eq!(value[entry_key(target)][SERVER], expected);
@@ -636,10 +762,18 @@ mod tests {
                 &connected.replace("/tmp/metactl", "/wrong"),
                 target,
                 expected.clone(),
+                Path::new("/tmp/example"),
                 false
             )
             .is_err());
-            let (removed, _) = edit_json(&connected, target, expected, true).unwrap();
+            let (removed, _) = edit_json(
+                &connected,
+                target,
+                expected,
+                Path::new("/tmp/example"),
+                true,
+            )
+            .unwrap();
             assert_eq!(
                 serde_json::from_str::<Value>(&removed).unwrap()["other"]["enabled"],
                 true

@@ -39,16 +39,19 @@ metactl --project /absolute/project skills doctor --target codex-cli
 path, deterministic baseline mode, a private ledger destination, and a reversible
 removal command. `--apply` edits only that server entry and preserves unrelated
 configuration values. JSON formatting can change on apply. It never installs an
-`AGENTS.md` instruction or switch on paid Jev automatically. Offer a separate,
+`AGENTS.md` instruction or switches on paid Jev automatically. Offer a separate,
 copyable project instruction after registration. Project config is loaded by
 Codex only in trusted projects; the installer must say so.
+Removal recognizes the pinned project's MetaCTL baseline entry after a binary
+or Python upgrade. Doctor checks the registered command even if the current
+invocation uses different profile flags, and reports that option difference.
 
 `doctor` displays a compact state ladder, with unknown as a first-class
 state:
 
-1. **Catalog:** configured project, eligible count, and exclusions.
-2. **Registration:** target config file and command/arguments found or missing.
-3. **Host:** local handshake and tool names verified or not tested.
+1. **Catalog:** configured project and eligible count from offline status.
+2. **Registration:** target config entry found, missing, or conflicting.
+3. **Host:** offline readiness of the registered command, without a provider call.
 4. **Agent:** native fresh-session acceptance reported by the user or not yet
    verified; MetaCTL cannot infer it from a config file.
 5. **Routing:** last matching event, mode, provider attempts/calls, fallback
