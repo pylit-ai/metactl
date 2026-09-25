@@ -28,6 +28,10 @@ Pi and Omnigent below are additional adapters, not replacements for standard
 targets. `other` covers explicitly tested custom clients; `contract` is for
 protocol tests. Existing `codex` events are not rewritten or automatically
 combined with `codex-cli` cohorts.
+The `skill-discovery` starter pack currently projects only to `codex-cli`;
+accepting another runtime label does not project that pack into its native
+instruction format. Use the adapter recipe and verify native tool use before
+claiming support for that client.
 
 ### Claude Code, Cursor and Gemini CLI
 
@@ -68,8 +72,17 @@ Verify both tools on the installed version before declaring native acceptance.
 
 ## Codex
 
+Choose a scope before registration. `codex mcp add` is convenient for a
+user-wide connection; for one trusted repository, put the server entry in its
+`.codex/config.toml`. Codex shares those configuration layers between the CLI
+and IDE, and ignores a project's `.codex` configuration until the project is
+trusted. MetaCTL's `--client-config` emits client-neutral `mcpServers` JSON,
+so copy its **command and argument values**, not the JSON envelope, into
+Codex TOML. [Codex configuration](https://developers.openai.com/codex/config-basic)
+and [MCP setup](https://developers.openai.com/codex/mcp) describe these layers.
+
 Use the installed CLI's stdio registration form. Replace the absolute project
-path with a locally configured project and review the flags before registering:
+and private log paths with local values and review the flags before registering:
 
 ```sh
 codex mcp add metactl-skills -- metactl --project /absolute/path/to/project \
@@ -78,10 +91,35 @@ codex mcp add metactl-skills -- metactl --project /absolute/path/to/project \
 codex mcp get metactl-skills
 ```
 
-Start a fresh Codex session and inspect its available tools for
-`discover_skills` and `load_skill`. Ask it to discover a harmless ambiguous task,
-then load one returned ID and digest. Confirm the returned metrics and unchanged
-native skill catalog. `codex mcp remove metactl-skills` reverses this registration.
+For a trusted project-local registration, merge the equivalent entry into
+`.codex/config.toml` without replacing unrelated settings:
+
+```toml
+[mcp_servers.metactl-skills]
+command = "/absolute/path/to/metactl"
+args = ["--project", "/absolute/path/to/project", "skills", "host",
+  "--ranker", "deterministic", "--runtime", "codex-cli",
+  "--trial-mode", "baseline", "--event-log", "/absolute/private/path/discovery-events.jsonl"]
+```
+
+Use `codex mcp list` (or `/mcp` in Codex's terminal UI) to check registration.
+These checks do not prove that a running session loaded the tools. Start a
+fresh Codex session and inspect its available tools for
+`discover_skills` and `load_skill`. Ask it to discover a harmless ambiguous
+task, then load one returned ID and digest. Confirm its `routing_receipt` says
+`mode=baseline`, `provider_calls=0`, and `log=recorded` when a private log is
+configured. Inspect the event with `metactl skills trials inspect` using the
+returned session and run IDs. The log is separate from Codex's transcript.
+
+For more predictable use, add the optional, conditional `AGENTS.md` instruction
+in the [first-run workflow](skill-discovery.md#first-run-workflow). Avoid an
+unconditional “before every coding task” instruction: exact known skills and
+tasks without specialist needs do not require discovery. Server registration,
+agent invocation, Jev use and task benefit have separate evidence.
+
+Confirm the returned metrics and unchanged native skill catalog.
+`codex mcp remove metactl-skills` reverses a CLI-added registration; remove only
+this server block to reverse a project-local registration.
 Omnigent Codex native sessions copy the user's Codex configuration at launch;
 restart such a session to see a changed registration. The copied session config
 and live tools should be checked separately.

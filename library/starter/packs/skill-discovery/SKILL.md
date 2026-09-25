@@ -12,6 +12,11 @@ the task query on stdin. Never put credentials or private task details in argv.
 
 Use returned names/descriptions to choose relevant IDs. Load original instructions
 with `load_skill(id, digest)` or `metactl --json skills load ID --digest DIGEST`.
+When the MCP tool is called, show its `routing_receipt` in the task trace or
+progress report. If discovery was skipped, say so when reporting routing; never
+infer Jev use from registration or a readiness check. Report `log=failed` as
+missing measurement, not a successful recorded event. The deterministic CLI
+fallback has no MCP routing receipt.
 Multiple skills can apply. Exact names can be searched. No candidates means a
 search miss, not proof no skill exists; reformulate once or use ordinary discovery.
 Never repeatedly retry a failed optional provider.

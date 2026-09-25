@@ -4,9 +4,58 @@ Experimental, opt-in, plain-instruction adapter. Deterministic mode is the defau
 and requires no provider, account, API credits, SDK or network access. Existing
 compilation, native skill menus and installed skill folders are unchanged.
 
-## Quick start
+## First-run workflow
 
-Build `cargo build -p metactl`. In a configured project:
+There are three separate steps: make a project catalog available, register the
+two-tool host in a coding client, and have an agent call it when specialist
+instructions are useful. Jev is an optional fourth step for authorized ranking.
+No `metactl skills enable` command currently performs the client registration.
+
+1. Point MetaCTL at an **absolute project path** and run
+   `metactl --project /absolute/path/to/project skills host --status --ranker deterministic --trial-mode baseline`.
+   Look for `project_ready: true` and an eligible-skill count. `provider_verified:
+   false` is expected in baseline mode; status makes no provider request. If
+   your machine default profile is unrelated to this project, explicitly place
+   `--no-profile` before `skills` and repeat the check.
+2. Generate registration data with the same project and mode using
+   `metactl --project /absolute/path/to/project skills host --client-config --ranker deterministic --trial-mode baseline --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl`.
+   It prints a client-neutral `mcpServers` JSON object and does **not** edit
+   Codex, another client, or `AGENTS.md`. Use the [adapter guide](discovery-agent-adapters.md)
+   for the client's actual configuration format. Keep the log in a private
+   directory that already exists and is writable only by the intended user.
+   Use the same profile choice in status and registration.
+3. Restart or open a fresh agent session. Confirm both `discover_skills` and
+   `load_skill` are available, then request one harmless ambiguous discovery
+   and load a returned ID with its digest. The `routing_receipt` should say
+   `mode=baseline`, `provider_calls=0`, and `log=recorded` when the private
+   ledger is writable. This checks the live tool path without using Jev.
+
+For daily work, discover when the task or phase calls for unfamiliar specialist
+instructions; use an exact known skill directly when appropriate. A project may
+add this **optional** line to its `AGENTS.md` after registering and verifying
+the host:
+
+> When specialist instructions may help, call MetaCTL `discover_skills` if
+> available, load a relevant result by ID and digest, and show its
+> `routing_receipt`. If discovery was not called, say so when reporting routing.
+
+This line influences agent tool choice. It does not install a server, change
+Jev consent, or prove that an agent called the tool. The starter
+`skill-discovery` pack carries the reusable agent instructions for projects
+that select it. Its current starter-pack projection is limited to `codex-cli`;
+other supported MCP clients can register the host separately. An `AGENTS.md` line
+is a short project-level reminder, not a requirement for every MetaCTL user.
+
+Read evidence in this order: client registration, fresh-session tool list,
+actual `routing_receipt`, private event log, then measured task outcome. A
+`provider_calls=1` receipt proves one validated Jev response was observed, not
+that it improved the task. See [private trials](discovery-trials.md) for log
+inspection. Missing events do not prove discovery was unused.
+
+## Direct CLI discovery
+
+Use an installed MetaCTL CLI, or build from source with
+`cargo build -p metactl`. In a configured project:
 
 ```sh
 metactl --project /path/to/project --json --full skills catalog

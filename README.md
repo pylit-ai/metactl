@@ -159,10 +159,18 @@ metactl --project /path/to/project skills host --status
 metactl --project /path/to/project skills host --client-config
 ```
 
-The second command prints a no-secret MCP registration snippet; review it and
-register it in your coding client. It does not modify the client automatically.
+The first command checks the project's catalog and local readiness without a
+provider call. The second prints a no-secret, client-neutral MCP registration
+snippet; review it and register it in your coding client. MetaCTL does not
+currently have a project-enabling command that writes your client's settings.
+Start a fresh agent session, verify that `discover_skills` and `load_skill` are
+available, then make one baseline discovery call and inspect its
+`routing_receipt`. Registration alone does not invoke discovery on every task.
+Follow the [agent adapter guide](docs/user/discovery-agent-adapters.md) for
+target-specific configuration and the [first-run workflow](docs/user/skill-discovery.md#first-run-workflow)
+for evidence at each step.
 Jev is **optional and off by default**. Follow the [activation and verification
-guide](docs/user/skill-discovery.md#install-enable-and-prove-jev-is-active) for
+guide](docs/user/skill-discovery.md#shared-gateway-and-measured-trials) for
 secret injection, data consent, bounded requests, status, live checks and rollback.
 
 In a frozen 12-query, 208-descriptor development fixture, deterministic discovery
