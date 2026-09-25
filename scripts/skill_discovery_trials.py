@@ -29,7 +29,7 @@ UUIDHEX = re.compile(r"[0-9a-f]{32}\Z")
 MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?\Z")
 REASONS = frozenset({"baseline", "disabled", "data_not_authorized", "missing_credential",
                      "budget_exhausted", "unambiguous", "payload_budget",
-                     "abstained", "reordered", "deadline",
+                     "abstained", "reordered", "unchanged", "deadline",
                      "provider_or_schema_failure"})
 RUNTIMES = frozenset({"codex", "omnigent", "pi", "other", "contract"})
 ARMS = frozenset({"baseline", "shadow", "advisory"})
@@ -292,8 +292,8 @@ def summarize(events, runtime=None, arm=None):
             "pass": sum(e["success"] == "pass" for e in outcomes),
             "fail": sum(e["success"] == "fail" for e in outcomes),
             "unknown": sum(e["success"] == "unknown" for e in outcomes),
-            "fallback": sum(e["reason"] not in {"baseline", "reordered", "abstained"} for e in discovers),
-            "reordered": sum(e["reason"] == "reordered" for e in discovers),
+            "fallback": sum(e["reason"] not in {"baseline", "reordered", "unchanged", "abstained"} for e in discovers),
+            "reordered": sum(e["reason"] == "reordered" and e["proposed_ids"] != e["baseline_ids"] for e in discovers),
             "abstained": sum(e["reason"] == "abstained" for e in discovers),
             "provider_attempts": sum(e["provider_attempts"] for e in discovers),
             "provider_calls_observed": sum(known_calls),

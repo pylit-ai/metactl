@@ -210,8 +210,9 @@ class Ranker:
                 if choice == "none":
                     metadata["reason"] = "abstained"
                 else:
+                    changed = original["skills"][0]["id"] != choice
                     original["skills"].sort(key=lambda s: s["id"] != choice)
-                    metadata.update(ranker="jev", reason="reordered")
+                    metadata.update(ranker="jev", reason="reordered" if changed else "unchanged")
             except (TimeoutError, subprocess.TimeoutExpired):
                 metadata["reason"] = "deadline"
             except Exception:
