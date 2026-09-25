@@ -87,6 +87,7 @@ def main() -> None:
                 "verify-v1-release-gate: FAIL command bash scripts/smoke_packaged_metactl.sh\n"
                 + output
             )
+        print("verify-v1-release-gate: PASS packaged Docker smoke")
     else:
         print("verify-v1-release-gate: SKIP packaged Docker smoke; Docker unavailable")
     print("verify-v1-release-gate: OK")

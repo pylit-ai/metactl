@@ -4,30 +4,34 @@ This guide covers the public local `metactl` CLI.
 
 ## Install
 
-Install the CLI from crates.io:
+The source crate version is 0.1.23. From this source checkout, run
+`cargo install --path crates/metactl --locked` if the version is not on
+crates.io yet. When the [registry](https://crates.io/crates/metactl) shows
+0.1.23, install the CLI with this pinned command:
 
 ```bash
-cargo install metactl --version 0.1.22 --locked
-# Installed package `metactl v0.1.22` (executable `metactl`)
+cargo install metactl --version 0.1.23 --locked
+# Installed package `metactl v0.1.23` (executable `metactl`)
 ```
 
 The published `metactl` package bundles the public starter library. You do not need a checkout of this repository for the built-in demo, `metactl list packs`, or the default `python-refactor` workflow.
 
-Install `metactld` only if you need the local JSON-RPC/MCP daemon:
+Install `metactld` only if you need the local JSON-RPC/MCP daemon and its
+0.1.23 version has appeared on crates.io:
 
 ```bash
-cargo install metactld --version 0.1.22 --locked
-# Installed package `metactld v0.1.22` (executable `metactld`)
+cargo install metactld --version 0.1.23 --locked
+# Installed package `metactld v0.1.23` (executable `metactld`)
 ```
 
-The pinned commands above reproduce this release. To update to the latest
-published crates.io versions later:
+Once available, the pinned commands above reproduce this release. To update to
+the latest published crates.io versions later:
 
 ```bash
 cargo install metactl --locked --force
 cargo install metactld --locked --force
-# Installed package `metactl v0.1.22` (executable `metactl`)
-# Installed package `metactld v0.1.22` (executable `metactld`)
+# Installed package `metactl v<latest published>` (executable `metactl`)
+# Installed package `metactld v<latest published>` (executable `metactld`)
 ```
 
 Check installed binaries:
@@ -35,8 +39,8 @@ Check installed binaries:
 ```bash
 metactl --version
 metactld --version
-# metactl 0.1.22 (metactl/v2alpha1)
-# metactld 0.1.22
+# metactl 0.1.23 (metactl/v2alpha1)
+# metactld 0.1.23
 ```
 
 For source development:
@@ -45,8 +49,8 @@ For source development:
 git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo build -p metactl -p metactld
-#    Compiling metactl v0.1.22 (...)
-#    Compiling metactld v0.1.22 (...)
+#    Compiling metactl v0.1.23 (...)
+#    Compiling metactld v0.1.23 (...)
 #     Finished `dev` profile ...
 ```
 
