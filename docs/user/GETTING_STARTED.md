@@ -4,7 +4,8 @@ This guide covers the public local `metactl` CLI.
 
 ## Install
 
-Install the CLI from crates.io:
+The source crate version is 0.1.23. After it appears on crates.io, install the
+CLI with this pinned command:
 
 ```bash
 cargo install metactl --version 0.1.23 --locked
@@ -13,21 +14,22 @@ cargo install metactl --version 0.1.23 --locked
 
 The published `metactl` package bundles the public starter library. You do not need a checkout of this repository for the built-in demo, `metactl list packs`, or the default `python-refactor` workflow.
 
-Install `metactld` only if you need the local JSON-RPC/MCP daemon:
+Install `metactld` only if you need the local JSON-RPC/MCP daemon and its
+0.1.23 version has appeared on crates.io:
 
 ```bash
 cargo install metactld --version 0.1.23 --locked
 # Installed package `metactld v0.1.23` (executable `metactld`)
 ```
 
-The pinned commands above reproduce this release. To update to the latest
-published crates.io versions later:
+Once available, the pinned commands above reproduce this release. To update to
+the latest published crates.io versions later:
 
 ```bash
 cargo install metactl --locked --force
 cargo install metactld --locked --force
-# Installed package `metactl v0.1.23` (executable `metactl`)
-# Installed package `metactld v0.1.23` (executable `metactld`)
+# Installed package `metactl v<latest published>` (executable `metactl`)
+# Installed package `metactld v<latest published>` (executable `metactld`)
 ```
 
 Check installed binaries:
