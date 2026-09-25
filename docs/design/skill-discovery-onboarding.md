@@ -43,15 +43,17 @@ configuration values. JSON formatting can change on apply. It never installs an
 copyable project instruction after registration. Project config is loaded by
 Codex only in trusted projects; the installer must say so.
 Removal recognizes the pinned project's MetaCTL baseline entry after a binary
-or Python upgrade. Doctor checks the registered command even if the current
-invocation uses different profile flags, and reports that option difference.
+or Python upgrade. Doctor compares the registration with the current invocation.
+On a mismatch it reports readiness as unknown and does not execute the
+registered command.
 
 `doctor` displays a compact state ladder, with unknown as a first-class
 state:
 
 1. **Catalog:** configured project and eligible count from offline status.
 2. **Registration:** target config entry found, missing, or conflicting.
-3. **Host:** offline readiness of the registered command, without a provider call.
+3. **Host:** offline readiness checked in the current shell when registration
+   matches the requested options, without a provider call.
 4. **Agent:** native fresh-session acceptance reported by the user or not yet
    verified; MetaCTL cannot infer it from a config file.
 5. **Routing:** last matching event, mode, provider attempts/calls, fallback

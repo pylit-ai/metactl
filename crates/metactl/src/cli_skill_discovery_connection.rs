@@ -158,6 +158,42 @@ fn codex_has_server(document: &toml::Value) -> bool {
         .is_some()
 }
 
+fn codex_server(document: &toml::Value) -> Option<&toml::Value> {
+    document.get("mcp_servers")?.get(SERVER)
+}
+
+fn codex_only_server_changed(
+    before: &toml::Value,
+    after: &toml::Value,
+    replacement: Option<&toml::Value>,
+) -> bool {
+    let mut expected = before.clone();
+    let Some(root) = expected.as_table_mut() else {
+        return false;
+    };
+    if let Some(value) = replacement {
+        let servers = root
+            .entry("mcp_servers")
+            .or_insert_with(|| toml::Value::Table(Default::default()));
+        let Some(table) = servers.as_table_mut() else {
+            return false;
+        };
+        table.insert(SERVER.to_owned(), value.clone());
+    } else {
+        let Some(table) = root
+            .get_mut("mcp_servers")
+            .and_then(toml::Value::as_table_mut)
+        else {
+            return false;
+        };
+        table.remove(SERVER);
+        if table.is_empty() {
+            root.remove("mcp_servers");
+        }
+    }
+    &expected == after
+}
+
 fn policy_args(args: &[String]) -> Vec<&str> {
     let mut result = Vec::new();
     let mut i = 0;
@@ -194,7 +230,6 @@ fn codex_block(command: &str, args: &[String]) -> String {
 struct ManagedEntry {
     command: String,
     args: Vec<String>,
-    event_log: PathBuf,
 }
 
 fn managed_entry(
@@ -251,11 +286,7 @@ fn managed_entry(
     if !event_log.is_absolute() {
         return None;
     }
-    Some(ManagedEntry {
-        command,
-        args,
-        event_log,
-    })
+    Some(ManagedEntry { command, args })
 }
 
 fn managed_json_entry(value: &Value, root: &Path, target: &str) -> Option<ManagedEntry> {
@@ -464,6 +495,13 @@ fn edit_codex(
     let header = format!("[mcp_servers.{SERVER}]");
     let parsed = parse_codex_toml(old)?;
     if let Some((begin, end, existing, entry)) = managed_codex_block(old, root)? {
+        let existing_semantic = parse_codex_toml(existing)?;
+        if codex_server(&parsed) != codex_server(&existing_semantic) {
+            return Err(CliError::new(
+                EXIT_STATE,
+                "Codex server has settings outside the managed block; review it manually.",
+            ));
+        }
         if remove {
             let suffix = if old[end..].starts_with('\n') {
                 end + 1
@@ -476,6 +514,10 @@ fn edit_codex(
                 return Err(CliError::new(EXIT_STATE,
                     "Codex config still defines metactl-skills after removing the managed block; review it manually."));
             }
+            if !codex_only_server_changed(&parsed, &parsed_updated, None) {
+                return Err(CliError::new(EXIT_STATE,
+                    "Removing the Codex server would change unrelated settings; review it manually."));
+            }
             return Ok((updated, "removed"));
         }
         if existing == block.trim_end() {
@@ -483,7 +525,14 @@ fn edit_codex(
         }
         require_policy_match(&entry, desired, replace)?;
         let updated = format!("{}{}{}", &old[..begin], block.trim_end(), &old[end..]);
-        parse_codex_toml(&updated)?;
+        let parsed_updated = parse_codex_toml(&updated)?;
+        let block_semantic = parse_codex_toml(block)?;
+        if !codex_only_server_changed(&parsed, &parsed_updated, codex_server(&block_semantic)) {
+            return Err(CliError::new(
+                EXIT_STATE,
+                "Updating the Codex server would change unrelated settings; review it manually.",
+            ));
+        }
         return Ok((updated, "updated"));
     }
     if old.contains(&header) || codex_has_server(&parsed) {
@@ -500,7 +549,14 @@ fn edit_codex(
         "\n\n"
     };
     let updated = format!("{old}{separator}{block}");
-    parse_codex_toml(&updated)?;
+    let parsed_updated = parse_codex_toml(&updated)?;
+    let block_semantic = parse_codex_toml(block)?;
+    if !codex_only_server_changed(&parsed, &parsed_updated, codex_server(&block_semantic)) {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "Adding the Codex server would change unrelated settings; review it manually.",
+        ));
+    }
     Ok((updated, "connected"))
 }
 
@@ -582,13 +638,19 @@ fn connection(
 }
 
 fn offline_status(command: &str, args: &[String]) -> (String, Value) {
-    use std::io::Read;
+    use std::io::{Read, Seek, SeekFrom};
     use std::time::{Duration, Instant};
+    let Ok(mut output_file) = tempfile::tempfile() else {
+        return ("unavailable".into(), Value::Null);
+    };
+    let Ok(child_output) = output_file.try_clone() else {
+        return ("unavailable".into(), Value::Null);
+    };
     let spawned = Command::new(command)
         .args(args)
         .arg("--status")
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::from(child_output))
         .stderr(std::process::Stdio::null())
         .spawn();
     let Ok(mut child) = spawned else {
@@ -602,10 +664,8 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
                     return ("project_not_ready".into(), Value::Null);
                 }
                 let mut output = Vec::new();
-                if child
-                    .stdout
-                    .take()
-                    .is_none_or(|stdout| stdout.take(65537).read_to_end(&mut output).is_err())
+                if output_file.seek(SeekFrom::Start(0)).is_err()
+                    || output_file.take(65537).read_to_end(&mut output).is_err()
                     || output.len() > 65536
                 {
                     return ("invalid_status".into(), Value::Null);
@@ -748,7 +808,13 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         match parse_codex_toml(&config) {
             Err(_) => ("invalid_config", None),
             Ok(document) => match managed_codex_block(&config, &root) {
-                Ok(Some((_, _, _, entry))) => ("configured", Some(entry)),
+                Ok(Some((_, _, block, entry)))
+                    if parse_codex_toml(block).ok().is_some_and(|managed| {
+                        codex_server(&document) == codex_server(&managed)
+                    }) =>
+                {
+                    ("configured", Some(entry))
+                }
                 _ if codex_has_server(&document) || config.contains(BEGIN) => ("conflict", None),
                 _ => ("missing", None),
             },
@@ -773,9 +839,6 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     let matches_requested = registered
         .as_ref()
         .is_some_and(|entry| entry.command == command && entry.args == args);
-    let ledger = registered
-        .as_ref()
-        .map_or(ledger, |entry| entry.event_log.clone());
     // A project-controlled client config is data for doctor, never a command to execute.
     let (host, catalog) = if registered.is_some() && !matches_requested {
         ("unknown_registration_drift".into(), Value::Null)

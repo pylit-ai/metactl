@@ -203,6 +203,29 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertIn("invalid TOML", invalid.stderr)
         self.assertEqual(path.read_text(), "model = [\n")
 
+    def test_codex_remove_refuses_reparenting_unrelated_settings(self):
+        path = self.project / ".codex/config.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[mcp_servers.other]\ncommand = "other"\n')
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        original = path.read_text()
+        path.write_text(original + "enabled = false\n")
+        changed = path.read_text()
+        doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertEqual(json.loads(doctor.stdout)["registration"], "conflict")
+        for flags in ((), ("--remove",)):
+            with self.subTest(flags=flags):
+                result = self.run_cli("skills", "connect", "--target", "codex-cli", *flags)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("outside the managed block", result.stderr)
+                self.assertEqual(path.read_text(), changed)
+        path.write_text(original)
+        removed = self.run_cli("skills", "connect", "--target", "codex-cli", "--remove")
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertIn('command = "other"', path.read_text())
+
     def test_profile_change_requires_explicit_replace(self):
         path = self.project / ".cursor/mcp.json"
         applied = self.run_cli("--no-profile", "skills", "connect", "--target", "cursor", "--apply")

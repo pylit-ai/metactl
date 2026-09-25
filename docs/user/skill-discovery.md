@@ -40,8 +40,9 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    If Python is outside `PATH`, add `--python /absolute/path/to/python3` to
    `connect`; the path must remain available to the agent. The printed rollback
    command recognizes the managed baseline entry even when the executable or
-   Python path later changes. `doctor` checks the registered command and reports
-   whether it matches the options in the current diagnostic invocation.
+   Python path later changes. `doctor` compares the registration with the
+   current invocation. It checks host readiness only when they match, using
+   the current shell environment; otherwise readiness is unknown.
    A user-wide Codex registration shares this one project's skill catalog and
    event metadata across Codex sessions in other repositories; choose project
    scope when catalogs or visibility should remain separate. The baseline
