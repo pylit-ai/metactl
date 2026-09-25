@@ -203,7 +203,8 @@ fn managed_entry(
     root: &Path,
     target: &str,
 ) -> Option<ManagedEntry> {
-    if Path::new(&command).file_name()?.to_str()? != "metactl"
+    if !Path::new(&command).is_absolute()
+        || Path::new(&command).file_name()?.to_str()? != "metactl"
         || args.len() < 12
         || args.first()? != "--project"
         || args.get(1)? != &root.to_string_lossy()
@@ -469,7 +470,13 @@ fn edit_codex(
             } else {
                 end
             };
-            return Ok((format!("{}{}", &old[..begin], &old[suffix..]), "removed"));
+            let updated = format!("{}{}", &old[..begin], &old[suffix..]);
+            let parsed_updated = parse_codex_toml(&updated)?;
+            if codex_has_server(&parsed_updated) {
+                return Err(CliError::new(EXIT_STATE,
+                    "Codex config still defines metactl-skills after removing the managed block; review it manually."));
+            }
+            return Ok((updated, "removed"));
         }
         if existing == block.trim_end() {
             return Ok((old.to_owned(), "already_connected"));
@@ -479,11 +486,11 @@ fn edit_codex(
         parse_codex_toml(&updated)?;
         return Ok((updated, "updated"));
     }
-    if remove {
-        return Ok((old.to_owned(), "already_absent"));
-    }
     if old.contains(&header) || codex_has_server(&parsed) {
         return Err(CliError::new(EXIT_STATE, "An unmanaged metactl-skills server already exists in Codex config; review it manually."));
+    }
+    if remove {
+        return Ok((old.to_owned(), "already_absent"));
     }
     let separator = if old.is_empty() || old.ends_with("\n\n") {
         ""
@@ -580,6 +587,7 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
     let spawned = Command::new(command)
         .args(args)
         .arg("--status")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn();
@@ -765,11 +773,15 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     let matches_requested = registered
         .as_ref()
         .is_some_and(|entry| entry.command == command && entry.args == args);
-    let (status_command, status_args, ledger) = match registered {
-        Some(entry) => (entry.command, entry.args, entry.event_log),
-        None => (command.clone(), args.clone(), ledger),
+    let ledger = registered
+        .as_ref()
+        .map_or(ledger, |entry| entry.event_log.clone());
+    // A project-controlled client config is data for doctor, never a command to execute.
+    let (host, catalog) = if registered.is_some() && !matches_requested {
+        ("unknown_registration_drift".into(), Value::Null)
+    } else {
+        offline_status(&command, &args)
     };
-    let (host, catalog) = offline_status(&status_command, &status_args);
     let mut latest = Value::Null;
     let mut observed = 0usize;
     let log_status = match fs::metadata(&ledger) {
@@ -819,7 +831,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     } else {
         "unknown_log_error"
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills\nRegistration: {} ({})\nRequested options match registration: {}\nLocal host: {} (offline status of registered command; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events)\nEvent log: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
+    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills\nRegistration: {} ({})\nRequested options match registration: {}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events, including manual calls)\nEvent log: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
         options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), matches_requested, host, routing, observed, log_status, ledger.display());
     Ok(CommandOutput {
         human,
@@ -829,7 +841,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
             json!({
                 "target": options.target, "config_path": path, "catalog_eligible_skills": catalog,
                 "registration": registration, "registration_matches_requested_options": matches_requested,
-                "registered_command": status_command, "host": host, "agent_tools": "unknown",
+                "registered_command": registered.as_ref().map(|entry| &entry.command), "host": host, "agent_tools": "unknown",
                 "routing": routing, "matching_discoveries": observed, "latest_discovery": latest,
                 "event_log": ledger, "log_status": log_status, "benefit": "unknown", "check_provider_calls": 0
             }),
@@ -914,6 +926,15 @@ mod tests {
         assert!(!updated.contains("/old/metactl"));
         let changed = old_block.replace("deterministic", "jev");
         assert!(edit_codex(&changed, &new_block, Path::new("/tmp/example"), true).is_err());
+    }
+
+    #[test]
+    fn codex_remove_refuses_unmanaged_and_leftover_server_table() {
+        let block = codex_block("/tmp/metactl", &args());
+        let unmanaged = "[mcp_servers.\"metactl-skills\"]\ncommand = \"other\"\n";
+        assert!(edit_codex(unmanaged, &block, Path::new("/tmp/example"), true).is_err());
+        let nested = format!("{block}\n[mcp_servers.metactl-skills.env]\nFOO = \"bar\"\n");
+        assert!(edit_codex(&nested, &block, Path::new("/tmp/example"), true).is_err());
     }
 
     #[test]
