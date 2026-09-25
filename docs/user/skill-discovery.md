@@ -25,7 +25,18 @@ No `metactl skills enable` command currently performs the client registration.
    Codex, another client, or `AGENTS.md`. Use the [adapter guide](discovery-agent-adapters.md)
    for the client's actual configuration format. Keep the log in a private
    directory that already exists and is writable only by the intended user.
-   Use the same profile choice in status and registration.
+   For example, run `mkdir -p -m 700 "$HOME/.local/state/metactl"` and
+   `chmod 700 "$HOME/.local/state/metactl"`, then use its resolved absolute
+   path for `--event-log`. Use the same profile choice in status and
+   registration. If status needed `--no-profile`, generate the entry with:
+
+   ```sh
+   metactl --project /absolute/path/to/project --no-profile skills host \
+     --client-config --ranker deterministic --trial-mode baseline \
+     --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl
+   ```
+
+   The generated argument array retains `--no-profile`.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
    `load_skill` are available, then request one harmless ambiguous discovery
    and load a returned ID with its digest. The `routing_receipt` should say

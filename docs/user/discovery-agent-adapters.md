@@ -82,8 +82,8 @@ Codex TOML. [Codex configuration](https://developers.openai.com/codex/config-bas
 and [MCP setup](https://developers.openai.com/codex/mcp) describe these layers.
 A user-wide registration fixes one `--project` catalog for every Codex session
 that loads it. Choose project scope when the catalog differs by repository;
-avoid registering `metactl-skills` at both scopes, where the duplicate name
-obscures which entry Codex selected.
+the trusted project's entry takes precedence over the user entry. Register
+`metactl-skills` at one scope to keep the active catalog clear.
 
 Use the installed CLI's stdio registration form. Replace the absolute project
 and private log paths with local values and review the flags before registering.
@@ -99,7 +99,10 @@ codex mcp get metactl-skills
 
 For a trusted project-local registration, merge the equivalent entry into
 `.codex/config.toml` without replacing unrelated settings. Use the absolute
-path returned by `command -v metactl` for `command`:
+path returned by `command -v metactl` for `command`. Keep a file containing
+machine-specific executable, project, or private log paths **untracked**; do
+not commit those paths to a shared repository. If `.codex/config.toml` is
+already tracked, use user scope or a reviewed portable wrapper instead:
 
 ```toml
 [mcp_servers.metactl-skills]
@@ -129,6 +132,9 @@ The packaged host needs Python 3.10 or newer. If either tool is missing in a
 fresh session, check project trust, absolute project and command paths, the
 Python installation, and the registration scope. If the receipt says
 `log=failed`, check the log parent directory and its write permissions.
+The registration recipe is based on Codex documentation and packaged host
+tests; maintainers have not yet acceptance-tested discovery and loading in a
+fresh native Codex session.
 
 For more predictable use, add the optional, conditional `AGENTS.md` instruction
 in the [first-run workflow](skill-discovery.md#first-run-workflow). Avoid an

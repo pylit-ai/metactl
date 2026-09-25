@@ -4,8 +4,10 @@ This guide covers the public local `metactl` CLI.
 
 ## Install
 
-The source crate version is 0.1.23. After it appears on crates.io, install the
-CLI with this pinned command:
+The source crate version is 0.1.23. From this source checkout, run
+`cargo install --path crates/metactl --locked` if the version is not on
+crates.io yet. When the [registry](https://crates.io/crates/metactl) shows
+0.1.23, install the CLI with this pinned command:
 
 ```bash
 cargo install metactl --version 0.1.23 --locked

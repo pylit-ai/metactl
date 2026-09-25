@@ -61,6 +61,7 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Prebuilt release | `cargo binstall metactl` | Fast, verified native install on Linux x86_64 or Apple Silicon. |
 | Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
 | npm shim (unpublished) | See [`packaging/npm`](packaging/npm) | Installer scaffold; the npm package is not yet published. |
+| This source checkout | `cargo install --path crates/metactl --locked` | Use the checked-out version before its registry release. |
 | crates.io, after 0.1.23 publication | `cargo install metactl --version 0.1.23 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 
@@ -68,7 +69,9 @@ All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Ac
 
 ## Quickstart
 
-After 0.1.23 appears on crates.io, install the CLI:
+From this source checkout, `cargo install --path crates/metactl --locked`
+installs 0.1.23 before registry publication. For a registry install, check the
+crates.io badge above; when it shows 0.1.23, use:
 
 ```bash
 cargo install metactl --version 0.1.23 --locked

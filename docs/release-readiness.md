@@ -8,7 +8,9 @@ This release adds bounded gateway-backed discovery trials, routing receipts,
 private event inspection and first-run activation guidance. It also includes
 Codex projection safety and library source-drift planning since v0.1.22. Native
 defaults remain unchanged. See [activation](user/skill-discovery.md),
-[trial modes](user/discovery-trials.md), and the [changelog](../CHANGELOG.md).
+[trial modes](user/discovery-trials.md), the [historical deterministic
+development benchmark](../reports/skill-discovery-development-benchmark.md),
+and the [changelog](../CHANGELOG.md).
 
 ## Evidence and claims
 
