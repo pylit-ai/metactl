@@ -10925,6 +10925,90 @@ fn ensure_ignore_recovery_dir(project_root: &Path) -> std::result::Result<PathBu
             ),
         ));
     }
+    // A failed multi-file repair can restore the old .git/info/exclude before
+    // the final staging check. Protect retained copies independently of both
+    // ignore files being repaired, including on that rollback path.
+    let guard = recovery.join(".gitignore");
+    let probe = recovery.join(".metactl-recovery-probe");
+    let git_tree = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()
+        .map_err(internal_error)?;
+    if git_tree.status.success() && git_tree.stdout == b"true\n" {
+        let probe_text = probe.to_str().ok_or_else(|| {
+            state_error(anyhow!(
+                "non-UTF-8 ignore recovery path: {}",
+                probe.display()
+            ))
+        })?;
+        let mut prior_check = Command::new("git")
+            .arg("-C")
+            .arg(project_root)
+            .args(["check-ignore", "--verbose", "-z", "--stdin", "--no-index"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(internal_error)?;
+        let mut prior_input = prior_check
+            .stdin
+            .take()
+            .ok_or_else(|| internal_error(anyhow!("git check-ignore stdin unavailable")))?;
+        prior_input
+            .write_all(probe_text.as_bytes())
+            .and_then(|()| prior_input.write_all(&[0]))
+            .map_err(internal_error)?;
+        drop(prior_input);
+        let prior = prior_check.wait_with_output().map_err(internal_error)?;
+        if !prior.status.success() && prior.status.code() != Some(1) {
+            return Err(state_error(anyhow!(
+                "inspect ignore recovery rules: {}",
+                String::from_utf8_lossy(&prior.stderr)
+            )));
+        }
+        let fields: Vec<_> = prior.stdout.split(|byte| *byte == 0).collect();
+        if fields
+            .get(2)
+            .is_some_and(|pattern| pattern.starts_with(b"!"))
+        {
+            return Err(state_error(anyhow!(
+                "recovery copy path is explicitly unignored: {}",
+                recovery.display()
+            )));
+        }
+    }
+    match fs::symlink_metadata(&guard) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+            if fs::read(&guard).map_err(internal_error)? != b"*\n" {
+                return Err(state_error(anyhow!(
+                    "recovery protection file is user-modified: {}",
+                    guard.display()
+                )));
+            }
+        }
+        Ok(_) => {
+            return Err(state_error(anyhow!(
+                "recovery protection path is not a regular file: {}",
+                guard.display()
+            )));
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&guard)
+                .map_err(internal_error)?;
+            file.write_all(b"*\n").map_err(internal_error)?;
+            file.sync_all().map_err(internal_error)?;
+        }
+        Err(err) => return Err(state_error(anyhow!("inspect {}: {err}", guard.display()))),
+    }
+    if git_tree.status.success() && git_tree.stdout == b"true\n" {
+        recovery_copies_ignored_by_git(project_root, &[(0, guard), (0, probe)])
+            .map_err(state_error)?;
+    }
     Ok(recovery)
 }
 

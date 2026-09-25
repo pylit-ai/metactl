@@ -773,6 +773,43 @@ fn explicit_unignore_of_recovery_directory_cannot_report_success() {
 }
 
 #[test]
+fn ignore_fix_does_not_replace_user_modified_recovery_guard() {
+    let project = TempDir::new().expect("project");
+    git_init_project(project.path());
+    let recovery_dir = project.path().join(".metactl/ignore-recovery");
+    fs::create_dir_all(&recovery_dir).expect("recovery dir");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&recovery_dir, fs::Permissions::from_mode(0o700))
+            .expect("private recovery dir");
+    }
+    let guard = recovery_dir.join(".gitignore");
+    let authored = b"!authored-recovery-note\n";
+    fs::write(&guard, authored).expect("authored guard");
+    let result = run_cli(
+        project.path(),
+        &[
+            "ignore",
+            "fix",
+            "--scope",
+            "repo",
+            "--target",
+            "codex-cli",
+            "--yes",
+        ],
+    );
+    assert!(!result.status.success(), "authored guard was replaced");
+    assert!(
+        stderr(&result).contains("user-modified"),
+        "{}",
+        stderr(&result)
+    );
+    assert_eq!(fs::read(&guard).expect("guard"), authored);
+    assert!(!project.path().join(".gitignore").exists());
+}
+
+#[test]
 fn ignore_fix_rejects_invalid_bytes_and_markers_without_mutation() {
     for invalid in [
         b"\xff\n".to_vec(),
@@ -894,6 +931,7 @@ fn ignore_fix_rolls_back_first_write_when_second_write_fails() {
     fs::create_dir_all(project.path().join(".test-home")).expect("test home");
     fs::create_dir_all(project.path().join(".metactl/state")).expect("state dir");
     let exclude = project.path().join(".git/info/exclude");
+    fs::write(&exclude, b"private-local-only-rule\n").expect("local exclude");
     let original = fs::read(&exclude).expect("exclude");
     let root_mode = fs::metadata(project.path())
         .expect("metadata")
@@ -922,6 +960,29 @@ fn ignore_fix_rolls_back_first_write_when_second_write_fails() {
     );
     assert_eq!(fs::read(&exclude).expect("exclude"), original);
     assert!(!project.path().join(".gitignore").exists());
+    let recovery_dir = project.path().join(".metactl/ignore-recovery");
+    let copies: Vec<_> = fs::read_dir(&recovery_dir)
+        .expect("recovery dir")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    assert!(
+        !copies.is_empty(),
+        "failed repair did not retain recovery copy"
+    );
+    for copy in &copies {
+        assert!(
+            agent_path_is_ignored(project.path(), copy.to_str().expect("recovery path")),
+            "failed repair left recovery copy eligible for git add: {}",
+            copy.display()
+        );
+    }
+    let dry_run = run_git(project.path(), &["add", "--dry-run", "--all"]);
+    assert!(dry_run.status.success(), "{}", stderr(&dry_run));
+    assert!(
+        !stdout(&dry_run).contains("ignore-recovery"),
+        "failed repair exposed recovery content: {}",
+        stdout(&dry_run)
+    );
     let retry = run_cli(
         project.path(),
         &[
