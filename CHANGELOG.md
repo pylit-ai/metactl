@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.23 - 2026-09-25
+
+### Added
+
+- Gateway-backed, opt-in skill discovery trials with baseline, shadow, and
+  advisory modes. Scoped calls have bounded budgets and deterministic fallback;
+  private event logs and routing receipts distinguish a registered adapter from
+  an invoked provider. Trial reports expose usage, latency, fallback, outcome,
+  and measurement coverage without recording queries or skill bodies.
+- Discovery adapter guidance for supported agent targets, including direct MCP
+  registration where available and explicit manual bridges where it is not.
+  First-run documentation starts with offline deterministic discovery and shows
+  how to inspect registration, invocation, and event logs.
+- Library source-drift status and a read-only JSON Git plan for reviewing
+  incoming library changes before applying them.
+
+### Changed
+
+- Codex now projects canonical Agent Skills to `.agents/skills` and avoids
+  generating unsupported `.codex/commands` for new projects. Existing command
+  files remain protected during migration.
+- The optional discovery starter instruction explains routing receipts and
+  skipped discovery without imposing an unconditional agent rule.
+
+### Evidence limits
+
+- Provider connectivity, valid ordering, and fallback have been exercised on
+  bounded fixtures. No productivity, context saving, or cost benefit is claimed
+  for real coding tasks. Trial registration alone does not prove agent use.
+- The Codex registration recipe follows current client documentation and a
+  packaged host smoke; a fresh native Codex discovery/load session remains to
+  be acceptance-tested.
+- The npm installer remains an unpublished scaffold; the release covers GitHub
+  archives and the two existing crates.
+
 ## 0.1.22 - 2026-09-20
 
 ### Added

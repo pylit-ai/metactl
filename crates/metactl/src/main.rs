@@ -14,11 +14,12 @@ use metactl::project::{
     current_config_digest, current_local_config_digest, current_overlay_digest,
     default_project_config, detect_brownfield_repo, digest_path,
     ensure_bundled_starter_library_root, ensure_gitignore_entries, ensure_project_layout,
-    is_candidate_pack, list_user_profiles, load_compile_manifest, load_lock,
-    load_partial_project_config, load_policy_report, load_profile_partial, load_project_context,
-    load_project_context_with_profile_preferences, load_user_settings, metactl_user_config_dir,
-    policy_report_path, preferred_apply_mode_for_target, private_source_lock_path, profile_path,
-    profiles_directory, project_config_path, project_lock_path, resolve_profile_name_for_init,
+    is_candidate_pack, library_content_comparison, library_content_digest, list_user_profiles,
+    load_compile_manifest, load_lock, load_partial_project_config, load_policy_report,
+    load_profile_partial, load_project_context, load_project_context_with_profile_preferences,
+    load_user_settings, metactl_user_config_dir, policy_report_path,
+    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
+    project_config_path, project_lock_path, resolve_profile_name_for_init,
     resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
     update_managed_files_index, user_settings_path, write_lock, write_lock_relaxed,
     write_partial_project_config, write_policy_report, write_policy_report_relaxed,
@@ -42,6 +43,7 @@ use metactl::{
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+mod git_plan;
 mod noise_report;
 mod project_import;
 mod setup;
@@ -206,6 +208,8 @@ enum Commands {
     Fleet(FleetArgs),
     /// Show project config, targets, and sync readiness at a glance
     Status(StatusArgs),
+    /// Read-only per-path Git plan for projected files
+    Git(GitArgs),
     /// List roles, packs, policies, or targets from the library or project
     #[command(hide = true)]
     List(ListArgs),
@@ -858,6 +862,16 @@ enum SkillsCommand {
     Host(SkillsHostArgs),
     /// Save an Auto-mode surface decision in machine-local project configuration
     Select(SkillsSelectArgs),
+    /// Private discovery event reports and session outcome recording
+    Trials(SkillsTrialsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsTrialsArgs {
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
 #[derive(Debug, Args)]
@@ -885,6 +899,24 @@ struct SkillsHostArgs {
     provider_deadline: f64,
     #[arg(long)]
     exclude_skill: Vec<String>,
+    #[arg(long, default_value = "direct", value_parser = ["direct", "gateway"])]
+    jev_transport: String,
+    #[arg(long, default_value = "jev")]
+    gateway_command: String,
+    #[arg(long)]
+    gateway_project: Option<String>,
+    #[arg(long, value_parser = ["synthetic", "public-nonsensitive"])]
+    gateway_data_class: Option<String>,
+    #[arg(long, default_value = "advisory", value_parser = ["baseline", "shadow", "advisory"])]
+    trial_mode: String,
+    #[arg(long)]
+    event_log: Option<PathBuf>,
+    #[arg(long)]
+    session_id: Option<String>,
+    #[arg(long, default_value = "other", value_parser = ["claude-code", "codex-cli", "cursor", "filesystem-agent", "gemini-cli", "openclaw", "opencode", "codex", "omnigent", "pi", "other", "contract"])]
+    runtime: String,
+    #[arg(long, value_parser = ["discover_skills", "load_skill"], conflicts_with_all = ["status", "check", "client_config"])]
+    call_tool: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1086,6 +1118,18 @@ struct StatusArgs {
     /// Show status for a specific target only
     #[arg(long, short = 't')]
     target: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct GitArgs {
+    #[command(subcommand)]
+    command: GitCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum GitCommand {
+    /// Compare saved MetaCTL ownership, installed bytes, and Git tracking
+    Plan,
 }
 
 #[derive(Debug, Clone, ValueEnum)]
@@ -1854,6 +1898,7 @@ fn command_contract_name(command: &Commands) -> &'static str {
         Commands::Target(_) => "target",
         Commands::Fleet(_) => "fleet",
         Commands::Status(_) => "status",
+        Commands::Git(_) => "git",
         Commands::List(_) => "list",
         Commands::Search(_) => "search",
         Commands::Stats(_) => "stats",
@@ -1941,10 +1986,19 @@ fn main() -> ExitCode {
     {
         return cli_skills::run_discovery_host(&cli, args);
     }
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Trials(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_trials(args);
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
-                let json = bounded_machine_json(output.json, cli.full);
+                let json = bounded_machine_json(
+                    output.json,
+                    cli.full || matches!(&cli.command, Commands::Git(_)),
+                );
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
@@ -2024,6 +2078,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Target(args) => cmd_target(cli, args),
         Commands::Fleet(args) => cmd_fleet(cli, args),
         Commands::Status(args) => cmd_status(cli, args),
+        Commands::Git(args) => cmd_git(cli, args),
         Commands::List(args) => cmd_list(cli, args),
         Commands::Search(args) => cmd_search(cli, args),
         Commands::Stats(args) => cmd_stats(cli, args),
@@ -2124,7 +2179,8 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::Catalog
             | SkillsCommand::Discover(_)
             | SkillsCommand::Load(_)
-            | SkillsCommand::Host(_) => None,
+            | SkillsCommand::Host(_)
+            | SkillsCommand::Trials(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {
@@ -2221,6 +2277,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             Some(SourceCommand::Remove(_)) => Some("source remove"),
         },
         Commands::Status(_)
+        | Commands::Git(_)
         | Commands::List(_)
         | Commands::Search(_)
         | Commands::Explain(_)
@@ -4394,6 +4451,24 @@ fn git_worktree_dirty(project_root: &Path) -> bool {
     !output.stdout.is_empty()
 }
 
+fn cmd_git(cli: &Cli, args: &GitArgs) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    match args.command {
+        GitCommand::Plan => {
+            let plan = git_plan::build(&project_root).map_err(internal_error)?;
+            let counts = &plan["counts"];
+            Ok(CommandOutput {
+                human: format!(
+                    "Projection Git plan (read-only): {} managed unchanged, {} managed edited, {} missing, {} unowned, {} unsafe aliases.\nReview every path with `metactl --json git plan`; no Git changes were made.",
+                    counts["managed_unchanged"], counts["managed_edited"],
+                    counts["missing"], counts["unowned"], counts["unsafe_alias"]
+                ),
+                json: success_json("git", Some(&project_root), plan),
+            })
+        }
+    }
+}
+
 fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput, CliError> {
     let project_root = project_root(cli).map_err(internal_error)?;
     let config_path = project_config_path(&project_root, cli.config.as_deref());
@@ -4417,6 +4492,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     let context = load_required_context(cli, &project_root)?;
     let stale_reason = metactl::project::lock_stale_reason(&context).map_err(internal_error)?;
     let stale = stale_reason.is_some();
+    let source_comparison = library_content_comparison(&context);
     let profile = profile_status_json(&context);
     let profile_resolution = profile_resolution_json(cli, &context);
     let discoverability = discoverability_report(&context, &ConfigOverrides::default());
@@ -4617,6 +4693,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         None => "ok".to_string(),
     };
     lines.push(format!("  Lock:    {}", lock_display));
+    lines.push(format!("  Library source: {}", source_comparison));
     lines.push(format!("  Profile: {}", profile_status_message(&profile)));
     if let Some(notice) = profile_resolution_notice(&profile_resolution) {
         lines.push(format!("  {notice}"));
@@ -4715,7 +4792,10 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         }
     }
 
-    let needs_sync = stale || targets.is_empty() || !surface_mode_mismatches.is_empty();
+    let needs_sync = stale
+        || targets.is_empty()
+        || !surface_mode_mismatches.is_empty()
+        || source_comparison != "current";
     if !blocking_checks.is_empty() {
         lines.push(String::new());
         lines.push("Next: metactl doctor".to_string());
@@ -4747,6 +4827,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                     "auto_discovered": import_roots.len(),
                 },
                 "source_state": source_state,
+                "library_source_comparison": source_comparison,
                 "skill_visibility": codex_skill_visibility,
                 "agent_artifact_policy": agent_artifact_policy,
                 "instruction_noise": instruction_noise,
@@ -6955,6 +7036,8 @@ fn cmd_compile_with_durable_writes(
         .as_ref()
         .and_then(|profile| profile.digest.clone());
     lock.local_config_digest = current_local_config_digest(&context).map_err(internal_error)?;
+    lock.library_content_digest =
+        Some(library_content_digest(&context.library_roots).map_err(internal_error)?);
     lock.updated_at = Some(now_string());
 
     for target_id in target_overrides {

@@ -3,10 +3,80 @@
 Experimental, opt-in, plain-instruction adapter. Deterministic mode is the default
 and requires no provider, account, API credits, SDK or network access. Existing
 compilation, native skill menus and installed skill folders are unchanged.
+The optional packaged host needs Python 3.10 or newer on the client machine.
 
-## Quick start
+<a id="quick-start"></a>
+## First-run workflow
 
-Build `cargo build -p metactl`. In a configured project:
+There are three separate steps: make a project catalog available, register the
+two-tool host in a coding client, and have an agent call it when specialist
+instructions are useful. Jev is an optional fourth step for authorized ranking.
+No `metactl skills enable` command currently performs the client registration.
+
+1. Point MetaCTL at an **absolute project path** and run
+   `metactl --project /absolute/path/to/project skills host --status --ranker deterministic --trial-mode baseline`.
+   Look for `project_ready: true` and an eligible-skill count. `provider_verified:
+   false` is expected in baseline mode; status makes no provider request. If
+   your machine default profile is unrelated to this project, repeat with
+   `metactl --project /absolute/path/to/project --no-profile skills host --status --ranker deterministic --trial-mode baseline`.
+2. Generate registration data with the same project and mode using
+   `metactl --project /absolute/path/to/project skills host --client-config --ranker deterministic --trial-mode baseline --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl`.
+   It prints a client-neutral `mcpServers` JSON object and does **not** edit
+   Codex, another client, or `AGENTS.md`. Use the [adapter guide](discovery-agent-adapters.md)
+   for the client's actual configuration format. Keep the log in a private
+   directory that already exists and is writable only by the intended user.
+   For example, run `mkdir -p -m 700 "$HOME/.local/state/metactl"` and
+   `chmod 700 "$HOME/.local/state/metactl"`, then use its resolved absolute
+   path for `--event-log`. Use the same profile choice in status and
+   registration. If status needed `--no-profile`, generate the entry with:
+
+   ```sh
+   metactl --project /absolute/path/to/project --no-profile skills host \
+     --client-config --ranker deterministic --trial-mode baseline \
+     --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl
+   ```
+
+   The generated argument array retains `--no-profile`.
+3. Restart or open a fresh agent session. Confirm both `discover_skills` and
+   `load_skill` are available, then request one harmless ambiguous discovery
+   and load a returned ID with its digest. The `routing_receipt` should say
+   `mode=baseline`, `provider_calls=0`, and `log=recorded` when the private
+   ledger is writable. This checks the live tool path without using Jev.
+
+If the tools are not visible, check that the project is trusted by the client,
+the registered project and executable paths are absolute and exist, Python
+3.10+ is available, and you opened a new agent session after registering.
+If discovery works but `log=failed`, check that the private log's parent
+directory already exists and is writable. `--status` confirms only local host
+readiness, not that the client loaded or called its tools.
+
+For daily work, discover when the task or phase calls for unfamiliar specialist
+instructions; use an exact known skill directly when appropriate. A project may
+add this **optional** line to its `AGENTS.md` after registering and verifying
+the host:
+
+> When specialist instructions may help, call MetaCTL `discover_skills` if
+> available, load a relevant result by ID and digest, and show its
+> `routing_receipt`. If discovery was not called, say so when reporting routing.
+
+This line influences agent tool choice. It does not install a server, change
+Jev consent or client permissions and approval settings, or prove that an agent
+called the tool. The starter
+`skill-discovery` pack carries the reusable agent instructions for projects
+that select it. Its current starter-pack projection is limited to `codex-cli`;
+other supported MCP clients can register the host separately. An `AGENTS.md` line
+is a short project-level reminder, not a requirement for every MetaCTL user.
+
+Read evidence in this order: client registration, fresh-session tool list,
+actual `routing_receipt`, private event log, then measured task outcome. A
+`provider_calls=1` receipt proves one validated Jev response was observed, not
+that it improved the task. See [private trials](discovery-trials.md) for log
+inspection. Missing events do not prove discovery was unused.
+
+## Direct CLI discovery
+
+Use an installed MetaCTL CLI, or build from source with
+`cargo build -p metactl`. In a configured project:
 
 ```sh
 metactl --project /path/to/project --json --full skills catalog
@@ -39,7 +109,45 @@ whose native restrictions have not been mapped. Plain text retrieval is not nati
 activation and never grants tool permissions. Exact skill names can be searched;
 ambiguous same-name results retain their distinct IDs and source digests.
 
-## Install, enable and prove Jev is active
+## Shared gateway and measured trials
+
+Use the approved scoped gateway client when your environment provides one. The
+client owns project authentication and shared quotas; MetaCTL never needs its
+credential or the upstream provider key. Install the gateway client through your
+organization's onboarding process first. MetaCTL does not provision it.
+
+```sh
+metactl --project /path/to/approved-project skills host \
+  --ranker jev --jev-transport gateway --gateway-command /path/to/jev \
+  --gateway-project APPROVED_PROJECT_ID --gateway-data-class public-nonsensitive \
+  --allow-provider-data --max-provider-calls 4 --provider-deadline 5 \
+  --trial-mode shadow --runtime codex-cli \
+  --event-log /private/path/discovery.jsonl --status
+```
+
+Replace `--status` with `--check` for one fixed synthetic request, or omit it to
+run the persistent tool server. A check consumes the same gateway budget as a
+discovery attempt. Use `--client-config` to produce registration arguments and
+the [agent adapter guide](discovery-agent-adapters.md) for Codex, Omnigent and Pi.
+The data classification applies to **both the query and candidate descriptions**;
+do not label private project content as synthetic or public. If those inputs are
+not approved, use the deterministic baseline without provider consent.
+
+Choose `--trial-mode baseline` for no provider dispatch, `shadow` to record Jev's
+proposal while returning the baseline, or `advisory` to use validated ordering.
+Missing client/configuration, rejection, deadline and exhausted budgets retain
+the original candidates. No retry or interactive login occurs. The host attempt
+ceiling resets per process; the gateway must enforce cross-process monetary
+limits. Local readiness is not proof that gateway credentials are accepted.
+
+`--event-log` is opt-in private metadata recording. Check
+`metrics.telemetry_status`; a failed write does not interrupt discovery but must
+not be counted as a measured result. See [private trials](discovery-trials.md)
+for the local HTML dashboard and independently supplied task outcomes. Compare
+equivalent tasks across baseline, shadow and advisory sessions before claiming
+benefit; native catalog suppression and prompt-token savings remain unproven.
+
+## Direct-provider install and verification
 
 Install the released CLI using the [README installation choices](../../README.md#install).
 The host is embedded in both crate and binary distributions. Install Python 3.10+
@@ -94,8 +202,8 @@ For managed environments, `METACTL_SKILL_RANKER=jev`,
 `METACTL_JEV_ALLOW_DATA=true`, and `METACTL_JEV_MAX_CALLS=20` configure the packaged
 CLI. Explicit flags override values. These variables are not secrets. A budget
 resets with each child process; this is not a shared daily or dollar limit.
-Use a properly admitted project gateway when organizational policy requires one;
-this direct-provider adapter does not implement that gateway's project auth.
+Use the gateway transport above when organizational policy requires a properly
+admitted project gateway; direct transport does not implement project auth.
 Never distribute a shared provider key merely to make remote checks pass.
 
 Rollback: remove the MCP registration or set `--ranker deterministic`, then
@@ -178,13 +286,16 @@ references are not thereby admitted or verified.
 
 ```sh
 cargo build -p metactl
-python3 -m unittest discover -s tests -p test_skill_discovery_host.py -v
+python3 -m unittest discover -s tests -p 'test_skill_discovery*.py' -v
 python3 scripts/benchmark_skill_discovery.py --repeats 3 --distractors 200
 ```
 
-Metrics travel in tool responses, with no automatic external logging. They include
+Metrics travel in tool responses, with optional private local logging. They include
 local latency, returned bytes/count, repeated-load flag, catalog digest, ranker,
-fallback reason, provider calls, validated model and reported usage. They exclude
+fallback reason, provider attempts, validated provider calls, model and reported usage. `provider_calls`
+is `null` for an uncertain attempt (previously counted as a call); inspect
+`provider_attempts` as well. Shadow responses hide the proposal and use the
+`shadow` reason; the private ledger preserves the underlying ranking reason. They exclude
 raw queries, credentials and bodies. Failure may have incurred a provider charge
 even when usage is unknown. No cost is invented from unknown usage.
 
