@@ -11,6 +11,58 @@ spec.loader.exec_module(host)
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_host_termination_reaps_isolated_gateway_worker(self):
+        import os
+        import signal
+        import subprocess
+        import sys
+        import time
+        from test_skill_discovery_host import Fixture
+        fixture = Fixture()
+        self.addCleanup(fixture.temp.cleanup)
+        fixture.add("review-tests", "Review regression tests")
+        fixture.add("debug-tests", "Debug regression tests")
+        pidfile = fixture.root / "worker.pid"
+        gateway = fixture.root / "gateway"
+        gateway.write_text(f"#!{sys.executable}\nimport os,time\nfrom pathlib import Path\nPath({str(pidfile)!r}).write_text(str(os.getpid()))\ntime.sleep(60)\n")
+        gateway.chmod(0o700)
+        command = [str(ROOT / "target/debug/metactl"), "--project", str(fixture.project),
+                   "--no-profile", "skills", "host", "--ranker", "jev", "--jev-transport", "gateway",
+                   "--gateway-command", str(gateway), "--gateway-project", "fixture",
+                   "--gateway-data-class", "public-nonsensitive", "--allow-provider-data",
+                   "--max-provider-calls", "1", "--provider-deadline", "3",
+                   "--call-tool", "discover_skills"]
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, start_new_session=True)
+        worker = None
+        try:
+            process.stdin.write(b'{"query":"regression tests"}')
+            process.stdin.close()
+            deadline = time.monotonic() + 10
+            while not pidfile.exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+            self.assertTrue(pidfile.exists(), "gateway fixture did not launch")
+            worker = int(pidfile.read_text())
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=3)
+            deadline = time.monotonic() + 4
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(worker, 0)
+                except ProcessLookupError:
+                    return
+                time.sleep(.05)
+            self.fail("gateway worker survived host termination and its deadline")
+        finally:
+            if worker:
+                try: os.killpg(worker, signal.SIGKILL)
+                except ProcessLookupError: pass
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=3)
+            process.stdout.close()
+            process.stderr.close()
+
     def test_shadow_masks_only_provider_advice_and_retains_no_call_diagnostics(self):
         baseline = {"catalog_digest": "c" * 64, "skills": []}
         for enabled, key, budget, mode, reason in [

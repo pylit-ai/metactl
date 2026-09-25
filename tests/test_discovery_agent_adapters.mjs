@@ -63,6 +63,7 @@ function extension() {
 const first = extension();
 const discover = first.tools.get("discover_skills");
 const loadSkill = first.tools.get("load_skill");
+await assert.rejects(discover.execute("too-long", { query: "😀".repeat(3000) }), /8192 UTF-8 bytes/);
 const one = JSON.parse((await discover.execute("a", { query: "review" })).content[0].text);
 const two = JSON.parse((await loadSkill.execute("b", { id: "a".repeat(64), digest: "b".repeat(64) })).content[0].text);
 assert.equal(one.pid, two.pid, "calls must share one host and one request budget");

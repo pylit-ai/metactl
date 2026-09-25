@@ -122,8 +122,13 @@ malformed response, or host error it fails closed for the rest of that Pi
 session. It does **not** restart a child and silently renew its per-process Jev
 request ceiling. Shutdown closes stdin for graceful host cleanup, then terminates
 the remaining POSIX process group after one second. A forced termination can
-leave a temporary script directory; it contains code, not credentials. Gateway
-workers enforce their own bounded deadlines. On Windows, process-tree cleanup
+leave a temporary script directory; it contains code, not credentials. A second
+group signal escalates to SIGKILL after 750 milliseconds. The host handles normal
+SIGTERM/SIGHUP termination by killing its isolated provider worker; direct
+provider workers also enforce a wall-clock alarm. Untrappable host SIGKILL or
+machine failure cannot guarantee cleanup of an arbitrary external gateway
+command; use a gateway client with its own deadline. The Pi request deadline
+is 35 seconds, covering two 15-second CLI calls with margin. On Windows, process-tree cleanup
 is not accepted; the trial ledger itself requires POSIX. The Pi contract test
 requires an installed package and is intentionally a local optional gate,
 not native acceptance from generic CI. Run:

@@ -61,6 +61,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def provider_worker(payload, key, timeout):
+    if os.name == "posix":
+        # A forced parent exit must not turn per-socket timeouts into an
+        # unbounded direct provider request.
+        signal.alarm(max(1, math.ceil(timeout) + 1))
     request = urllib.request.Request(ENDPOINT, data=compact(payload).encode(),
                                     headers={"Authorization": "Bearer " + key,
                                              "Content-Type": "application/json"})
@@ -124,15 +128,18 @@ def exchange_child(command, wire, deadline, cwd=None):
     # Some pipe operations can outlive communicate(timeout) on host runtimes.
     # The caller owns the deadline independently of the pipe-exchange thread.
     threading.Thread(target=exchange, daemon=True).start()
-    if not done.wait(deadline):
-        # Killing only the parent can leave inherited stdout pipes open in a
-        # descendant. Kill our isolated process group and bound cleanup too.
+    try:
+        if not done.wait(deadline):
+            raise subprocess.TimeoutExpired("provider-worker", deadline)
+        if process.returncode or outcome.get("failed"):
+            raise ValueError("provider failed")
+        return json.loads(outcome["output"])
+    except BaseException:
+        # Includes termination signals converted to SystemExit by main().
+        # The isolated worker must not outlive its deadline supervisor.
         terminate()
         done.wait(.2)
-        raise subprocess.TimeoutExpired("provider-worker", deadline)
-    if process.returncode or outcome.get("failed"):
-        raise ValueError("provider failed")
-    return json.loads(outcome["output"])
+        raise
 
 
 class Ranker:
@@ -247,7 +254,7 @@ class Host:
         event = {"schema": "metactl.discovery_trial.v1", "kind": kind, "event_id": event_id,
                  "session_id": self.session_id, "run_id": self.run_id, "runtime": self.runtime,
                  "arm": self.ranker.mode if self.ranker.enabled else "baseline",
-                 "transport": self.ranker.transport_kind if self.ranker.enabled else "none", "time": time.time(),
+                 "transport": self.ranker.transport_kind if self.ranker.enabled and self.ranker.mode != "baseline" else "none", "time": time.time(),
                  **{k: metric[k] for k in fields if k in metric}}
         metric.update(event_id=event_id, session_id=self.session_id, run_id=self.run_id, trial_mode=event["arm"],
                       telemetry_status="disabled")
@@ -299,7 +306,7 @@ class Host:
                 metric["ranker"] = "deterministic"
                 if metric["reason"] in {"reordered", "unchanged", "abstained"}:
                     metric["reason"] = "shadow"
-            receipt = (f"Jev discovery: mode={metric['trial_mode']}; reason={metric['reason']}; "
+            receipt = (f"Skill discovery: mode={metric['trial_mode']}; reason={metric['reason']}; "
                        f"provider_calls={metric['provider_calls'] if metric['provider_calls'] is not None else 'unknown'}; "
                        f"order_changed={result['skills'] != baseline['skills']}; "
                        f"log={metric['telemetry_status']}; event={metric['event_id']}")
@@ -363,6 +370,11 @@ def main():
         except Exception:
             sys.exit(1)
         return
+    def stop_host(signum, _frame):
+        raise SystemExit(128 + signum)
+    if os.name == "posix":
+        signal.signal(signal.SIGTERM, stop_host)
+        signal.signal(signal.SIGHUP, stop_host)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--metactl", default="metactl")
     parser.add_argument("--project", required=True)

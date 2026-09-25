@@ -9,7 +9,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 const MAX_REPLY_BYTES = 2 * 1024 * 1024;
-const TIMEOUT_MS = 20_000;
+// load has two 15s CLI calls; discover has 15s CLI + up to 10s ranking.
+const TIMEOUT_MS = 35_000;
 const ERROR = "Skill discovery unavailable for this session; inspect the host locally.";
 type Reply = { jsonrpc: string; id: number; result?: unknown; error?: unknown };
 
@@ -32,6 +33,13 @@ class DiscoveryHost {
         try {
           if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
           else child.kill();
+          const hardKill = setTimeout(() => {
+            try {
+              if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+              else child.kill("SIGKILL");
+            } catch { /* Process group already exited. */ }
+          }, 750);
+          hardKill.unref();
         } catch { /* Already exited. */ }
       }, 1000);
       timer.unref();
@@ -110,6 +118,9 @@ class DiscoveryHost {
   }
 
   call(name: "discover_skills" | "load_skill", args: Record<string, string>, signal?: AbortSignal): Promise<{ content: Array<{ type: "text"; text: string }>; details: Record<string, never> }> {
+    if (name === "discover_skills" && typeof args.query === "string" && Buffer.byteLength(args.query, "utf8") > 8192) {
+      return Promise.reject(new Error("Discovery query exceeds 8192 UTF-8 bytes."));
+    }
     const run = async () => {
       await this.start(signal);
       const reply = await this.request("tools/call", { name, arguments: args }, signal);

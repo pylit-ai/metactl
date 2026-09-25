@@ -16,7 +16,7 @@ can apply a validated order. This feature selects skills, not the coding
 agent's underlying model.
 
 Every discovery response includes a `routing_receipt`, for example:
-`Jev discovery: mode=shadow; reason=shadow; provider_calls=1; order_changed=False; log=recorded; event=<opaque ID>`.
+`Skill discovery: mode=shadow; reason=shadow; provider_calls=1; order_changed=False; log=recorded; event=<opaque ID>`.
 In shadow mode the response omits proposed IDs and masks successful choice or
 abstention reasons as `shadow`, so the coding agent cannot follow the hidden
 proposal. Failure and no-call reasons remain visible. The private ledger
