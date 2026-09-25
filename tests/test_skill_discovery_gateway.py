@@ -88,9 +88,22 @@ class GatewayTrials(unittest.TestCase):
         result, metric = ranker.rank("task", baseline())
         self.assertEqual(result, baseline())
         self.assertEqual(metric["proposed_ids"], ["b" * 64, "a" * 64])
+        self.assertEqual(metric["reason"], "reordered")
         ranker = host.Ranker(True, True, 1, key="client", mode="baseline", sender=lambda *a: self.fail("dispatch"))
         self.assertEqual(ranker.rank("task", baseline())[1]["provider_calls"], 0)
         self.assertEqual(ranker.remaining, 1)
+
+    def test_valid_jev_choice_already_first_is_unchanged(self):
+        answer = response("a" * 64)
+        answer["answers"]["first"]["probabilities"] = {
+            "a" * 64: .8, "b" * 64: .1, "none": .1}
+        ranker = host.Ranker(True, True, 1, key="client",
+                             sender=lambda *a: answer, mode="advisory")
+        result, metric = ranker.rank("task", baseline())
+        self.assertEqual(result, baseline())
+        self.assertEqual(metric["reason"], "unchanged")
+        self.assertEqual(metric["ranker"], "jev")
+        self.assertEqual(metric["provider_calls"], 1)
 
     def test_gateway_timeout_is_bounded_and_candidate_set_preserved(self):
         with tempfile.TemporaryDirectory() as root:

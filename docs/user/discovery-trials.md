@@ -60,6 +60,12 @@ task completion labels, task duration and cost coverage. Unknown provider calls
 and missing outcome/usage/cost data stay explicit. Provider attempts may have
 incurred charges when validated usage is unavailable.
 
+The reorder count requires a changed proposed ID order. In shadow mode this is
+only a proposal; in advisory mode it is the applied order. A valid Jev choice
+that was already first is recorded as `unchanged`, not as a reorder or fallback.
+The report also checks ID order when reading older events whose reason was
+incorrectly recorded as `reordered` for an unchanged choice.
+
 These are descriptive cohorts. Without randomized or matched task assignment,
 their difference is **not** a causal saving. Result bytes are not prompt
 tokens. A skill host's small tool interface does not prove that the native

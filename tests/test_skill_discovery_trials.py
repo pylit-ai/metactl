@@ -132,6 +132,7 @@ class TrialTests(unittest.TestCase):
         self.assertEqual((advisory["runtime"], advisory["provider_calls_observed"],
                           advisory["sessions_without_outcome"]), ("pi", 1, 1))
         self.assertEqual(advisory["uncertain_provider_attempts"], 0)
+        self.assertEqual(advisory["reordered"], 0)
         self.assertIsNone(advisory["cost_usd_reported"])
         self.assertIsNone(advisory["task_input_tokens_reported"])
         self.assertIsNone(advisory["human_interventions_reported"])
@@ -142,6 +143,14 @@ class TrialTests(unittest.TestCase):
         self.assertIn("unknown / unknown", html_output)
         self.assertEqual(trial.summarize(rows, runtime="pi")["event_count"], 1)
         self.assertIn("No causal savings", report["interpretation"])
+
+    def test_unchanged_jev_choice_is_neither_reorder_nor_fallback(self):
+        row = event(arm="advisory", transport="gateway", reason="unchanged",
+                    provider_attempts=1, provider_calls=1,
+                    usage={"input_tokens": 10, "output_tokens": 2}, model="jev-1.13.0")
+        trial.record_event(self.log, row)
+        cohort = trial.summarize(trial.read_events(self.log))["cohorts"][0]
+        self.assertEqual((cohort["reordered"], cohort["fallback"]), (0, 0))
 
     def test_html_escapes_and_report_cli_private_output(self):
         self.assertIn("&lt;script&gt;", trial.render_html({"cohorts": [], "event_count": 0,
