@@ -80,9 +80,15 @@ trusted. MetaCTL's `--client-config` emits client-neutral `mcpServers` JSON,
 so copy its **command and argument values**, not the JSON envelope, into
 Codex TOML. [Codex configuration](https://developers.openai.com/codex/config-basic)
 and [MCP setup](https://developers.openai.com/codex/mcp) describe these layers.
+A user-wide registration fixes one `--project` catalog for every Codex session
+that loads it. Choose project scope when the catalog differs by repository;
+avoid registering `metactl-skills` at both scopes, where the duplicate name
+obscures which entry Codex selected.
 
 Use the installed CLI's stdio registration form. Replace the absolute project
-and private log paths with local values and review the flags before registering:
+and private log paths with local values and review the flags before registering.
+Run `command -v metactl` to find the installed executable; substitute its
+absolute path if Codex may have a different `PATH`:
 
 ```sh
 codex mcp add metactl-skills -- metactl --project /absolute/path/to/project \
@@ -92,7 +98,8 @@ codex mcp get metactl-skills
 ```
 
 For a trusted project-local registration, merge the equivalent entry into
-`.codex/config.toml` without replacing unrelated settings:
+`.codex/config.toml` without replacing unrelated settings. Use the absolute
+path returned by `command -v metactl` for `command`:
 
 ```toml
 [mcp_servers.metactl-skills]
@@ -109,15 +116,19 @@ fresh Codex session and inspect its available tools for
 task, then load one returned ID and digest. Confirm its `routing_receipt` says
 `mode=baseline`, `provider_calls=0`, and `log=recorded` when a private log is
 configured. Inspect the event with `metactl skills trials inspect` using the
-returned session and run IDs:
+`metrics.session_id` and `metrics.run_id` from the discovery response:
 
 ```sh
-metactl skills trials inspect --log /private/path/discovery-events.jsonl \
+metactl skills trials inspect --log /absolute/private/path/discovery-events.jsonl \
   --session-id SESSION_SHA256 --run-id RUN_UUID_HEX
 ```
 
 The run filter is optional; the log is separate from Codex's transcript.
 Confirm the returned metrics and unchanged native skill catalog.
+The packaged host needs Python 3.10 or newer. If either tool is missing in a
+fresh session, check project trust, absolute project and command paths, the
+Python installation, and the registration scope. If the receipt says
+`log=failed`, check the log parent directory and its write permissions.
 
 For more predictable use, add the optional, conditional `AGENTS.md` instruction
 in the [first-run workflow](skill-discovery.md#first-run-workflow). Avoid an

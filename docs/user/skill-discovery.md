@@ -3,6 +3,7 @@
 Experimental, opt-in, plain-instruction adapter. Deterministic mode is the default
 and requires no provider, account, API credits, SDK or network access. Existing
 compilation, native skill menus and installed skill folders are unchanged.
+The optional packaged host needs Python 3.10 or newer on the client machine.
 
 <a id="quick-start"></a>
 ## First-run workflow
@@ -30,6 +31,13 @@ No `metactl skills enable` command currently performs the client registration.
    and load a returned ID with its digest. The `routing_receipt` should say
    `mode=baseline`, `provider_calls=0`, and `log=recorded` when the private
    ledger is writable. This checks the live tool path without using Jev.
+
+If the tools are not visible, check that the project is trusted by the client,
+the registered project and executable paths are absolute and exist, Python
+3.10+ is available, and you opened a new agent session after registering.
+If discovery works but `log=failed`, check that the private log's parent
+directory already exists and is writable. `--status` confirms only local host
+readiness, not that the client loaded or called its tools.
 
 For daily work, discover when the task or phase calls for unfamiliar specialist
 instructions; use an exact known skill directly when appropriate. A project may

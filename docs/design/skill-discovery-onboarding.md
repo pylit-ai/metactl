@@ -85,7 +85,7 @@ rule to MetaCTL core instructions: many tasks need no discovery, and Jev may
 be unavailable or unauthorized. The server's bootstrap instruction and tool
 descriptions help but cannot guarantee that a client calls the tool.
 
-## Acceptance tests before release
+## Acceptance tests before shipping the proposed connector
 
 - A new user with a packaged MetaCTL binary can preview and apply a Codex
   baseline registration to a disposable trusted project without editing JSON

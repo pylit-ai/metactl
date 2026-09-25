@@ -29,6 +29,9 @@
 - Provider connectivity, valid ordering, and fallback have been exercised on
   bounded fixtures. No productivity, context saving, or cost benefit is claimed
   for real coding tasks. Trial registration alone does not prove agent use.
+- The Codex registration recipe follows current client documentation and a
+  packaged host smoke; a fresh native Codex discovery/load session remains to
+  be acceptance-tested.
 - The npm installer remains an unpublished scaffold; the release covers GitHub
   archives and the two existing crates.
 
