@@ -37,6 +37,7 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
         )?;
         let mut command = std::process::Command::new(&args.python);
         command
+            .arg("-I")
             .arg(&script_path)
             .arg("--metactl")
             .arg(std::env::current_exe()?)
@@ -111,11 +112,14 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
 pub(super) fn run_discovery_trials(args: &SkillsTrialsArgs) -> ExitCode {
     fn launch(args: &SkillsTrialsArgs) -> anyhow::Result<std::process::ExitStatus> {
         use std::io::Write;
-        let mut script = tempfile::Builder::new().suffix(".py").tempfile()?;
+        let directory = tempfile::tempdir()?;
+        let script_path = directory.path().join("skill_discovery_trials.py");
+        let mut script = fs::File::create(&script_path)?;
         script.write_all(include_bytes!("../assets/skill_discovery_trials.py"))?;
         script.flush()?;
         std::process::Command::new(&args.python)
-            .arg(script.path())
+            .arg("-I")
+            .arg(&script_path)
             .args(&args.args)
             .status()
             .map_err(Into::into)

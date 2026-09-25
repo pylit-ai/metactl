@@ -39,6 +39,18 @@ def event(kind="discover", **changes):
 
 
 class TrialTests(unittest.TestCase):
+    def test_trials_launcher_does_not_import_modules_from_shared_temp_root(self):
+        trial.record_event(self.log, event())
+        marker = Path(self.temp.name) / "poison-imported"
+        (Path(self.temp.name) / "json.py").write_text(
+            f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('untrusted temp module imported')\n")
+        result = subprocess.run([str(ROOT / "target/debug/metactl"), "skills", "trials", "inspect",
+            "--log", str(self.log), "--session-id", "a" * 64], capture_output=True, text=True,
+            env={**os.environ, "TMPDIR": self.temp.name}, timeout=10)
+        self.assertFalse(marker.exists(), "launcher imported a module from shared TMPDIR")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["status"], "recorded")
+
     def test_busy_ledger_fails_without_waiting_and_skips_are_not_fallbacks(self):
         import fcntl
         import time

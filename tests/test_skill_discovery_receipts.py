@@ -11,6 +11,47 @@ spec.loader.exec_module(host)
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_direct_worker_ignores_untrusted_python_import_paths(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / "poisoned"
+            (root / "json.py").write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).touch()\nraise RuntimeError('poisoned')\n")
+            worker = root / "safe-worker.py"
+            worker.write_text("import json,sys\njson.load(sys.stdin)\nprint(json.dumps({'isolated':sys.flags.isolated}))\n")
+            with patch.object(host, "__file__", str(worker)), patch.dict("os.environ", {"PYTHONPATH": str(root)}):
+                result = host.transport({}, "synthetic-fixture-key", 3)
+            self.assertEqual(result, {"isolated": 1})
+            self.assertFalse(marker.exists())
+
+    def test_gateway_wire_budget_does_not_consume_an_undispatched_attempt(self):
+        baseline = {"catalog_digest": "c" * 64, "skills": [
+            {"id": "a" * 64, "name": "first", "description": "a" * 2000, "score": 1},
+            {"id": "b" * 64, "name": "second", "description": "b" * 2000, "score": 1}]}
+        captured = []
+        def capture(payload, *args):
+            captured.append(payload)
+            raise ValueError("fixture capture only")
+        host.Ranker(True, True, 1, key="fixture", sender=capture).rank("x", baseline)
+        query = "x" * (15000 - len(host.compact(captured[0]).encode()) + 1)
+        self.assertLessEqual(len(query), 8192)
+        def forbidden(*args):
+            self.fail("oversized gateway envelope dispatched")
+        ranker = host.Ranker(True, True, 1, key="fixture", sender=forbidden, transport_kind="gateway")
+        _, metric = ranker.rank(query, baseline)
+        self.assertEqual(metric["reason"], "payload_budget")
+        self.assertEqual(metric["provider_attempts"], 0)
+        self.assertEqual(ranker.remaining, 1)
+
+    def test_provider_worker_does_not_inherit_provider_key_environment(self):
+        import sys
+        from unittest.mock import patch
+        code = "import json,os,sys;json.load(sys.stdin);print(json.dumps({'has_key':'TYPESAFE_API_KEY' in os.environ}))"
+        with patch.dict("os.environ", {"TYPESAFE_API_KEY": "synthetic-test-sentinel"}):
+            result = host.exchange_child([sys.executable, "-I", "-c", code], {}, 3)
+        self.assertEqual(result, {"has_key": False})
+
     def test_host_termination_reaps_isolated_gateway_worker(self):
         import os
         import signal
