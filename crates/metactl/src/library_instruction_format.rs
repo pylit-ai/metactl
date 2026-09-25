@@ -259,10 +259,12 @@ pub(super) fn pack_resource_output_id(pack_id: &str, relative_path: &str) -> Str
     format!("resource-{}-{}", pack_id, slug)
 }
 
+type SkillCardMetadata = (Vec<String>, Vec<String>, Vec<String>, Vec<String>);
+
 pub(super) fn declared_skill_card_metadata(
     pack: &DiscoveredPack,
     skill_resource: &PackResource,
-) -> Result<(Vec<String>, Vec<String>, Vec<String>, Vec<String>)> {
+) -> Result<SkillCardMetadata> {
     let Some(parent) = Path::new(&skill_resource.path).parent() else {
         return Ok((Vec::new(), Vec::new(), Vec::new(), Vec::new()));
     };

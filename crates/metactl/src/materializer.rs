@@ -1649,7 +1649,7 @@ fn plan_apply_from_staging(
                     .and_then(|item| item.backup_path.as_ref())
                     .map(|item| project_root.join(item)),
                 patch_marker: state_output.and_then(|item| item.patch_marker.clone()),
-                existed_before: state_output.map_or(true, |item| item.existed_before),
+                existed_before: state_output.is_none_or(|item| item.existed_before),
             }));
             continue;
         }

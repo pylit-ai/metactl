@@ -21,6 +21,11 @@ The connector refuses tracked machine-specific configuration files and
 conflicting existing server entries. `--scope user` is available only for Codex.
 To reverse an installed entry, run the preview's `--remove` command. Native
 client tool acceptance is still a fresh-session test.
+If the selected profile or log destination changes, preview with `--replace`
+and apply with `--apply --replace`; otherwise the connector preserves the
+existing registration. A pre-existing manual server entry must be reviewed and
+removed manually before connecting. For exclusions or Jev, use the explicit
+`skills host --client-config` recipe below.
 
 ## Coverage of standard MetaCTL targets
 

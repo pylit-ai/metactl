@@ -181,6 +181,58 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertNotEqual(linked.returncode, 0)
         self.assertIn("symlink", linked.stderr)
 
+    def test_quoted_codex_key_and_invalid_toml_are_refused(self):
+        path = self.project / ".codex/config.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        original = '[mcp_servers."metactl-skills"]\ncommand = "other"\n'
+        path.write_text(original)
+        conflict = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertNotEqual(conflict.returncode, 0)
+        self.assertIn("unmanaged", conflict.stderr)
+        self.assertEqual(path.read_text(), original)
+        path.write_text("model = [\n")
+        invalid = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertIn("invalid TOML", invalid.stderr)
+        self.assertEqual(path.read_text(), "model = [\n")
+
+    def test_profile_change_requires_explicit_replace(self):
+        path = self.project / ".cursor/mcp.json"
+        applied = self.run_cli("--no-profile", "skills", "connect", "--target", "cursor", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        original = path.read_text()
+        refused = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("--replace", refused.stderr)
+        self.assertEqual(path.read_text(), original)
+        preview = self.run_cli("skills", "connect", "--target", "cursor", "--replace", "--json")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertEqual(path.read_text(), original)
+        changed = self.run_cli("skills", "connect", "--target", "cursor", "--apply", "--replace")
+        self.assertEqual(changed.returncode, 0, changed.stdout + changed.stderr)
+        self.assertNotEqual(path.read_text(), original)
+
+    def test_user_scope_copyable_rollback(self):
+        codex_home = self.base / "codex home"
+        self.env["CODEX_HOME"] = str(codex_home)
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--scope", "user", "--apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        receipt = json.loads(applied.stdout)
+        self.assertIn("metactl-skills", (codex_home / "config.toml").read_text())
+        self.assertIn("CODEX_HOME=", receipt["rollback"])
+        env = dict(self.env, PATH=f"{BINARY.parent}:{self.env.get('PATH', '')}")
+        removed = subprocess.run(receipt["rollback"], shell=True, env=env, text=True,
+                                 capture_output=True, timeout=25)
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertNotIn("metactl-skills", (codex_home / "config.toml").read_text())
+
+    def test_preview_does_not_create_client_or_state_files(self):
+        preview = self.run_cli("skills", "connect", "--target", "codex-cli")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertFalse((self.project / ".codex").exists())
+        self.assertFalse((self.base / "state").exists())
+
 
 if __name__ == "__main__":
     if not BINARY.exists():

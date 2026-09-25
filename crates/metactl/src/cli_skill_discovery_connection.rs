@@ -141,6 +141,49 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
+fn parse_codex_toml(body: &str) -> Result<toml::Value, CliError> {
+    let source = if body.trim().is_empty() { "\n" } else { body };
+    toml::from_str(source).map_err(|error| {
+        CliError::new(
+            EXIT_STATE,
+            format!("Codex configuration is invalid TOML; no change was made: {error}"),
+        )
+    })
+}
+
+fn codex_has_server(document: &toml::Value) -> bool {
+    document
+        .get("mcp_servers")
+        .and_then(|value| value.get(SERVER))
+        .is_some()
+}
+
+fn policy_args(args: &[String]) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--python" && i + 1 < args.len() {
+            i += 2;
+        } else {
+            result.push(args[i].as_str());
+            i += 1;
+        }
+    }
+    result
+}
+
+fn require_policy_match(
+    existing: &ManagedEntry,
+    desired: &ManagedEntry,
+    replace: bool,
+) -> Result<(), CliError> {
+    if policy_args(&existing.args) != policy_args(&desired.args) && !replace {
+        return Err(CliError::new(EXIT_STATE,
+            "The managed registration uses different profile, config, overlay or event-log options. Review the new entry with --replace, then use --apply --replace to change it. --remove still works without matching those options."));
+    }
+    Ok(())
+}
+
 fn codex_block(command: &str, args: &[String]) -> String {
     let command = serde_json::to_string(command).unwrap_or_default();
     let args = serde_json::to_string(args).unwrap_or_default();
@@ -219,7 +262,7 @@ fn managed_json_entry(value: &Value, root: &Path, target: &str) -> Option<Manage
     if target == "opencode" {
         if map.len() != 3
             || map.get("type")?.as_str()? != "local"
-            || map.get("enabled")?.as_bool()? != true
+            || !map.get("enabled")?.as_bool()?
         {
             return None;
         }
@@ -283,6 +326,52 @@ fn tracked(root: &Path, path: &Path) -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|status| status.success())
+}
+
+fn git_visibility(root: &Path, path: &Path, scope: DiscoveryScopeArg) -> &'static str {
+    if scope == DiscoveryScopeArg::User {
+        return "user_config";
+    }
+    if !Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        return "not_git";
+    }
+    let Ok(relative) = path.strip_prefix(root) else {
+        return "outside_project";
+    };
+    if Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["check-ignore", "-q", "--"])
+        .arg(relative)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+    {
+        "ignored"
+    } else {
+        "unignored"
+    }
+}
+
+fn acceptance_note(target: &str, scope: DiscoveryScopeArg) -> &'static str {
+    match target {
+        "codex-cli" if scope == DiscoveryScopeArg::Project => "Codex loads project config only after the project is trusted. Start a fresh session and check /mcp for both tools.",
+        "codex-cli" => "Start a fresh Codex session and check /mcp for both tools. User scope shares this fixed catalog across projects.",
+        "claude-code" => "Approve the project MCP server in Claude Code, start a fresh session, and check for both tools.",
+        "gemini-cli" => "Trust the project folder in Gemini CLI, reload its MCP tools, and check for both tools.",
+        "cursor" => "Reload Cursor's project MCP tools and check for both tools.",
+        "opencode" => "Reload OpenCode's local MCP tools and check for both tools.",
+        _ => "Check both tools in a fresh native client session.",
+    }
 }
 
 fn write_private(path: &Path, body: &str) -> Result<(), CliError> {
@@ -367,10 +456,13 @@ fn edit_codex(
     old: &str,
     block: &str,
     root: &Path,
+    desired: &ManagedEntry,
     remove: bool,
+    replace: bool,
 ) -> Result<(String, &'static str), CliError> {
     let header = format!("[mcp_servers.{SERVER}]");
-    if let Some((begin, end, existing, _)) = managed_codex_block(old, root)? {
+    let parsed = parse_codex_toml(old)?;
+    if let Some((begin, end, existing, entry)) = managed_codex_block(old, root)? {
         if remove {
             let suffix = if old[end..].starts_with('\n') {
                 end + 1
@@ -382,15 +474,15 @@ fn edit_codex(
         if existing == block.trim_end() {
             return Ok((old.to_owned(), "already_connected"));
         }
-        return Ok((
-            format!("{}{}{}", &old[..begin], block.trim_end(), &old[end..]),
-            "updated",
-        ));
+        require_policy_match(&entry, desired, replace)?;
+        let updated = format!("{}{}{}", &old[..begin], block.trim_end(), &old[end..]);
+        parse_codex_toml(&updated)?;
+        return Ok((updated, "updated"));
     }
     if remove {
         return Ok((old.to_owned(), "already_absent"));
     }
-    if old.contains(&header) {
+    if old.contains(&header) || codex_has_server(&parsed) {
         return Err(CliError::new(EXIT_STATE, "An unmanaged metactl-skills server already exists in Codex config; review it manually."));
     }
     let separator = if old.is_empty() || old.ends_with("\n\n") {
@@ -400,7 +492,9 @@ fn edit_codex(
     } else {
         "\n\n"
     };
-    Ok((format!("{old}{separator}{block}"), "connected"))
+    let updated = format!("{old}{separator}{block}");
+    parse_codex_toml(&updated)?;
+    Ok((updated, "connected"))
 }
 
 fn edit_json(
@@ -409,6 +503,7 @@ fn edit_json(
     expected: Value,
     root: &Path,
     remove: bool,
+    replace: bool,
 ) -> Result<(String, &'static str), CliError> {
     let mut document: Value = if old.trim().is_empty() {
         json!({})
@@ -441,7 +536,12 @@ fn edit_json(
             servers.remove(SERVER);
         }
         Some(value) if value == &expected => return Ok((old.to_owned(), "already_connected")),
-        Some(_) => { servers.insert(SERVER.into(), expected); },
+        Some(_) => {
+            let existing = managed_json_entry(servers.get(SERVER).unwrap(), root, target).unwrap();
+            let desired = managed_json_entry(&expected, root, target).unwrap();
+            require_policy_match(&existing, &desired, replace)?;
+            servers.insert(SERVER.into(), expected);
+        },
         None if remove => return Ok((old.to_owned(), "already_absent")),
         None => {
             servers.insert(SERVER.into(), expected);
@@ -475,20 +575,48 @@ fn connection(
 }
 
 fn offline_status(command: &str, args: &[String]) -> (String, Value) {
-    let result = Command::new(command).args(args).arg("--status").output();
-    match result {
-        Ok(output) if output.status.success() => {
-            match serde_json::from_slice::<Value>(&output.stdout) {
-                Ok(value) if value.get("project_ready") == Some(&Value::Bool(true)) => (
-                    "ready".into(),
-                    value.get("eligible_skills").cloned().unwrap_or(Value::Null),
-                ),
-                _ => ("invalid_status".into(), Value::Null),
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+    let spawned = Command::new(command)
+        .args(args)
+        .arg("--status")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = spawned else {
+        return ("unavailable".into(), Value::Null);
+    };
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(15) {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return ("project_not_ready".into(), Value::Null);
+                }
+                let mut output = Vec::new();
+                if child
+                    .stdout
+                    .take()
+                    .is_none_or(|stdout| stdout.take(65537).read_to_end(&mut output).is_err())
+                    || output.len() > 65536
+                {
+                    return ("invalid_status".into(), Value::Null);
+                }
+                return match serde_json::from_slice::<Value>(&output) {
+                    Ok(value) if value.get("project_ready") == Some(&Value::Bool(true)) => (
+                        "ready".into(),
+                        value.get("eligible_skills").cloned().unwrap_or(Value::Null),
+                    ),
+                    _ => ("invalid_status".into(), Value::Null),
+                };
             }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => return ("unavailable".into(), Value::Null),
         }
-        Ok(_) => ("project_not_ready".into(), Value::Null),
-        Err(_) => ("unavailable".into(), Value::Null),
     }
+    let _ = child.kill();
+    let _ = child.wait();
+    ("timeout".into(), Value::Null)
 }
 
 pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandOutput, CliError> {
@@ -503,8 +631,22 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
     }
     ensure_safe_destination(&path)?;
     let old = read_config(&path)?.unwrap_or_default();
+    let desired =
+        managed_entry(command.clone(), args.clone(), &root, &options.target).ok_or_else(|| {
+            CliError::new(
+                EXIT_STATE,
+                "Generated discovery registration failed its own safety check.",
+            )
+        })?;
     let (new, action) = if options.target == "codex-cli" {
-        edit_codex(&old, &codex_block(&command, &args), &root, options.remove)?
+        edit_codex(
+            &old,
+            &codex_block(&command, &args),
+            &root,
+            &desired,
+            options.remove,
+            options.replace,
+        )?
     } else {
         edit_json(
             &old,
@@ -512,6 +654,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             expected_entry(&options.target, &command, &args),
             &root,
             options.remove,
+            options.replace,
         )?
     };
     if options.apply || options.remove {
@@ -563,8 +706,14 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             "project"
         }
     );
-    let human = format!("Discovery {phase} for {}\nConfig: {}\nServer: {}\nMode: baseline (deterministic; provider calls 0)\nPrivate event log: {}\nChange: {}\nEntry:\n{}\nRollback: {}\nNext: restart the agent, verify discover_skills and load_skill, then call them for a useful task.\nNative acceptance and benefit remain unknown until observed.",
-        options.target, path.display(), SERVER, ledger.display(), if old == new { "none" } else if options.remove { "remove server entry" } else if action == "updated" { "update managed server entry" } else { "add server entry" }, entry, rollback);
+    let visibility = git_visibility(&root, &path, options.scope);
+    let git_note = if visibility == "unignored" {
+        "Machine-specific config is not ignored by Git. Add this path to .git/info/exclude or a reviewed .gitignore before committing."
+    } else {
+        ""
+    };
+    let human = format!("Discovery {phase} for {}\nConfig: {}\nServer: {}\nMode: baseline (deterministic; provider calls 0)\nPrivate event log: {}\nChange: {}\nEntry:\n{}\nRollback: {}\nNext: {}\n{}\nNative acceptance and benefit remain unknown until observed.",
+        options.target, path.display(), SERVER, ledger.display(), if old == new { "none" } else if options.remove { "remove server entry" } else if action == "updated" { "update managed server entry" } else { "add server entry" }, entry, rollback, acceptance_note(&options.target, options.scope), git_note);
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -575,6 +724,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
                 "config_path": path, "server": SERVER, "command": command, "args": args,
                 "mode": "baseline", "provider_calls": 0, "event_log": ledger,
                 "entry_preview": entry,
+                "git_visibility": visibility, "native_acceptance_note": acceptance_note(&options.target, options.scope),
                 "changed": old != new, "applied": options.apply || options.remove, "rollback": rollback,
                 "native_acceptance": "unknown", "benefit": "unknown"
             }),
@@ -587,12 +737,13 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         connection(cli, &options.target, options.scope, &options.python)?;
     let config = read_config(&path)?.unwrap_or_default();
     let (registration, registered) = if options.target == "codex-cli" {
-        match managed_codex_block(&config, &root) {
-            Ok(Some((_, _, _, entry))) => ("configured", Some(entry)),
-            _ if config.contains(&format!("[mcp_servers.{SERVER}]")) || config.contains(BEGIN) => {
-                ("conflict", None)
-            }
-            _ => ("missing", None),
+        match parse_codex_toml(&config) {
+            Err(_) => ("invalid_config", None),
+            Ok(document) => match managed_codex_block(&config, &root) {
+                Ok(Some((_, _, _, entry))) => ("configured", Some(entry)),
+                _ if codex_has_server(&document) || config.contains(BEGIN) => ("conflict", None),
+                _ => ("missing", None),
+            },
         }
     } else if config.trim().is_empty() {
         ("missing", None)
@@ -689,6 +840,31 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn edit_codex(
+        old: &str,
+        block: &str,
+        root: &Path,
+        remove: bool,
+    ) -> Result<(String, &'static str), CliError> {
+        let lines: Vec<_> = block.lines().collect();
+        let command: String =
+            serde_json::from_str(lines[2].strip_prefix("command = ").unwrap()).unwrap();
+        let args: Vec<String> =
+            serde_json::from_str(lines[3].strip_prefix("args = ").unwrap()).unwrap();
+        let desired = managed_entry(command, args, root, "codex-cli").unwrap();
+        super::edit_codex(old, block, root, &desired, remove, false)
+    }
+
+    fn edit_json(
+        old: &str,
+        target: &str,
+        expected: Value,
+        root: &Path,
+        remove: bool,
+    ) -> Result<(String, &'static str), CliError> {
+        super::edit_json(old, target, expected, root, remove, false)
+    }
 
     fn args() -> Vec<String> {
         vec![

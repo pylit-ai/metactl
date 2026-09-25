@@ -940,6 +940,9 @@ struct SkillsConnectArgs {
     /// Remove only a MetaCTL-managed registration
     #[arg(long)]
     remove: bool,
+    /// Explicitly replace a managed registration with different profile or log options
+    #[arg(long, conflicts_with = "remove")]
+    replace: bool,
 }
 
 #[derive(Debug, Args)]

@@ -46,6 +46,12 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    event metadata across Codex sessions in other repositories; choose project
    scope when catalogs or visibility should remain separate. The baseline
    ledger does not store query text or skill bodies.
+   Reapplying with a different profile, config, overlay or log destination
+   requires an explicit preview with `--replace`, followed by `--apply --replace`.
+   Changing only the installed binary or Python path updates the managed entry.
+   For `--exclude-skill` or an approved Jev gateway mode, use
+   `skills host --client-config` and the manual adapter guide; `connect` currently
+   installs baseline without exclusions.
    The older `skills host --client-config` command remains available for custom
    clients and explicitly approved gateway evaluation.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
