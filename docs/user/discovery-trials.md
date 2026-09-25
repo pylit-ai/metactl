@@ -17,9 +17,10 @@ agent's underlying model.
 
 Every discovery response includes a `routing_receipt`, for example:
 `Jev discovery: mode=shadow; reason=shadow; provider_calls=1; order_changed=False; log=recorded; event=<opaque ID>`.
-In shadow mode the response omits proposed IDs and masks the ranking reason as
-`shadow`, so the coding agent cannot follow the hidden proposal. The private
-ledger retains the proposal and original reason for later analysis.
+In shadow mode the response omits proposed IDs and masks successful choice or
+abstention reasons as `shadow`, so the coding agent cannot follow the hidden
+proposal. Failure and no-call reasons remain visible. The private ledger
+retains the proposal and original reason for later analysis.
 The host bootstrap asks the agent to surface it; a client may ignore that
 instruction or hide tool output, so inspect the actual tool response or ledger.
 No global hook or guarantee of discovery on every coding run is installed.
@@ -97,7 +98,7 @@ metactl skills trials report \
   --json-output /private/path/skill-discovery-trial-summary.json
 ```
 
-The HTML file is self-contained and can be opened locally. `--runtime codex`,
+The HTML file is self-contained and can be opened locally. `--runtime codex-cli`,
 `--runtime omnigent` or `--runtime pi`, and `--arm baseline`, `--arm shadow` or
 `--arm advisory` filter the report. Files are created mode `0600` and must
 remain owned regular files with one link. Symlink or hardlink targets, unsafe
@@ -116,7 +117,7 @@ session appears in more than one run, pass `--run-id` and, if needed,
 ```sh
 metactl skills trials outcome \
   --log /private/path/skill-discovery-trial.jsonl \
-  --session-id SESSION_SHA256 --runtime codex --arm advisory \
+  --session-id SESSION_SHA256 --runtime codex-cli --arm advisory \
   --success pass --verifier-ref VERIFIER_SHA256 \
   --task-ms 123456 --input-tokens 12000 --output-tokens 1500
 ```

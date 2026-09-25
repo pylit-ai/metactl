@@ -294,9 +294,11 @@ class Host:
             self.record("discover", metric)
             # Preserve the proposal in the private ledger, never expose it to the
             # coding agent in the shadow arm (which would contaminate the trial).
-            if self.ranker.mode == "shadow":
+            if metric["trial_mode"] == "shadow":
                 metric.pop("proposed_ids", None)
-                metric.update(ranker="deterministic", reason="shadow")
+                metric["ranker"] = "deterministic"
+                if metric["reason"] in {"reordered", "unchanged", "abstained"}:
+                    metric["reason"] = "shadow"
             receipt = (f"Jev discovery: mode={metric['trial_mode']}; reason={metric['reason']}; "
                        f"provider_calls={metric['provider_calls'] if metric['provider_calls'] is not None else 'unknown'}; "
                        f"order_changed={result['skills'] != baseline['skills']}; "

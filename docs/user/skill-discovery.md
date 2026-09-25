@@ -51,7 +51,7 @@ metactl --project /path/to/approved-project skills host \
   --ranker jev --jev-transport gateway --gateway-command /path/to/jev \
   --gateway-project APPROVED_PROJECT_ID --gateway-data-class public-nonsensitive \
   --allow-provider-data --max-provider-calls 4 --provider-deadline 5 \
-  --trial-mode shadow --runtime codex \
+  --trial-mode shadow --runtime codex-cli \
   --event-log /private/path/discovery.jsonl --status
 ```
 

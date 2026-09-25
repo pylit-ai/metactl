@@ -11,6 +11,20 @@ spec.loader.exec_module(host)
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_shadow_masks_only_provider_advice_and_retains_no_call_diagnostics(self):
+        baseline = {"catalog_digest": "c" * 64, "skills": []}
+        for enabled, key, budget, mode, reason in [
+            (False, "fixture", 1, "baseline", "disabled"),
+            (True, "fixture", 0, "shadow", "budget_exhausted"),
+            (True, None, 1, "shadow", "missing_credential")]:
+            with self.subTest(enabled=enabled, reason=reason):
+                ranker = host.Ranker(enabled, True, budget, key=key, mode="shadow")
+                response = host.Host("unused", "/unused", ranker, runner=lambda *a: baseline).call(
+                    "discover_skills", {"query": "fixture"})
+                self.assertEqual(response["metrics"]["reason"], reason)
+                self.assertIn(f"mode={mode}; reason={reason}; provider_calls=0", response["routing_receipt"])
+                self.assertIn("log=disabled", response["routing_receipt"])
+
     def test_one_shot_paid_direct_transport_is_rejected_before_dispatch(self):
         import subprocess
         import sys
