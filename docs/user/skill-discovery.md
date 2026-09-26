@@ -77,7 +77,7 @@ gateway client supplied by your operator; MetaCTL does not provision that servic
 | What preferences apply to this project? | `metactl --project /absolute/path/to/project skills preferences` |
 | Is this client's connection ready, and what discovery events were observed? | `metactl --project /absolute/path/to/project skills doctor --target codex-cli --use-preferences --json` |
 | Is the preference-aware local host ready? | `metactl --project /absolute/path/to/project skills host --use-preferences --status` |
-| Does the scoped gateway report access and remaining policy allowance? | `jev status --project approved-project-id` |
+| What access, configured budget limits and expiry does the scoped gateway report? | `jev status --project approved-project-id` |
 | Does this working directory match the gateway project? | From the intended project directory: `jev check-project --project approved-project-id` |
 | What happened in a particular run? | Read its `routing_receipt`, then `metactl skills trials inspect --log /private/path/discovery-events.jsonl --session-id SESSION_SHA256 --run-id RUN_UUID_HEX` using the event log and identifiers reported for that run. |
 
@@ -87,6 +87,9 @@ current directory is enrolled. Doctor reports the private `event_log` path and
 observed events, which can include manual calls. Confirm native agent acceptance
 in a fresh session by calling the tools and correlating the receipt with its
 event. No event means unknown use, not proven non-use.
+Gateway status reports configured limits and expiry, not consumed or remaining
+counters or reset timestamps. Current usage requires the gateway ledger or a
+usage endpoint supplied by your operator.
 
 There is currently no single aggregate discovery-status command covering every
 project and native agent's acceptance. Inspect each project/target with `skills
@@ -100,13 +103,14 @@ limits can preserve local ordering; logging limits affect the evidence recorded:
 | --- | --- |
 | Host attempt ceiling | `--max-provider-calls` limits one host process. Restarting renews only this allowance; one-shot calls start separate hosts. |
 | Gateway request count | Shared policy can limit aggregate and per-project requests per day across processes and clients. |
-| Gateway spending allowance | Policy can limit aggregate total, aggregate daily and per-project daily spending. A reservation per request can consume allowance even when completion is uncertain. Accounting checks are not a provider billing hard cap. |
+| Gateway spending allowance | Policy can limit aggregate and per-project total spending, plus aggregate and per-project daily spending. A reservation per request can consume allowance even when completion is uncertain. Accounting checks are not a provider billing hard cap. |
 | Policy expiry and access | The project grant, allowed data classes and policy expiry remain authoritative. Restarting or changing local preferences cannot renew an expired grant or raise shared limits. |
 | Local log capacity | A full or unwritable ledger can produce `log=failed` while discovery still succeeds; this is missing measurement, not a larger provider allowance. |
 
-Use your operator's authoritative policy and free gateway status for current
-amounts, counters, reset times and expiry; do not infer them from MetaCTL's host
-ceiling. Changes to shared budgets or expiry require operator authorization.
+Use your operator's authoritative policy and free gateway status for configured
+limits and expiry, and the operator-supplied usage source for counters; do not
+infer these from MetaCTL's host ceiling. Changes to shared budgets or expiry
+require operator authorization.
 After a denial or error, retain local discovery rather than retrying to bypass a
 limit. See [private trials](discovery-trials.md#storage-and-later-analysis) for
 ledger capacity and preservation.
