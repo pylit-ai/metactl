@@ -347,6 +347,18 @@ Local ignore scope writes `.git/info/exclude` for the current checkout only. Use
 repo scope only when the team wants the ignore posture committed. Agent roots
 can contain authored files, so `ignore fix` and `ignore install` do not hide or
 untrack `.agents/`, `.codex/`, `.claude/`, `.cursor/`, or `.gemini/` files.
+Exact private local names remain ignored independently of the selected target:
+`CLAUDE.local.md`, `GEMINI.local.md`, `AGENTS.local.md`, `OPENCLAW.local.md`,
+`.cursor/rules/metactl-pack-index.local.mdc`, `.claude/settings.local.json`,
+`.cursor/mcp.json`, and `.gemini/.env`. Install these rules before using private
+native instruction outputs; a successful `sync` alone is not proof that Git
+ignores them. Ignore rules do not remove previously tracked private files.
+Migration checks normalize nested projects against the Git worktree root and
+batch working/index-only path checks in one NUL-delimited Git probe. Ambiguous
+path or ignore-source evidence refuses the migration before writes.
+Replacing existing ignore files currently requires Linux or macOS atomic
+exchange support. On other platforms this mutation fails closed; source
+installation support does not imply support for ignore-file replacement.
 `--untrack-generated` is refused until exclusive ownership can be proven.
 Changed ignore files retain a reported recovery copy under the private,
 Git-ignored `.metactl/ignore-recovery/` directory. Review these copies before

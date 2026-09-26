@@ -11128,7 +11128,11 @@ fn git_local_exclude_path(project_root: &Path) -> std::result::Result<PathBuf, C
     let metadata = match fs::symlink_metadata(&dot_git) {
         Ok(metadata) => metadata,
         Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Ok(dot_git.join("info/exclude"))
+            if !ignore_recovery::git_worktree_present(project_root).map_err(state_error)? {
+                return Ok(dot_git.join("info/exclude"));
+            }
+            // A nested project still inherits the enclosing worktree's exclude.
+            return ignore_privacy::resolve_git_exclude_path(project_root);
         }
         Err(err) => return Err(state_error(anyhow!("inspect {}: {err}", dot_git.display()))),
     };
@@ -11149,33 +11153,7 @@ fn git_local_exclude_path(project_root: &Path) -> std::result::Result<PathBuf, C
     }
     // Linked worktrees and submodules use a .git indirection file. Git is the
     // authority for their effective exclude path; repo scope only reads it.
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args([
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-path",
-            "info/exclude",
-        ])
-        .output()
-        .map_err(|err| state_error(anyhow!("resolve Git exclude: {err}")))?;
-    if !output.status.success() {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "Cannot resolve linked Git exclude path",
-        ));
-    }
-    let raw = std::str::from_utf8(&output.stdout)
-        .map_err(|err| state_error(anyhow!("decode Git exclude path: {err}")))?;
-    let path = PathBuf::from(raw.trim_end_matches('\n'));
-    if !path.is_absolute() || !path.ends_with("info/exclude") {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "Git returned an invalid exclude path",
-        ));
-    }
-    Ok(path)
+    ignore_privacy::resolve_git_exclude_path(project_root)
 }
 
 fn apply_ignore_scope(
@@ -11220,6 +11198,15 @@ fn planned_ignore_actions(
     root_paths: &[String],
 ) -> std::result::Result<Vec<Value>, CliError> {
     let _ = root_paths;
+    if matches!(scope, IgnoreScopeArg::Local | IgnoreScopeArg::Both)
+        && !project_root.join(".git").is_dir()
+        && ignore_recovery::git_worktree_present(project_root).map_err(state_error)?
+    {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "No .git directory found. Local ignore scope writes .git/info/exclude.",
+        ));
+    }
     ensure_no_broad_untouched_scope(project_root, scope)?;
     let specs = ignore_block_specs(
         project_root,
@@ -11446,7 +11433,7 @@ fn resolve_ignore_targets(
 }
 
 fn git_ignore_patterns(
-    targets: &[String],
+    _targets: &[String],
     include_lock: bool,
     include_private_sources: bool,
 ) -> Vec<String> {
@@ -11456,12 +11443,11 @@ fn git_ignore_patterns(
         "metactl.local.yaml".to_string(),
     ]);
 
-    if targets.iter().any(|target| target == "claude-code") {
-        patterns.insert("CLAUDE.local.md".to_string());
-    }
-    if targets.iter().any(|target| target == "gemini-cli") {
-        patterns.insert("GEMINI.local.md".to_string());
-    }
+    patterns.extend(
+        ignore_privacy::PRIVATE_LOCAL_DESTINATIONS
+            .iter()
+            .map(|s| s.to_string()),
+    );
     if include_lock {
         patterns.insert("metactl.lock.json".to_string());
     }

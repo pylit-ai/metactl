@@ -3,6 +3,231 @@ use super::*;
 // Ignore and repository hygiene workflow tests.
 
 #[test]
+fn ignore_nested_coordinates_refuse_unknown_working_and_index_only_paths() {
+    for configured in [false, true] {
+        for index_only in [false, true] {
+            for scope in ["repo", "local"] {
+                let repo = TempDir::new().unwrap();
+                git_init_project(repo.path());
+                assert!(
+                    run_git(repo.path(), &["config", "core.excludesFile", "/dev/null"])
+                        .status
+                        .success()
+                );
+                let project = repo.path().join("nested project");
+                fs::create_dir(&project).unwrap();
+                if configured {
+                    init_project(&project);
+                    assert!(run_cli(&project, &["sync", "--yes"]).status.success());
+                }
+                let destination = ".agents/skills/leftover/SKILL.md";
+                let file = project.join(destination);
+                fs::create_dir_all(file.parent().unwrap()).unwrap();
+                fs::write(&file, "SYNTHETIC_PRIVATE_CANARY\n").unwrap();
+                if index_only {
+                    git_add_forced(&project, &[destination]);
+                    fs::remove_file(&file).unwrap();
+                }
+                let ignore = if scope == "repo" {
+                    project.join(".gitignore")
+                } else {
+                    repo.path().join(".git/info/exclude")
+                };
+                let broad = "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n# metactl:end generated-agent-surfaces\n";
+                fs::write(&ignore, broad).unwrap();
+                let before = run_git(repo.path(), &["ls-files", "--stage"]).stdout;
+                for action in ["plan", "install", "fix"] {
+                    let mut args = vec![
+                        "ignore",
+                        if action == "plan" { "fix" } else { action },
+                        "--scope",
+                        scope,
+                        "--target",
+                        "codex-cli",
+                    ];
+                    if action == "plan" {
+                        args.push("--plan");
+                    }
+                    if action == "fix" {
+                        args.push("--yes");
+                    }
+                    let result = run_cli(&project, &args);
+                    assert!(
+                        !result.status.success(),
+                        "configured={configured} index_only={index_only} {scope} {action}: {}",
+                        stdout(&result)
+                    );
+                    assert!(
+                        stderr(&result).contains(if scope == "local" {
+                            "No .git directory found"
+                        } else {
+                            "no verified public projection bytes"
+                        }),
+                        "{}",
+                        stderr(&result)
+                    );
+                    assert_eq!(fs::read_to_string(&ignore).unwrap(), broad);
+                    assert_eq!(
+                        run_git(repo.path(), &["ls-files", "--stage"]).stdout,
+                        before
+                    );
+                    assert!(!project.join(".metactl/ignore-recovery").exists());
+                }
+                if !index_only {
+                    assert!(run_git(repo.path(), &["add", "--all"]).status.success());
+                    assert!(!run_git(&project, &["show", &format!(":./{destination}")])
+                        .status
+                        .success());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn ignore_private_local_names_survive_target_change_and_future_creation() {
+    let private = [
+        "CLAUDE.local.md",
+        "GEMINI.local.md",
+        "AGENTS.local.md",
+        "OPENCLAW.local.md",
+        ".cursor/rules/metactl-pack-index.local.mdc",
+        ".claude/settings.local.json",
+        ".cursor/mcp.json",
+        ".gemini/.env",
+    ];
+    for configured in [false, true] {
+        for migration in [false, true] {
+            for index_only in [false, true] {
+                let repo = TempDir::new().unwrap();
+                git_init_project(repo.path());
+                assert!(
+                    run_git(repo.path(), &["config", "core.excludesFile", "/dev/null"])
+                        .status
+                        .success()
+                );
+                let project = repo.path().join("nested");
+                fs::create_dir(&project).unwrap();
+                if configured {
+                    init_project(&project);
+                }
+                if migration {
+                    for name in private {
+                        let file = project.join(name);
+                        fs::create_dir_all(file.parent().unwrap()).unwrap();
+                        fs::write(&file, "SYNTHETIC_PRIVATE_LOCAL\n").unwrap();
+                        if index_only {
+                            git_add_forced(&project, &[name]);
+                            fs::remove_file(file).unwrap();
+                        }
+                    }
+                    fs::write(project.join(".gitignore"), "# metactl:begin generated-agent-surfaces\n.claude/\n.cursor/\n.gemini/\nCLAUDE.local.md\nGEMINI.local.md\nAGENTS.local.md\nOPENCLAW.local.md\n# metactl:end generated-agent-surfaces\n").unwrap();
+                }
+                let index = run_git(repo.path(), &["ls-files", "--stage"]).stdout;
+                let before = fs::read(project.join(".gitignore")).ok();
+                for action in ["plan", "install", "fix"] {
+                    let mut args = vec![
+                        "ignore",
+                        if action == "plan" { "fix" } else { action },
+                        "--scope",
+                        "repo",
+                        "--target",
+                        "codex-cli",
+                    ];
+                    if action == "plan" {
+                        args.push("--plan");
+                    }
+                    if action == "fix" {
+                        args.push("--yes");
+                    }
+                    let result = run_cli(&project, &args);
+                    assert!(result.status.success(), "{action}: {}", stderr(&result));
+                    assert_eq!(run_git(repo.path(), &["ls-files", "--stage"]).stdout, index);
+                    if action == "plan" {
+                        assert_eq!(fs::read(project.join(".gitignore")).ok(), before);
+                    }
+                }
+                for name in private {
+                    let file = project.join(name);
+                    fs::create_dir_all(file.parent().unwrap()).unwrap();
+                    fs::write(file, "SYNTHETIC_PRIVATE_LOCAL\n").unwrap();
+                    assert!(agent_path_is_ignored(&project, name), "exposed {name}");
+                }
+                let authored = project.join(".agents/skills/authored/SKILL.md");
+                fs::create_dir_all(authored.parent().unwrap()).unwrap();
+                fs::write(authored, "# Authored public skill\n").unwrap();
+                assert!(!agent_path_is_ignored(
+                    &project,
+                    ".agents/skills/authored/SKILL.md"
+                ));
+                if !index_only {
+                    assert!(run_git(repo.path(), &["add", "--all"]).status.success());
+                    for name in private {
+                        assert!(
+                            !run_git(&project, &["show", &format!(":./{name}")])
+                                .status
+                                .success(),
+                            "staged {name}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn ignore_large_ignored_tree_uses_one_batched_probe() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = TempDir::new().unwrap();
+    git_init_project(project.path());
+    init_project(project.path());
+    let tree = project.path().join("node_modules/synthetic");
+    fs::create_dir_all(&tree).unwrap();
+    for n in 0..2048 {
+        fs::write(tree.join(format!("{n:04}.txt")), "fixture\n").unwrap();
+    }
+    fs::write(project.path().join(".gitignore"), "node_modules/\n# metactl:begin generated-agent-surfaces\n.codex/\n# metactl:end generated-agent-surfaces\n").unwrap();
+    let wrapper = TempDir::new().unwrap();
+    let real_git = Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real_git = stdout(&real_git).trim().to_string();
+    let script = wrapper.path().join("git");
+    fs::write(&script, "#!/bin/sh\nfor arg do\n if [ \"$arg\" = check-ignore ]; then printf 'probe\\n' >> \"$METACTL_PROBE_LOG\"; fi\ndone\nexec \"$METACTL_REAL_GIT\" \"$@\"\n").unwrap();
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    let log = wrapper.path().join("probes");
+    let path = format!(
+        "{}:{}",
+        wrapper.path().display(),
+        std::env::var("PATH").unwrap()
+    );
+    let start = std::time::Instant::now();
+    let result = run_cli_env(
+        project.path(),
+        &[
+            "ignore",
+            "fix",
+            "--scope",
+            "repo",
+            "--target",
+            "codex-cli",
+            "--plan",
+        ],
+        &[
+            ("PATH", &path),
+            ("METACTL_REAL_GIT", &real_git),
+            ("METACTL_PROBE_LOG", log.to_str().unwrap()),
+        ],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
+    assert!(start.elapsed() < std::time::Duration::from_secs(30));
+}
+
+#[test]
 fn ignore_non_git_migration_preserves_private_output_through_later_git_init() {
     for configured in [false, true] {
         let project = TempDir::new().expect("project");
@@ -191,6 +416,48 @@ fn ignore_shared_inventory_requires_matching_worktree_and_index_bytes() {
             );
         } else {
             assert!(!agent_path_is_ignored(project.path(), destination));
+        }
+    }
+}
+
+#[test]
+fn ignore_nested_shared_index_bytes_use_project_coordinates() {
+    for changed in [false, true] {
+        let repo = TempDir::new().unwrap();
+        git_init_project(repo.path());
+        let project = repo.path().join("nested");
+        fs::create_dir(&project).unwrap();
+        init_project(&project);
+        assert!(run_cli(&project, &["sync", "--yes"]).status.success());
+        let destination = ".agents/skills/python-refactor/python-refactor/SKILL.md";
+        let file = project.join(destination);
+        if changed {
+            fs::write(&file, "SYNTHETIC_PRIVATE_INDEX\n").unwrap();
+        }
+        git_add_forced(&project, &[destination]);
+        fs::remove_file(file).unwrap();
+        let index = run_git(repo.path(), &["ls-files", "--stage"]).stdout;
+        let broad = "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n# metactl:end generated-agent-surfaces\n";
+        fs::write(project.join(".gitignore"), broad).unwrap();
+        let result = run_cli(
+            &project,
+            &[
+                "ignore",
+                "fix",
+                "--scope",
+                "repo",
+                "--target",
+                "codex-cli",
+                "--yes",
+            ],
+        );
+        assert_eq!(result.status.success(), !changed, "{}", stderr(&result));
+        assert_eq!(run_git(repo.path(), &["ls-files", "--stage"]).stdout, index);
+        if changed {
+            assert_eq!(
+                fs::read_to_string(project.join(".gitignore")).unwrap(),
+                broad
+            );
         }
     }
 }
@@ -1752,7 +2019,11 @@ fn cli_ignore_install_local_writes_git_exclude_only() {
         "managed ignore block should be replaced idempotently"
     );
     assert!(!updated.lines().any(|line| line == ".codex/"));
-    assert!(!updated.contains(".cursor/"));
+    assert!(!updated.lines().any(|line| line == ".cursor/"));
+    assert!(updated.lines().any(|line| line == ".cursor/mcp.json"));
+    assert!(updated
+        .lines()
+        .any(|line| line == ".cursor/rules/metactl-pack-index.local.mdc"));
 
     let status = run_cli(project.path(), &["ignore", "status", "--target", "cursor"]);
     assert!(status.status.success(), "{}", stderr(&status));

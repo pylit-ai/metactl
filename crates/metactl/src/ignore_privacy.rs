@@ -1,6 +1,48 @@
 use super::*;
 use std::path::Component;
 
+// These names remain private even after switching targets or before a tool
+// creates them. Keep this policy shared with the migration gate's exemptions.
+pub(super) const PRIVATE_LOCAL_DESTINATIONS: &[&str] = &[
+    "CLAUDE.local.md",
+    "GEMINI.local.md",
+    "AGENTS.local.md",
+    "OPENCLAW.local.md",
+    ".cursor/rules/metactl-pack-index.local.mdc",
+    ".claude/settings.local.json",
+    ".cursor/mcp.json",
+    ".gemini/.env",
+];
+
+pub(super) fn resolve_git_exclude_path(
+    project_root: &Path,
+) -> std::result::Result<PathBuf, CliError> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args([
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "info/exclude",
+        ])
+        .output()
+        .map_err(|err| state_error(anyhow!("resolve Git exclude: {err}")))?;
+    if !output.status.success() {
+        return Err(CliError::new(EXIT_STATE, "Cannot resolve Git exclude path"));
+    }
+    let raw = std::str::from_utf8(&output.stdout)
+        .map_err(|err| state_error(anyhow!("decode Git exclude path: {err}")))?;
+    let path = PathBuf::from(raw.trim_end_matches('\n'));
+    if !path.is_absolute() || !path.ends_with("info/exclude") {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "Git returned an invalid exclude path",
+        ));
+    }
+    Ok(path)
+}
+
 pub(super) fn managed_ignore_file_has_broad_roots(
     path: &Path,
 ) -> std::result::Result<bool, CliError> {
@@ -19,6 +61,7 @@ pub(super) fn managed_ignore_file_has_broad_roots(
         .lines()
         .map(str::trim)
         .filter(|line| !line.starts_with('#') && !line.starts_with('!'))
+        .filter(|line| !PRIVATE_LOCAL_DESTINATIONS.contains(&line.trim_start_matches('/')))
         .any(|line| {
             [".agents", ".codex", ".claude", ".cursor", ".gemini"]
                 .iter()
@@ -325,6 +368,23 @@ fn refuse_uninventoried_generated_paths(
         }
         return Ok(());
     }
+    let root_output = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|err| state_error(anyhow!("inspect Git root: {err}")))?;
+    if !root_output.status.success() {
+        return Err(privacy_refusal("Git root cannot be verified".into()));
+    }
+    let root_text = std::str::from_utf8(&root_output.stdout)
+        .map_err(|_| privacy_refusal("non-UTF8 Git root cannot be verified".into()))?;
+    let git_root =
+        fs::canonicalize(root_text.trim_end_matches('\n')).map_err(|e| state_error(e.into()))?;
+    let project = fs::canonicalize(project_root).map_err(|e| state_error(e.into()))?;
+    let prefix = project
+        .strip_prefix(&git_root)
+        .map_err(|_| privacy_refusal("project is outside the Git worktree".into()))?;
     let files = Command::new("git")
         .arg("-C")
         .arg(project_root)
@@ -334,13 +394,21 @@ fn refuse_uninventoried_generated_paths(
     if !files.status.success() {
         return Err(privacy_refusal("affected-path enumeration failed".into()));
     }
+    let mut candidates = BTreeMap::new();
     for raw in files
         .stdout
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
     {
-        let destination = std::str::from_utf8(raw)
+        let repository_path = std::str::from_utf8(raw)
             .map_err(|_| privacy_refusal("non-UTF8 affected path cannot be verified".into()))?;
+        validate_relative_destination(repository_path).map_err(state_error)?;
+        let destination = Path::new(repository_path)
+            .strip_prefix(prefix)
+            .ok()
+            .and_then(Path::to_str)
+            .ok_or_else(|| privacy_refusal("affected path is outside the project".into()))?;
+        validate_relative_destination(destination).map_err(state_error)?;
         if retained_local_destination(destination) || verified.contains(destination) {
             continue;
         }
@@ -349,51 +417,91 @@ fn refuse_uninventoried_generated_paths(
         if !strict_inventory && !generated_destination(destination) {
             continue;
         }
-        let mut probe = Command::new("git")
-            .arg("-C")
-            .arg(project_root)
-            .args(["check-ignore", "--no-index", "--verbose", "-z", "--stdin"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|err| state_error(anyhow!("inspect ignore rule: {err}")))?;
-        {
-            let mut input = probe
-                .stdin
-                .take()
-                .ok_or_else(|| state_error(anyhow!("missing ignore probe input")))?;
-            input
-                .write_all(raw)
-                .and_then(|_| input.write_all(&[0]))
-                .map_err(|err| state_error(anyhow!("write ignore probe: {err}")))?;
-        }
-        let ignored = probe
-            .wait_with_output()
-            .map_err(|err| state_error(anyhow!("inspect ignore rule: {err}")))?;
-        if ignored.status.code() == Some(1) {
+        candidates.insert(repository_path.to_string(), destination.to_string());
+    }
+    if candidates.is_empty() {
+        return Ok(());
+    }
+    let input = candidates
+        .keys()
+        .flat_map(|path| path.as_bytes().iter().copied().chain([0]))
+        .collect::<Vec<_>>();
+    // Drain output while feeding stdin: ignored trees can exceed both pipe
+    // buffers. One process handles all candidates, including unmatched paths.
+    let mut probe = Command::new("git")
+        .arg("-C")
+        .arg(&git_root)
+        .args([
+            "check-ignore",
+            "--no-index",
+            "--verbose",
+            "--non-matching",
+            "-z",
+            "--stdin",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|err| state_error(anyhow!("inspect ignore rule: {err}")))?;
+    let mut stdin = probe
+        .stdin
+        .take()
+        .ok_or_else(|| state_error(anyhow!("missing ignore probe input")))?;
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let ignored = probe
+        .wait_with_output()
+        .map_err(|err| state_error(anyhow!("inspect ignore rule: {err}")));
+    writer
+        .join()
+        .map_err(|_| privacy_refusal("ignore input writer failed".into()))?
+        .map_err(|err| state_error(anyhow!("write ignore probe: {err}")))?;
+    let ignored = ignored?;
+    if !matches!(ignored.status.code(), Some(0 | 1)) {
+        return Err(privacy_refusal("affected-path ignore probe failed".into()));
+    }
+    if !ignored.stdout.ends_with(&[0]) {
+        return Err(privacy_refusal("unterminated ignore evidence".into()));
+    }
+    let fields = ignored.stdout[..ignored.stdout.len() - 1]
+        .split(|byte| *byte == 0)
+        .collect::<Vec<_>>();
+    if fields.len() != candidates.len() * 4 {
+        return Err(privacy_refusal(
+            "invalid affected-path ignore evidence".into(),
+        ));
+    }
+    for fields in fields.chunks_exact(4) {
+        let name = std::str::from_utf8(fields[3])
+            .map_err(|_| privacy_refusal("non-UTF8 ignore evidence".into()))?;
+        let destination = candidates
+            .remove(name)
+            .ok_or_else(|| privacy_refusal("unexpected or duplicate ignore evidence".into()))?;
+        if fields[..3].iter().all(|field| field.is_empty()) {
             continue;
         }
-        if !ignored.status.success() {
-            return Err(privacy_refusal("affected-path ignore probe failed".into()));
-        }
-        let fields = ignored.stdout.split(|byte| *byte == 0).collect::<Vec<_>>();
-        if fields.len() < 4 {
-            return Err(privacy_refusal(
-                "invalid affected-path ignore evidence".into(),
-            ));
-        }
-        let source = PathBuf::from(String::from_utf8_lossy(fields[0]).as_ref());
+        let source = PathBuf::from(
+            std::str::from_utf8(fields[0])
+                .map_err(|_| privacy_refusal("non-UTF8 ignore source".into()))?,
+        );
         let source = if source.is_absolute() {
             source
         } else {
-            project_root.join(source)
+            git_root.join(source)
         };
+        let source = fs::canonicalize(source).map_err(|e| state_error(e.into()))?;
         let line = std::str::from_utf8(fields[1])
             .ok()
-            .and_then(|line| line.parse::<usize>().ok());
+            .and_then(|line| line.parse::<usize>().ok())
+            .filter(|line| *line > 0)
+            .ok_or_else(|| privacy_refusal("invalid ignore source line".into()))?;
         for write in prepared {
-            if source != write.path || write.original.as_deref() == Some(write.updated.as_slice()) {
+            if write.original.is_none()
+                || write.original.as_deref() == Some(write.updated.as_slice())
+            {
+                continue;
+            }
+            if source != fs::canonicalize(&write.path).map_err(|e| state_error(e.into()))? {
                 continue;
             }
             let original = std::str::from_utf8(write.original.as_deref().unwrap_or_default())
@@ -406,7 +514,7 @@ fn refuse_uninventoried_generated_paths(
                 if text.trim() == IGNORE_BLOCK_END {
                     in_block = false;
                 }
-                if in_block && line == Some(index + 1) && !fields[2].starts_with(b"!") {
+                if in_block && line == index + 1 && !fields[2].starts_with(b"!") {
                     return Err(privacy_refusal(format!(
                         "affected path {destination} has no verified public projection bytes"
                     )));
@@ -438,7 +546,7 @@ fn projection_bytes_match(
         let output = Command::new("git")
             .arg("-C")
             .arg(project_root)
-            .args(["show", &format!(":{destination}")])
+            .args(["show", &format!(":./{destination}")])
             .output()
             .map_err(|err| state_error(anyhow!("inspect indexed bytes: {err}")))?;
         if !output.status.success()
@@ -451,8 +559,7 @@ fn projection_bytes_match(
 }
 
 fn retained_local_destination(destination: &str) -> bool {
-    destination.starts_with(".metactl/")
-        || matches!(destination, "CLAUDE.local.md" | "GEMINI.local.md")
+    destination.starts_with(".metactl/") || PRIVATE_LOCAL_DESTINATIONS.contains(&destination)
 }
 
 fn indexed_destination(
