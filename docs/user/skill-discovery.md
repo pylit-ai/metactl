@@ -100,8 +100,10 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    candidate skill names and descriptions, the gateway project ID, and the data
    class. The query may contain text the agent copied from your project. Do not
    enable this option for private projects, secrets, or restricted customer and
-   third-party work under the current public-data authorization. This PR does
+   third-party work under the current public-data authorization. This opt-in path does
    not authorize private-project traffic or a fleet-wide, default-on rollout.
+   MetaCTL cannot verify that a project or query is public; the data class is
+   your attestation.
 
    `--max-provider-calls` permits 1-10 attempts per host process, not per
    discovery request; `--provider-deadline` must be positive and no more than
@@ -111,11 +113,12 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    local host's offline status path, never the provider. A later discovery call
    may contact the gateway. On unavailable, rejected, timed-out or over-budget
    responses, the host returns deterministic ordering and records whether the
-   provider attempt or billing state is unknown. Run doctor with the same
-   routing flags to compare the requested registration. Policy changes require
+   provider attempt or billing state is unknown. Policy changes require
    `--replace`. Synthetic classification is reserved for `skills host --check`.
    To check actual use, run `skills doctor` with the same routing flags and
-   inspect `registered_mode` and `routing`. For a specific discovery request,
+   inspect `registered_mode`, `registered_gateway_command_state`, and `routing`.
+   The gateway command state detects a missing or non-executable client without
+   calling it. For a specific discovery request,
    inspect its `routing_receipt` for `reason` and `provider_calls`, then match
    its session/run ID in the private event log. A configured registration or
    healthy host alone does not prove that the agent called Jev. Use `--json

@@ -112,6 +112,16 @@ fn executable_file(path: &Path) -> bool {
     }
 }
 
+fn executable_state(path: &Path) -> &'static str {
+    if executable_file(path) {
+        "present"
+    } else if path.exists() {
+        "not_executable"
+    } else {
+        "missing"
+    }
+}
+
 fn canonicalize_missing_tail(path: &Path) -> Result<PathBuf, CliError> {
     let mut absent = Vec::new();
     let mut prefix = path;
@@ -196,14 +206,7 @@ fn host_command(
             "Use 1-10 --max-provider-calls and a positive --provider-deadline no greater than 5 seconds."));
     }
     if let Some(project) = &routing.gateway_project {
-        if project.is_empty()
-            || project.len() > 80
-            || !project.as_bytes()[0].is_ascii_lowercase()
-                && !project.as_bytes()[0].is_ascii_digit()
-            || !project
-                .bytes()
-                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-        {
+        if !valid_gateway_project(project) {
             return Err(CliError::new(
                 EXIT_VALIDATION,
                 "Use a lowercase gateway project ID with letters, digits or hyphens.",
@@ -286,6 +289,15 @@ fn entry_key(target: &str) -> &'static str {
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn valid_gateway_project(project: &str) -> bool {
+    !project.is_empty()
+        && project.len() <= 80
+        && (project.as_bytes()[0].is_ascii_lowercase() || project.as_bytes()[0].is_ascii_digit())
+        && project
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 fn parse_codex_toml(body: &str) -> Result<toml::Value, CliError> {
@@ -455,12 +467,9 @@ fn managed_entry(
             || args.get(j + 2)?.as_str() != "--gateway-command"
             || !Path::new(args.get(j + 3)?).is_absolute()
             || args.get(j + 4)?.as_str() != "--gateway-project"
-            || args.get(j + 5)?.is_empty()
+            || !valid_gateway_project(args.get(j + 5)?)
             || args.get(j + 6)?.as_str() != "--gateway-data-class"
-            || !matches!(
-                args.get(j + 7)?.as_str(),
-                "synthetic" | "public-nonsensitive"
-            )
+            || args.get(j + 7)?.as_str() != "public-nonsensitive"
             || args.get(j + 8)?.as_str() != "--allow-provider-data"
             || args.get(j + 9)?.as_str() != "--max-provider-calls"
             || !(1..=10).contains(&args.get(j + 10)?.parse::<u32>().ok()?)
@@ -1243,8 +1252,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             json!({
                 "action": phase, "target": options.target, "scope": format!("{:?}", options.scope).to_lowercase(),
                 "config_path": path, "server": SERVER, "command": command, "args": args,
-                "mode": options.routing.trial_mode, "provider_calls": 0,
-                "gateway_response": "unknown_not_called", "event_log": ledger,
+                "mode": options.routing.trial_mode, "provider_calls_this_check": 0,
+                "gateway_response": if options.routing.trial_mode == "baseline" { "not_applicable" } else { "unknown_not_called" }, "event_log": ledger,
                 "entry_preview": entry,
                 "git_visibility": visibility, "allow_unignored": options.allow_unignored,
                 "native_acceptance_note": acceptance_note(&options.target, options.scope),
@@ -1379,11 +1388,31 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
             .and_then(|index| entry.args.get(index + 1))
             .map(String::as_str)
     });
+    let registered_gateway_command = registered.as_ref().and_then(|entry| {
+        entry
+            .args
+            .iter()
+            .position(|arg| arg == "--gateway-command")
+            .and_then(|index| entry.args.get(index + 1))
+            .map(String::as_str)
+    });
+    let registered_gateway_command_state = if registered_mode == Some("baseline") {
+        "not_applicable"
+    } else {
+        registered_gateway_command
+            .map(|path| executable_state(Path::new(path)))
+            .unwrap_or("unknown")
+    };
     let drift = registered.as_ref().and_then(|entry| {
         if registered_command_state == "missing" {
             Some("registered_command_missing")
         } else if registered_python_state == "missing" {
             Some("registered_python_missing")
+        } else if matches!(
+            registered_gateway_command_state,
+            "missing" | "not_executable"
+        ) {
+            Some("registered_gateway_command_unavailable")
         } else if entry.command != command {
             Some("command_differs")
         } else if entry.args.last() != args.last() {
@@ -1458,11 +1487,19 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         Some("options_differ" | "event_log_differs") => {
             "rerun doctor with the registration's profile/config and state-home settings; if changing policy intentionally, preview with --replace before --apply --replace"
         }
+        Some("registered_gateway_command_unavailable") => {
+            "restore the registered gateway executable or preview and apply an updated provider connection with --replace"
+        }
         Some(_) => "rerun skills connect --apply after an upgrade",
         None => "",
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered mode: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nGateway response: unknown (not called by doctor)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nProvider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_mode.unwrap_or("unknown"), registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; {drift_hint})")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
+    let gateway_response = if registered_mode == Some("baseline") {
+        "not_applicable"
+    } else {
+        "unknown_not_called"
+    };
+    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered mode: {}\nRegistered gateway command: {} ({})\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nGateway response: {}\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nProvider calls on this check: 0",
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_mode.unwrap_or("unknown"), registered_gateway_command.unwrap_or("unknown"), registered_gateway_command_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; {drift_hint})")).unwrap_or_default(), host, gateway_response, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -1473,7 +1510,10 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                 "registration": registration, "registration_matches_requested_options": matches_requested,
                 "registered_command": registered_command, "registered_command_state": registered_command_state,
                 "registered_python": registered_python, "registered_python_state": registered_python_state,
-                "registered_mode": registered_mode, "gateway_response": "unknown_not_called",
+                "registered_mode": registered_mode,
+                "registered_gateway_command": registered_gateway_command,
+                "registered_gateway_command_state": registered_gateway_command_state,
+                "gateway_response": gateway_response,
                 "registered_event_log": registered_log,
                 "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_catalog,
                 "agent_tools": "unknown",
