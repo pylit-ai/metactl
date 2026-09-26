@@ -24,6 +24,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure public-boundary scanner
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          fi
+          rg --version
       - uses: dtolnay/rust-toolchain@stable
       - name: Format
         run: cargo fmt --check
@@ -36,4 +43,4 @@ jobs:
       - name: V1 release gate
         run: make verify-v1-release-gate
       - name: Public boundary
-        run: bash scripts/check_public_boundary.sh
+        run: make verify-public-boundary
