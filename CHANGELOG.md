@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.24 - 2026-09-26
+
+### Added
+
+- Persistent Jev defaults with explicit project enrollment, private-owned data
+  classification, project/session opt-outs and revocable data permission.
+- Preference-aware discovery hosts recheck policy before each request, without
+  resetting their call ceiling. Missing or invalid policy falls back locally.
+- Target-native discovery connection and diagnostics for Codex, Claude Code,
+  Cursor, Gemini CLI and OpenCode; explicit manual guidance for other targets.
+- Diagnostics distinguish saved enablement, executable readiness, legacy
+  registrations, actual provider use and private event logging.
+
+### Evidence limits
+
+- Local preference and connection tests use simulated provider responses.
+  A saved preference or installed connection alone does not prove agent use,
+  provider availability, fleet deployment or productivity improvement.
+
 ## 0.1.23 - 2026-09-25
 
 ### Added

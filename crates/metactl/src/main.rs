@@ -177,7 +177,7 @@ enum Commands {
     /// Import, export, and verify portable Agent Skill folders as metactl packs
     #[command(hide = true)]
     Pack(PackArgs),
-    /// Manage repo-local and user-global Codex Agent Skill visibility
+    /// Manage Agent Skills, optional discovery connections, and diagnostics
     #[command(hide = true)]
     Skills(SkillsArgs),
     /// Project packs into local runtime plugin marketplace bundles
@@ -862,10 +862,51 @@ enum SkillsCommand {
     Load(SkillsLoadArgs),
     /// Packaged optional discovery host (Python 3.10+); status and live verification
     Host(SkillsHostArgs),
+    /// Preview or install a target-native, deterministic discovery registration
+    Connect(SkillsConnectArgs),
+    /// Diagnose discovery readiness, registration, and observed use without provider calls
+    Doctor(SkillsDoctorArgs),
     /// Save an Auto-mode surface decision in machine-local project configuration
     Select(SkillsSelectArgs),
     /// Private discovery event reports and session outcome recording
     Trials(SkillsTrialsArgs),
+    /// Persistent Jev defaults and explicit project enrollment (no provider calls)
+    Preferences(SkillsPreferencesArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsPreferencesArgs {
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    /// Default for enrolled projects; omit all options to show effective policy
+    #[arg(long, value_parser = ["enabled", "disabled"])]
+    mode: Option<String>,
+    /// Save permission once to send task text and skill metadata to TypeSafe
+    #[arg(long, conflicts_with = "revoke_provider_data")]
+    allow_provider_data: bool,
+    /// Withdraw saved data permission; enabling again requires explicit consent
+    #[arg(long)]
+    revoke_provider_data: bool,
+    /// Explicitly enroll this canonical project path in the saved default
+    #[arg(long, requires_all = ["gateway_project", "data_class"])]
+    enroll: bool,
+    /// Explicitly replace a saved gateway identity or data classification
+    #[arg(long, requires = "enroll")]
+    replace_enrollment: bool,
+    #[arg(long, requires = "enroll")]
+    gateway_project: Option<String>,
+    #[arg(long, value_parser = ["public-nonsensitive", "private-owned"], requires = "enroll")]
+    data_class: Option<String>,
+    /// Project opt-out overrides the user default, including in running hosts
+    #[arg(long, value_parser = ["inherit", "disabled"])]
+    project_mode: Option<String>,
+    #[arg(long)]
+    gateway_command: Option<PathBuf>,
+    /// Per-host ceiling; does not override shared gateway limits
+    #[arg(long)]
+    max_provider_calls: Option<u32>,
+    #[arg(long)]
+    provider_deadline: Option<f64>,
 }
 
 #[derive(Debug, Args)]
@@ -878,6 +919,9 @@ struct SkillsTrialsArgs {
 
 #[derive(Debug, Args)]
 struct SkillsHostArgs {
+    /// Re-read persistent Jev preferences before every discovery request
+    #[arg(long)]
+    use_preferences: bool,
     /// Python 3.10+ executable; useful where system python3 is older
     #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
     python: PathBuf,
@@ -919,6 +963,82 @@ struct SkillsHostArgs {
     runtime: String,
     #[arg(long, value_parser = ["discover_skills", "load_skill"], conflicts_with_all = ["status", "check", "client_config"])]
     call_tool: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct SkillsConnectArgs {
+    /// Canonical target ID (see docs/user/discovery-agent-adapters.md)
+    #[arg(long)]
+    target: String,
+    /// Project or user configuration scope; user scope is currently supported for Codex
+    #[arg(long, value_enum, default_value = "project")]
+    scope: DiscoveryScopeArg,
+    /// Python 3.10+ executable used by the packaged discovery host
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    #[command(flatten)]
+    routing: DiscoveryRoutingArgs,
+    /// Write the previewed registration; ordinary connect previews without writing
+    #[arg(long, conflicts_with = "remove")]
+    apply: bool,
+    /// Immediately remove only a MetaCTL-managed registration (no --apply needed)
+    #[arg(long)]
+    remove: bool,
+    /// Explicitly replace a managed registration with different profile or log options
+    #[arg(long, conflicts_with = "remove")]
+    replace: bool,
+    /// Allow machine-specific paths in a project config that Git does not ignore
+    #[arg(long, conflicts_with = "remove")]
+    allow_unignored: bool,
+}
+
+#[derive(Debug, Args)]
+struct SkillsDoctorArgs {
+    /// Canonical target ID
+    #[arg(long)]
+    target: String,
+    /// Configuration scope to inspect
+    #[arg(long, value_enum, default_value = "project")]
+    scope: DiscoveryScopeArg,
+    /// Python 3.10+ executable used by the packaged discovery host
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    #[command(flatten)]
+    routing: DiscoveryRoutingArgs,
+}
+
+#[derive(Debug, Args)]
+struct DiscoveryRoutingArgs {
+    /// Inherit saved Jev preferences, including live project opt-outs
+    #[arg(long, conflicts_with_all = ["allow_provider_data", "gateway_project", "gateway_data_class"])]
+    use_preferences: bool,
+    /// Baseline makes no Jev calls; shadow observes; advisory may apply validated ordering
+    #[arg(long, default_value = "baseline", value_parser = ["baseline", "shadow", "advisory"])]
+    trial_mode: String,
+    /// Explicit consent to send this project's query and candidate descriptions
+    #[arg(long)]
+    allow_provider_data: bool,
+    /// Scoped gateway project ID, required for shadow/advisory
+    #[arg(long)]
+    gateway_project: Option<String>,
+    /// Data class authorized by the current gateway policy
+    #[arg(long, value_parser = ["synthetic", "public-nonsensitive"])]
+    gateway_data_class: Option<String>,
+    /// Gateway client executable; resolved to an absolute path
+    #[arg(long, default_value = "jev")]
+    gateway_command: PathBuf,
+    /// Per-process provider attempt ceiling; gateway enforces additional shared limits
+    #[arg(long, default_value_t = 4)]
+    max_provider_calls: u32,
+    /// Maximum seconds per provider attempt
+    #[arg(long, default_value_t = 5.0)]
+    provider_deadline: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DiscoveryScopeArg {
+    Project,
+    User,
 }
 
 #[derive(Debug, Args)]
@@ -1994,6 +2114,12 @@ fn main() -> ExitCode {
     {
         return cli_skills::run_discovery_trials(args);
     }
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Preferences(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_preferences(&cli, args);
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
@@ -2122,7 +2248,10 @@ fn validate_explicit_project_root(cli: &Cli) -> std::result::Result<(), CliError
     let Some(project_root) = cli.project.as_deref() else {
         return Ok(());
     };
-    if project_root.is_dir() || command_can_initialize_project_root(&cli.command) {
+    if project_root.is_dir()
+        || command_can_initialize_project_root(&cli.command)
+        || missing_project_user_discovery_remove(cli)
+    {
         return Ok(());
     }
     let message = if project_root.exists() {
@@ -2147,11 +2276,25 @@ fn validate_explicit_project_root(cli: &Cli) -> std::result::Result<(), CliError
     Err(err)
 }
 
+fn missing_project_user_discovery_remove(cli: &Cli) -> bool {
+    cli.project
+        .as_deref()
+        .is_some_and(|path| path.is_absolute() && !path.exists())
+        && matches!(&cli.command,
+            Commands::Skills(SkillsArgs { command: SkillsCommand::Connect(args) })
+                if args.remove && args.scope == DiscoveryScopeArg::User)
+}
+
 fn command_can_initialize_project_root(command: &Commands) -> bool {
     matches!(command, Commands::Init(_) | Commands::Setup(_))
 }
 
 fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
+    // Emergency removal of a user-wide server cannot create an operation lock
+    // under a deleted project; the config update itself remains atomic.
+    if missing_project_user_discovery_remove(cli) {
+        return None;
+    }
     match &cli.command {
         Commands::Init(_) => Some("init"),
         Commands::Setup(args) => {
@@ -2182,7 +2325,11 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             | SkillsCommand::Discover(_)
             | SkillsCommand::Load(_)
             | SkillsCommand::Host(_)
+            | SkillsCommand::Doctor(_)
             | SkillsCommand::Trials(_) => None,
+            SkillsCommand::Preferences(_) => None,
+            SkillsCommand::Connect(args) if args.apply || args.remove => Some("skills connect"),
+            SkillsCommand::Connect(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {
@@ -11578,6 +11725,7 @@ mod cli_hook;
 mod cli_pack;
 mod cli_plugin;
 mod cli_profile;
+mod cli_skill_discovery_connection;
 mod cli_skills;
 mod cli_source;
 
