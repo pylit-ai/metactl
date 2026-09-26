@@ -87,10 +87,29 @@ fn resolved_python(python: &Path) -> Result<PathBuf, CliError> {
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path)
+        .filter(|directory| directory.is_absolute())
         .map(|directory| directory.join(python))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| executable_file(candidate))
         .ok_or_else(|| CliError::new(EXIT_STATE,
             format!("Python interpreter '{}' was not found on PATH. Pass --python /absolute/path/to/python3.", python.display())))
+}
+
+fn executable_file(path: &Path) -> bool {
+    let Ok(metadata) = path.metadata() else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 fn canonicalize_missing_tail(path: &Path) -> Result<PathBuf, CliError> {
@@ -192,6 +211,11 @@ fn parse_codex_toml(body: &str) -> Result<toml::Value, CliError> {
     })
 }
 
+fn parse_generated_codex_toml(body: &str) -> Result<toml::Value, CliError> {
+    parse_codex_toml(body).map_err(|_| CliError::new(EXIT_STATE,
+        "MetaCTL cannot add this server table to the valid Codex config without changing its structure; no change was made. Review inline mcp_servers tables manually."))
+}
+
 fn codex_has_server(document: &toml::Value) -> bool {
     document
         .get("mcp_servers")
@@ -201,6 +225,14 @@ fn codex_has_server(document: &toml::Value) -> bool {
 
 fn codex_server(document: &toml::Value) -> Option<&toml::Value> {
     document.get("mcp_servers")?.get(SERVER)
+}
+
+fn codex_pinned_project(document: &toml::Value) -> Option<&str> {
+    let args = codex_server(document)?.get("args")?.as_array()?;
+    if args.first()?.as_str()? != "--project" {
+        return None;
+    }
+    args.get(1)?.as_str()
 }
 
 fn codex_only_server_changed(
@@ -536,7 +568,9 @@ fn recover_rewritten_codex_block(
     parsed: &toml::Value,
     root: &Path,
 ) -> Option<(String, ManagedEntry)> {
-    if old.matches(BEGIN).count() != 1 || old.matches(END).count() != 1 {
+    // A client may rewrite comments away. The exact managed command shape and
+    // a parsed single-server semantic diff establish ownership in that case.
+    if old.matches(BEGIN).count() > 1 || old.matches(END).count() > 1 {
         return None;
     }
     let server = codex_server(parsed)?.as_table()?;
@@ -627,7 +661,7 @@ fn edit_codex(
         }
         require_policy_match(entry, desired, replace)?;
         let updated = format!("{}{}{}", &old[..*begin], block.trim_end(), &old[*end..]);
-        let parsed_updated = parse_codex_toml(&updated)?;
+        let parsed_updated = parse_generated_codex_toml(&updated)?;
         let block_semantic = parse_codex_toml(block)?;
         if !codex_only_server_changed(&parsed, &parsed_updated, codex_server(&block_semantic)) {
             return Err(CliError::new(
@@ -645,9 +679,28 @@ fn edit_codex(
         let (updated, _) = edit_codex(&cleaned, block, root, desired, false, replace)?;
         return Ok((updated, "updated"));
     }
-    strict_block?;
+    if let Err(error) = strict_block {
+        if let Some(owner) = codex_pinned_project(&parsed) {
+            if owner != root.to_string_lossy() {
+                return Err(CliError::new(EXIT_STATE, format!(
+                    "The existing Codex metactl-skills server is pinned to project {owner}. Run its rollback with --project {owner}, or review the config manually."
+                )));
+            }
+        }
+        return Err(error);
+    }
     if old.contains(&header) || codex_has_server(&parsed) {
-        return Err(CliError::new(EXIT_STATE, "An unmanaged metactl-skills server already exists in Codex config; review it manually."));
+        if let Some(owner) = codex_pinned_project(&parsed) {
+            if owner != root.to_string_lossy() {
+                return Err(CliError::new(EXIT_STATE, format!(
+                    "The existing Codex metactl-skills server is pinned to project {owner}. Run its rollback with --project {owner}, or review the config manually."
+                )));
+            }
+        }
+        let operation = if remove { "remove" } else { "replace" };
+        return Err(CliError::new(EXIT_STATE, format!(
+            "Cannot {operation} an unmanaged metactl-skills server in Codex config; review it manually."
+        )));
     }
     if remove {
         return Ok((old.to_owned(), "already_absent"));
@@ -660,7 +713,7 @@ fn edit_codex(
         "\n\n"
     };
     let updated = format!("{old}{separator}{block}");
-    let parsed_updated = parse_codex_toml(&updated)?;
+    let parsed_updated = parse_generated_codex_toml(&updated)?;
     let block_semantic = parse_codex_toml(block)?;
     if !codex_only_server_changed(&parsed, &parsed_updated, codex_server(&block_semantic)) {
         return Err(CliError::new(
@@ -811,6 +864,36 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
     ("timeout".into(), Value::Null)
 }
 
+fn read_recent_log(path: &Path) -> Result<(String, bool), CliError> {
+    use std::io::{Read, Seek, SeekFrom};
+    const MAX: u64 = 2 * 1024 * 1024;
+    let mut file = fs::File::open(path).map_err(internal_error)?;
+    let metadata = file.metadata().map_err(internal_error)?;
+    if !metadata.is_file() {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "Discovery event log is not a regular file.",
+        ));
+    }
+    let truncated = metadata.len() > MAX;
+    let start = metadata.len().saturating_sub(MAX);
+    file.seek(SeekFrom::Start(start)).map_err(internal_error)?;
+    let mut bytes = Vec::new();
+    file.take(MAX + 1)
+        .read_to_end(&mut bytes)
+        .map_err(internal_error)?;
+    let bytes = if truncated {
+        bytes
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|index| &bytes[index + 1..])
+            .unwrap_or(&[])
+    } else {
+        &bytes
+    };
+    Ok((String::from_utf8_lossy(bytes).into_owned(), truncated))
+}
+
 pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandOutput, CliError> {
     let (root, path, ledger, command, args) = connection(
         cli,
@@ -943,7 +1026,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         true,
     )?;
     let python_unavailable = resolved_python(&options.python)
-        .map(|path| !path.is_file())
+        .map(|path| !executable_file(&path))
         .unwrap_or(true);
     let config_issue = if path
         .symlink_metadata()
@@ -1043,14 +1126,15 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     };
     let mut latest = Value::Null;
     let mut observed = 0usize;
+    let mut invalid_lines = 0usize;
+    let mut log_window_truncated = false;
     let log_status = match fs::metadata(&ledger) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => "missing",
         Err(_) => "unreadable",
-        Ok(metadata) if metadata.len() > 8 * 1024 * 1024 => "too_large",
-        Ok(_) => match fs::read_to_string(&ledger) {
+        Ok(_) => match read_recent_log(&ledger) {
             Err(_) => "unreadable",
-            Ok(body) => {
-                let mut valid = true;
+            Ok((body, truncated)) => {
+                log_window_truncated = truncated;
                 for line in body.lines() {
                     match serde_json::from_str::<Value>(line) {
                         Ok(value)
@@ -1070,28 +1154,27 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                             }
                         }
                         _ => {
-                            valid = false;
-                            break;
+                            invalid_lines += 1;
                         }
                     }
                 }
-                if valid {
+                if invalid_lines == 0 {
                     "readable"
                 } else {
-                    "invalid"
+                    "partial"
                 }
             }
         },
     };
-    let routing = if log_status == "readable" && observed > 0 {
+    let routing = if (log_status == "readable" || log_status == "partial") && observed > 0 {
         "observed"
-    } else if log_status == "missing" || log_status == "readable" {
+    } else if matches!(log_status, "missing" | "readable" | "partial") {
         "unknown_no_event"
     } else {
         "unknown_log_error"
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills (local)\nRegistration: {} ({})\nRegistered command: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events, including manual calls)\nEvent log checked: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason})")).unwrap_or_default(), host, routing, observed, log_status, ledger.display());
+    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills (local)\nRegistration: {} ({})\nRegistered command: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason})")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -1104,7 +1187,9 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                 "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_catalog,
                 "agent_tools": "unknown",
                 "routing": routing, "matching_discoveries": observed, "latest_discovery": latest,
-                "event_log": ledger, "log_status": log_status, "benefit": "unknown", "check_provider_calls": 0
+                "event_log": ledger, "log_status": log_status, "invalid_log_lines": invalid_lines,
+                "log_window_truncated": log_window_truncated,
+                "benefit": "unknown", "check_provider_calls": 0
             }),
         ),
     })

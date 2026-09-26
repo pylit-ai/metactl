@@ -80,7 +80,10 @@ If discovery works but `log=failed`, check that the private log's parent
 directory exists and is writable. `skills doctor` separates local host
 readiness, registration, observed discovery events, and unknown client or
 benefit states; it makes no provider call. A missing event does not prove the
-agent skipped discovery. `--status` confirms only local host readiness.
+agent skipped discovery. Doctor reads the most recent 2 MiB of the private log,
+reports malformed lines as partial evidence, and marks a truncated window;
+older events may need `skills trials inspect`. `--status` confirms only local
+host readiness.
 
 For daily work, discover when the task or phase calls for unfamiliar specialist
 instructions; use an exact known skill directly when appropriate. A project may

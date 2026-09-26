@@ -129,6 +129,7 @@ class ConnectionFirstRun(unittest.TestCase):
     def test_real_baseline_receipt_is_visible_in_doctor(self):
         applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply", "--json")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        settings = json.loads(applied.stdout)
         config = (self.project / ".codex/config.toml").read_text()
         command = json.loads(re.search(r'^command = (.+)$', config, re.MULTILINE).group(1))
         args = json.loads(re.search(r'^args = (.+)$', config, re.MULTILINE).group(1))
@@ -140,6 +141,10 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertIn("mode=baseline", result["routing_receipt"])
         self.assertIn("provider_calls=0", result["routing_receipt"])
         self.assertIn("log=recorded", result["routing_receipt"])
+        ledger = pathlib.Path(settings["event_log"]).read_text()
+        self.assertNotIn("Review a small CLI user workflow", ledger)
+        self.assertTrue(all("query" not in record and "instructions" not in record
+                            for record in map(json.loads, ledger.splitlines())))
         doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
         observed = json.loads(doctor.stdout)
@@ -284,6 +289,23 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertIn(client_table, path.read_text())
         self.assertIn("metactl-skills", path.read_text())
 
+    def test_codex_comment_rewrite_keeps_semantic_rollback_usable(self):
+        path = self.project / ".codex/config.toml"
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        original = path.read_text()
+        for rewritten in (original.replace("# metactl-discovery:begin\n", "")
+                                   .replace("# metactl-discovery:end\n", ""),
+                          original.replace("# metactl-discovery:begin\n", "")):
+            with self.subTest(rewritten=rewritten.count("metactl-discovery:")):
+                path.write_text(rewritten)
+                doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+                self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+                self.assertEqual(json.loads(doctor.stdout)["registration"], "configured")
+                removed = self.run_cli("skills", "connect", "--target", "codex-cli", "--remove")
+                self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+                self.assertNotIn("metactl-skills", path.read_text())
+
     def test_profile_change_requires_explicit_replace(self):
         path = self.project / ".cursor/mcp.json"
         applied = self.run_cli("--no-profile", "skills", "connect", "--target", "cursor", "--apply")
@@ -328,6 +350,22 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertNotIn("metactl-skills", (codex_home / "config.toml").read_text())
 
+    def test_user_scope_wrong_project_names_owner(self):
+        codex_home = self.base / "codex-home"
+        self.env["CODEX_HOME"] = str(codex_home)
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--scope", "user", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        other = self.base / "other-project"
+        other.mkdir()
+        wrong = subprocess.run([str(BINARY), "--project", str(other), "skills", "connect",
+                                "--target", "codex-cli", "--scope", "user", "--remove"],
+                               env=self.env, text=True, capture_output=True, timeout=25)
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertIn("pinned to project", wrong.stderr)
+        self.assertIn(str(self.project.resolve()), wrong.stderr)
+        self.assertIn("metactl-skills", (codex_home / "config.toml").read_text())
+
     def test_existing_config_permissions_are_preserved(self):
         path = self.project / ".cursor/mcp.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -336,6 +374,18 @@ class ConnectionFirstRun(unittest.TestCase):
         applied = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+
+    def test_json_unrelated_values_and_64bit_integer_are_preserved(self):
+        path = self.project / ".cursor/mcp.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        number = 12345678901234567890
+        path.write_text('{"z":1,"a":{"large":' + str(number) + '},"mcpServers":{"other":{"command":"other"}}}\n')
+        applied = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        result = path.read_text()
+        self.assertEqual(json.loads(result)["z"], 1)
+        self.assertEqual(json.loads(result)["a"]["large"], number)
+        self.assertEqual(json.loads(result)["mcpServers"]["other"]["command"], "other")
 
     def test_doctor_reports_states_when_python_or_config_is_unavailable(self):
         path = self.project / ".codex/config.toml"
@@ -354,6 +404,23 @@ class ConnectionFirstRun(unittest.TestCase):
         linked = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
         self.assertEqual(linked.returncode, 0, linked.stdout + linked.stderr)
         self.assertEqual(json.loads(linked.stdout)["registration"], "symlink_refused")
+
+    def test_doctor_reads_recent_events_after_large_or_partial_log(self):
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        ledger = pathlib.Path(json.loads(applied.stdout)["event_log"])
+        event = {"schema": "metactl.discovery_trial.v1", "runtime": "codex-cli",
+                 "kind": "discover", "arm": "baseline", "provider_calls": 0,
+                 "session_id": "recent-session", "run_id": "recent-run"}
+        ledger.write_text("x" * (2 * 1024 * 1024 + 100) + "\n" + json.dumps(event) + "\npartial\n")
+        doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        state = json.loads(doctor.stdout)
+        self.assertEqual(state["log_status"], "partial")
+        self.assertEqual(state["routing"], "observed")
+        self.assertEqual(state["latest_discovery"]["run_id"], "recent-run")
+        self.assertTrue(state["log_window_truncated"])
+        self.assertGreaterEqual(state["invalid_log_lines"], 1)
 
     def test_preview_does_not_create_client_or_state_files(self):
         preview = self.run_cli("skills", "connect", "--target", "codex-cli")
