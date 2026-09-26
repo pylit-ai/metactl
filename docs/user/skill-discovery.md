@@ -6,12 +6,71 @@ compilation, native skill menus and installed skill folders are unchanged.
 The optional packaged host needs Python 3.10 or newer on the client machine.
 
 <a id="quick-start"></a>
+## Enable Jev once for managed projects
+
+Persistent preferences send a task description and candidate skill metadata
+through your scoped gateway to TypeSafe. Provider processing and retention
+apply. Exclude secrets and projects whose customer or organization policy
+prohibits that transfer. Private repositories you control can use
+`private-owned` when the gateway grant permits it; do not relabel them public.
+
+```sh
+metactl --project /absolute/path/to/project skills preferences --mode enabled \
+  --allow-provider-data --gateway-command /absolute/path/to/jev \
+  --enroll --gateway-project approved-project-id --data-class private-owned
+metactl --project /absolute/path/to/project skills connect --target codex-cli --use-preferences
+metactl --project /absolute/path/to/project skills connect --target codex-cli --use-preferences --apply
+metactl --project /absolute/path/to/project skills doctor --target codex-cli --use-preferences --json
+```
+
+The enablement choice is saved in `$XDG_CONFIG_HOME/metactl/discovery.json`
+(default `~/.config/metactl/discovery.json`), owned by the user with mode 0600.
+Enroll another project with `skills preferences --enroll --gateway-project ID
+--data-class private-owned`; it inherits the saved default without another
+permission prompt. Enrollment matches the canonical project path exactly:
+unrelated repositories, nested projects and new worktrees are not silently
+enrolled. Existing explicit project opt-outs survive re-enrollment.
+Enrollment checks the path/ID binding through the gateway client's free
+`check-project` command before saving. Changing an existing data classification
+or gateway ID requires `--replace-enrollment`; the gateway still rechecks scope
+when evaluating each request.
+Use the same `--use-preferences` registration for each supported target.
+An existing managed registration requires preview/apply with `--replace`.
+
+`skills preferences --project-mode disabled` disables the current project;
+`--project-mode inherit` restores its inherited setting. `--mode disabled`
+disables all enrolled projects. `METACTL_JEV_DISABLE=1` disables a launched
+host for one session. Preferences are read before each discovery request;
+changes affect existing preference-aware hosts without restart. Initial MCP
+registration still requires the native agent to reload its tools. A request
+already in flight may finish. Legacy registrations using explicit trial flags
+must be reconnected with `--use-preferences` to inherit these controls.
+Use `skills preferences --revoke-provider-data` to withdraw permission itself;
+enabling again then requires the explicit data-transfer choice.
+
+Call/deadline settings are advanced options (`--max-provider-calls 1..10`,
+`--provider-deadline` at most 5 seconds). Gateway scope, data restrictions,
+shared budgets and expiry remain authoritative; local preferences cannot
+override them. A provider error or denial preserves local ordering.
+The default four-call ceiling lasts for the entire host process; after four
+attempts, further discoveries use local ordering. Restarting the agent starts
+a fresh host allowance, but does not reset the gateway's shared limits.
+The one-shot `--call-tool` adapter starts a new host each time; its calls are
+bounded by the shared gateway limits rather than a persistent local counter.
+
+Doctor reports effective preferences separately from registration and observed
+use, without calling the provider. Each discovery returns a `routing_receipt`
+with provider calls, fallback reason, order change and log status. Inspect the
+private `event_log` path printed by connect/doctor; logs contain metadata, not
+task text or skill bodies. Local logging is separate from provider retention.
+Enabled does not prove a coding agent invoked discovery: ask it to show its
+receipt. Default-on uses Jev when useful; unambiguous requests remain local.
+
 ## First-run workflow
 
 There are three separate steps: make a project catalog available, register the
 two-tool host in a coding client, and have an agent call it when specialist
 instructions are useful. Jev is an optional fourth step for authorized ranking.
-No `metactl skills enable` command currently performs the client registration.
 
 1. Point MetaCTL at an **absolute project path** and run
    `metactl --project /absolute/path/to/project skills host --status --ranker deterministic --trial-mode baseline`.
@@ -19,24 +78,112 @@ No `metactl skills enable` command currently performs the client registration.
    false` is expected in baseline mode; status makes no provider request. If
    your machine default profile is unrelated to this project, repeat with
    `metactl --project /absolute/path/to/project --no-profile skills host --status --ranker deterministic --trial-mode baseline`.
-2. Generate registration data with the same project and mode using
-   `metactl --project /absolute/path/to/project skills host --client-config --ranker deterministic --trial-mode baseline --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl`.
-   It prints a client-neutral `mcpServers` JSON object and does **not** edit
-   Codex, another client, or `AGENTS.md`. Use the [adapter guide](discovery-agent-adapters.md)
-   for the client's actual configuration format. Keep the log in a private
-   directory that already exists and is writable only by the intended user.
-   For example, run `mkdir -p -m 700 "$HOME/.local/state/metactl"` and
-   `chmod 700 "$HOME/.local/state/metactl"`, then use its resolved absolute
-   path for `--event-log`. Use the same profile choice in status and
-   registration. If status needed `--no-profile`, generate the entry with:
+2. Preview and apply a target-native registration with the same project and
+   profile choice. The preview names the exact file, mode, log and rollback;
+   it changes nothing. Apply adds the `metactl-skills` server entry and prepares
+   a private state directory for its event log:
 
    ```sh
-   metactl --project /absolute/path/to/project --no-profile skills host \
-     --client-config --ranker deterministic --trial-mode baseline \
-     --runtime codex-cli --event-log /absolute/private/path/discovery-events.jsonl
+   metactl --project /absolute/path/to/project skills connect --target codex-cli
+   metactl --project /absolute/path/to/project skills connect --target codex-cli --apply
+   metactl --project /absolute/path/to/project skills doctor --target codex-cli
    ```
 
-   The generated argument array retains `--no-profile`.
+   Use `--scope user` for a user-wide Codex registration that always points to
+   this one project. Project scope is the default; Codex loads project config
+   only when the project is trusted. The connector supports project config for
+   `codex-cli`, `claude-code`, `cursor`, `gemini-cli`, and `opencode`.
+   In a Git project, an unignored config containing machine-specific paths
+   requires explicit `--allow-unignored` on apply. Prefer a reviewed local Git
+   exclusion for that config. Tracked configs are refused, including a tracked
+   user-scope Codex dotfile.
+   `openclaw`, `filesystem-agent`, Pi and Omnigent have manual adapters; the
+   connector reports that limitation explicitly. The entry is deterministic
+   baseline with `provider_calls=0`; it does not turn on Jev. A private event
+   log under the user's state directory is prepared on apply. If status needed
+   `--no-profile`, pass it before `skills connect` so the registration retains it.
+   `connect` resolves `python3` to an absolute path from the current `PATH` so
+   GUI clients do not silently choose a different interpreter. If Python is
+   outside `PATH`, add `--python /absolute/path/to/python3` to `connect`; the
+   path must remain available to the agent. The printed rollback
+   command recognizes the managed baseline entry even when the executable or
+   Python path later changes. `doctor` compares the registration with the
+   current invocation. It checks host readiness only when they match, using
+   the current shell environment; otherwise readiness is unknown. The local
+   catalog count is checked separately, so it can remain known when host
+   readiness is unknown. If Python is missing or the client config is a
+   symlink, `doctor` still reports the other states. A failed host check is
+   labeled `host_failed` because the cause can be Python, profile or project
+   setup. Doctor flags missing registered executable and Python paths without
+   running the client-configured command; rerun `connect --apply` after an
+   upgrade to repair those paths.
+   A user-wide Codex registration shares this one project's skill catalog and
+   event metadata across Codex sessions in other repositories; choose project
+   scope when catalogs or visibility should remain separate. The baseline
+   ledger does not store query text or skill bodies.
+   Existing JSON client files are parsed and re-serialized, so formatting
+   and key order may change. Integers outside the exact signed/unsigned 64-bit
+   range are refused to prevent a lossy rewrite; edit such a file manually. JSONC
+   comments are not edited automatically. OpenCode's `opencode.jsonc` is
+   detected to avoid creating a second config file. Existing file permissions
+   are preserved. Removing the managed entry
+   is immediate with `--remove` (no `--apply` needed). It leaves the private
+   event log and may leave an empty client config object. The printed rollback
+   uses the installed binary's absolute path; if that binary is later removed,
+   run the same command with a currently installed `metactl` binary.
+   Package managers may replace that binary during an upgrade. Rerun
+   `skills connect --target <target> --apply` afterward, then `skills doctor`,
+   to refresh the client registration; a versioned executable path can stop
+   launching after its old version is removed.
+   Reapplying with a different profile, config, overlay or log destination
+   requires an explicit preview with `--replace`, followed by `--apply --replace`.
+   Changing only the installed binary or Python path updates the managed entry.
+   For `--exclude-skill` or a custom client, use `skills host --client-config`
+   and the manual adapter guide.
+
+   **Approved public data only:** `connect` can also register gateway-backed
+   `shadow` or `advisory` mode when the project and query are authorized for
+   `public-nonsensitive` data. Use the project's scoped gateway client, an
+   explicit data-transfer opt-in, and bounded attempts:
+
+   ```sh
+   metactl --project /absolute/path/to/public-project skills connect \
+     --target codex-cli --trial-mode advisory --allow-provider-data \
+     --gateway-project approved-project-id \
+     --gateway-data-class public-nonsensitive \
+     --gateway-command /absolute/path/to/jev \
+     --max-provider-calls 2 --provider-deadline 1
+   # Review the preview, then repeat with --apply.
+   ```
+
+   **Data sent to the gateway:** each discovery request can send the task query,
+   candidate skill names and descriptions, the gateway project ID, and the data
+   class. The query may contain text the agent copied from your project. Do not
+   enable this option for private projects, secrets, or restricted customer and
+   third-party work under the current public-data authorization. This opt-in path does
+   not authorize private-project traffic or a fleet-wide, default-on rollout.
+   MetaCTL cannot verify that a project or query is public; the data class is
+   your attestation.
+
+   `--max-provider-calls` permits 1-10 attempts per host process, not per
+   discovery request; `--provider-deadline` must be positive and no more than
+   5 seconds per attempt. The example uses 2 attempts and 1 second. `shadow`
+   records Jev's proposed order without changing the returned order;
+   `advisory` may apply a validated proposal. Connect and doctor call only the
+   local host's offline status path, never the provider. A later discovery call
+   may contact the gateway. On unavailable, rejected, timed-out or over-budget
+   responses, the host returns deterministic ordering and records whether the
+   provider attempt or billing state is unknown. Policy changes require
+   `--replace`. Synthetic classification is reserved for `skills host --check`.
+   To check actual use, run `skills doctor` with the same routing flags and
+   inspect `registered_mode`, `registered_gateway_command_state`, and `routing`.
+   The gateway command state detects a missing or non-executable client without
+   calling it. For a specific discovery request,
+   inspect its `routing_receipt` for `reason` and `provider_calls`, then match
+   its session/run ID in the private event log. A configured registration or
+   healthy host alone does not prove that the agent called Jev. Use `--json
+   --full` when copying the complete generated argument array; ordinary JSON
+   output marks long arrays as truncated.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
    `load_skill` are available, then request one harmless ambiguous discovery
    and load a returned ID with its digest. The `routing_receipt` should say
@@ -47,8 +194,13 @@ If the tools are not visible, check that the project is trusted by the client,
 the registered project and executable paths are absolute and exist, Python
 3.10+ is available, and you opened a new agent session after registering.
 If discovery works but `log=failed`, check that the private log's parent
-directory already exists and is writable. `--status` confirms only local host
-readiness, not that the client loaded or called its tools.
+directory exists and is writable. `skills doctor` separates local host
+readiness, registration, observed discovery events, and unknown client or
+benefit states; it makes no provider call. A missing event does not prove the
+agent skipped discovery. Doctor reads the most recent 2 MiB of the private log,
+reports malformed lines as partial evidence, and marks a truncated window;
+older events may need `skills trials inspect`. `--status` confirms only local
+host readiness.
 
 For daily work, discover when the task or phase calls for unfamiliar specialist
 instructions; use an exact known skill directly when appropriate. A project may
@@ -100,7 +252,9 @@ Register that command and argument array using your client's supported MCP
 configuration. The project is fixed by the operator; model tool arguments cannot
 change it. The server exposes only `discover_skills(query)` and
 `load_skill(id, digest)`. It is session-bound, not an always-on service, and has no
-HTTP listener. No installation command modifies user/global client configuration.
+HTTP listener. `skills connect --scope user --apply` modifies Codex user
+configuration; the default project scope modifies only the selected project's
+client file.
 
 Host-disabled IDs or names must be mapped by the operator's adapter with repeatable
 `--exclude-skill NAME_OR_ID`. These restrictions apply to discovery and direct load.
