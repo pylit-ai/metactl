@@ -12,18 +12,34 @@ use sha2::{Digest, Sha256};
 use crate::materializer::{self, StagedOutputInput};
 use crate::suite_registry::selected_target_from_config;
 use crate::types::{
-    ActivationClass, ApplyMode, ApplyReport, CapabilityGap, CompileManifest, CompileParams,
-    CompileResult, CompileTargetKind, Config, DiscoveryMode, EnforcementStatus, ExplainParams,
-    ExplainResult, GeneratedOutputKind, ImportEcosystem, InstructionProjectionMode,
-    InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport, PackImport, PackManifest,
-    PackResource, PolicyEnforcementReport, PolicyManifest, PolicyOperator, PolicyRuleReport,
-    PolicySelectors, PolicySubject, PromotionStatus, ProvenanceEnvelope, ProvenanceReview,
+    ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, AutoSurfaceSelection, CapabilityGap,
+    CompileManifest, CompileParams, CompileResult, CompileTargetKind, Config, DiscoveryMode,
+    EnforcementStatus, ExplainParams, ExplainResult, GeneratedOutputKind,
+    InstructionProjectionMode, InvocationOverlay, KnowledgeSourceManifest, LocalProjectionSupport,
+    PackManifest, PackResource, PolicyEnforcementReport, PolicyManifest, PolicyOperator,
+    PolicyRuleReport, PolicySelectors, PolicySubject, PromotionStatus, ProvenanceEnvelope,
     RealizedEnforcementClass, ReasonCode, Ref, RefKind, RequestedEnforcementClass, ResolveGraph,
     ResolveParams, ResourceKind, RevertReport, RoleManifest, RuntimeTemplateRef, SearchMatch,
-    SearchMatchEvidence, SearchParams, SearchResult, SideEffectClass, SuppressedRef,
-    SuppressedSubject, SurfaceMergeStatus, SurfaceMergeStrategy, SurfaceRelevanceTier,
-    SurfaceSelectionDecision, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier,
-    ValidateParams, ValidationCheck, ValidationReport, ValidationStatus, VisibilityScope,
+    SearchParams, SearchResult, SuppressedRef, SuppressedSubject, SurfaceMergeStatus,
+    SurfaceMergeStrategy, SurfaceRelevanceTier, SurfaceSelectionDecision, SurfaceSelectionMode,
+    TargetCapabilityMatrix, ValidateParams, ValidationCheck, ValidationReport, ValidationStatus,
+    VisibilityScope,
+};
+
+#[path = "library_discovery.rs"]
+mod library_discovery;
+use library_discovery::{
+    normalize_candidate, provenance_ref_for, query_terms, relevance_score, search_match_evidence,
+    why_string,
+};
+
+#[path = "library_instruction_format.rs"]
+mod library_instruction_format;
+use library_instruction_format::{
+    budget_instruction_document, capitalize_surface_word, common_reference_root,
+    compact_reference_locator, declared_skill_card_metadata, instruction_mode_label,
+    instruction_resource_heading, pack_resource_output_id, pack_resource_relative_path,
+    summarize_inline_snippet, when_to_open_for_pack, IfEmptyThen,
 };
 
 #[path = "library_frontmatter.rs"]
@@ -34,6 +50,8 @@ mod library_hooks;
 mod library_instruction;
 #[path = "library_validation.rs"]
 mod library_validation;
+#[path = "skill_discovery.rs"]
+pub mod skill_discovery;
 
 use library_frontmatter::{render_frontmatter, wrap_with_frontmatter};
 use library_hooks::{
@@ -43,10 +61,11 @@ use library_hooks::{
 };
 use library_instruction::{
     derive_skill_surfaces, effective_surface_selection_mode, emit_pack_extension_manifests,
-    emit_pack_resource_outputs, expand_runtime_template, expand_skill_path, frontmatter_name,
-    instruction_document, instruction_document_plan, merged_skill_document,
-    semantic_carrier_parent_slug, should_emit_separate_surfaces, skill_compile_target_for,
-    skill_surface_document, slugify_surface_candidate, surface_selection_decisions,
+    emit_pack_resource_outputs, emit_skill_package_resources, expand_runtime_template,
+    expand_skill_path, frontmatter_name, instruction_document, instruction_document_plan,
+    merged_skill_document, semantic_carrier_parent_slug, should_emit_separate_surfaces,
+    skill_compile_target_for, skill_surface_document, slugify_surface_candidate,
+    surface_selection_decisions_with_auto_selection,
 };
 use library_validation::{validate_skill_frontmatter_text, validate_staged_outputs};
 
@@ -122,6 +141,32 @@ pub struct PackSurfaceSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub merge_strategy: Option<SurfaceMergeStrategy>,
     pub surfaces: Vec<SurfaceSummary>,
+}
+
+/// A read-only skill-level route. Cards are only consumed when the adjacent
+/// `skill-card.json` is declared by the pack manifest.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SkillRouteCandidate {
+    pub skill_name: String,
+    pub pack_ref: Ref,
+    pub resource_path: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surface_ids: Vec<String>,
+    pub score: i64,
+    pub matched_fields: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub suppressed_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SkillRouteResult {
+    pub api_version: String,
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub candidates: Vec<SkillRouteCandidate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -265,11 +310,126 @@ impl LibraryRegistry {
         })
     }
 
+    /// Route a natural-language task to declared skill resources. This does
+    /// not activate packs or change the configured project state.
+    pub fn route_skills(
+        &self,
+        query: &str,
+        target: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<SkillRouteResult> {
+        let terms = routing_terms(query);
+        let mut candidates = Vec::new();
+        for pack in self.packs.values() {
+            for resource in &pack.manifest.resources {
+                if !resource.path.ends_with("SKILL.md") {
+                    continue;
+                }
+                let contents = read_pack_resource(pack, resource)?;
+                let Some(skill_name) = frontmatter_name(&contents) else {
+                    continue;
+                };
+                let (aliases, positive, negative, card_targets) =
+                    declared_skill_card_metadata(pack, resource)?;
+                let mut matched_fields = Vec::new();
+                let mut score =
+                    score_routing_field(&terms, &skill_name, 12, "name", &mut matched_fields);
+                for alias in &aliases {
+                    score += score_routing_field(&terms, alias, 10, "alias", &mut matched_fields);
+                }
+                for intent in &positive {
+                    score += score_routing_field(
+                        &terms,
+                        intent,
+                        6,
+                        "positive_intent",
+                        &mut matched_fields,
+                    );
+                }
+                for intent in &negative {
+                    score -= score_routing_field(
+                        &terms,
+                        intent,
+                        20,
+                        "negative_intent",
+                        &mut matched_fields,
+                    );
+                }
+                if score <= 0 {
+                    continue;
+                }
+                let mut suppressed_reasons = Vec::new();
+                if let Some(target) = target {
+                    let compatible = if card_targets.is_empty() {
+                        &pack.manifest.compatible_targets
+                    } else {
+                        &card_targets
+                    };
+                    if !compatible.is_empty() && !compatible.iter().any(|item| item == target) {
+                        suppressed_reasons.push("target_not_compatible".to_string());
+                    }
+                }
+                let surface_ids = derive_skill_surfaces(pack)?
+                    .into_iter()
+                    .filter(|surface| {
+                        surface
+                            .instruction_resource_paths
+                            .iter()
+                            .any(|path| path == &resource.path)
+                    })
+                    .map(|surface| surface.surface_id)
+                    .collect();
+                candidates.push(SkillRouteCandidate {
+                    skill_name,
+                    pack_ref: pack.manifest.pack_ref(),
+                    resource_path: resource.path.clone(),
+                    surface_ids,
+                    score,
+                    matched_fields,
+                    suppressed_reasons,
+                });
+            }
+        }
+        candidates.sort_by(|left, right| {
+            left.suppressed_reasons
+                .is_empty()
+                .cmp(&right.suppressed_reasons.is_empty())
+                .reverse()
+                .then_with(|| right.score.cmp(&left.score))
+                .then_with(|| left.skill_name.cmp(&right.skill_name))
+        });
+        if let Some(limit) = limit {
+            candidates.truncate(limit);
+        }
+        Ok(SkillRouteResult {
+            api_version: "metactl.skill_route.v1".to_string(),
+            query: query.to_string(),
+            target: target.map(ToOwned::to_owned),
+            candidates,
+            notes: vec!["Read-only route; selected skills remain subject to project policy and activation checks.".to_string()],
+        })
+    }
+
     pub fn surface_summaries_for_target(
         &self,
         pack_refs: &[Ref],
         target: &TargetCapabilityMatrix,
         surface_selection_mode: SurfaceSelectionMode,
+    ) -> Result<Vec<PackSurfaceSummary>> {
+        self.surface_summaries_for_target_with_auto_selection(
+            pack_refs,
+            target,
+            surface_selection_mode,
+            None,
+        )
+    }
+
+    pub fn surface_summaries_for_target_with_auto_selection(
+        &self,
+        pack_refs: &[Ref],
+        target: &TargetCapabilityMatrix,
+        surface_selection_mode: SurfaceSelectionMode,
+        auto_selection: Option<&AutoSurfaceSelection>,
     ) -> Result<Vec<PackSurfaceSummary>> {
         let compile_target = skill_compile_target_for(target);
         pack_refs
@@ -277,8 +437,12 @@ impl LibraryRegistry {
             .filter_map(|pack_ref| self.find_pack(pack_ref))
             .map(|pack| {
                 let surfaces = derive_skill_surfaces(pack)?;
-                let decisions =
-                    surface_selection_decisions(pack, &surfaces, surface_selection_mode.clone());
+                let decisions = surface_selection_decisions_with_auto_selection(
+                    pack,
+                    &surfaces,
+                    surface_selection_mode.clone(),
+                    auto_selection,
+                );
                 let emitted_surfaces = surfaces
                     .iter()
                     .filter(|surface| {
@@ -478,6 +642,15 @@ impl LibraryRegistry {
                 affected_refs: vec![role.role_ref(), policy.policy_ref()],
             });
         }
+        if let Some(selection) = params
+            .config
+            .defaults
+            .as_ref()
+            .and_then(|defaults| defaults.auto_surface_selection.as_ref())
+        {
+            capability_gaps
+                .extend(self.auto_surface_selection_gaps(&activated_pack_refs, selection)?);
+        }
 
         Ok(ResolveGraph {
             api_version: crate::types::API_VERSION.to_string(),
@@ -496,8 +669,58 @@ impl LibraryRegistry {
                 .defaults
                 .as_ref()
                 .and_then(|defaults| defaults.brownfield_mode.clone()),
+            auto_surface_selection: params
+                .config
+                .defaults
+                .as_ref()
+                .and_then(|defaults| defaults.auto_surface_selection.clone()),
             pack_visibility,
         })
+    }
+
+    /// Stable surface ids currently known to this registry. Selection commands
+    /// use this to reject typos before they are persisted.
+    pub fn known_surface_ids(&self) -> Result<BTreeSet<String>> {
+        let mut ids = BTreeSet::new();
+        for pack in self.packs.values() {
+            ids.extend(
+                derive_skill_surfaces(pack)?
+                    .into_iter()
+                    .map(|surface| surface.surface_id),
+            );
+        }
+        Ok(ids)
+    }
+
+    fn auto_surface_selection_gaps(
+        &self,
+        activated_pack_refs: &[Ref],
+        selection: &AutoSurfaceSelection,
+    ) -> Result<Vec<CapabilityGap>> {
+        let active_ids = activated_pack_refs
+            .iter()
+            .filter_map(|pack_ref| self.find_pack(pack_ref))
+            .map(derive_skill_surfaces)
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .map(|surface| surface.surface_id)
+            .collect::<BTreeSet<_>>();
+        let saved_ids = selection
+            .selected_surface_ids
+            .iter()
+            .chain(selection.pinned_surface_ids.iter())
+            .chain(selection.blocked_surface_ids.iter())
+            .collect::<BTreeSet<_>>();
+        Ok(saved_ids
+            .into_iter()
+            .filter(|surface_id| !active_ids.contains(*surface_id))
+            .map(|surface_id| CapabilityGap {
+                feature: format!("auto_surface_selection:{surface_id}"),
+                reason_code: ReasonCode::NotFound,
+                affected_refs: Vec::new(),
+            })
+            .collect())
     }
 
     pub fn explain(&self, params: ExplainParams) -> ExplainResult {
@@ -631,24 +854,29 @@ impl LibraryRegistry {
             role,
             policy,
             &active_packs,
-            &params.resolve_graph,
-            &params.target_capability,
-            &self.roots,
-            &params.apply_mode,
-            effective_surface_selection_mode.clone(),
+            SynthesisContext {
+                resolve_graph: &params.resolve_graph,
+                target: &params.target_capability,
+                library_roots: &self.roots,
+                apply_mode: &params.apply_mode,
+                surface_selection_override: effective_surface_selection_mode.clone(),
+                auto_surface_selection: params.resolve_graph.auto_surface_selection.as_ref(),
+            },
         )?;
         degradations.extend(surface_degradations);
         dedupe_degradations(&mut degradations);
         let manifest = materializer::stage_outputs(
             &project_root,
             &params.target_capability.target_ref(),
-            outputs,
-            effective_surface_selection_mode,
-            surface_selection,
-            supported_apply_modes(&params.target_capability),
-            params.resolve_graph.brownfield_mode.clone(),
-            degradations,
-            params.durable_staging,
+            materializer::StageOutputsParams {
+                inputs: outputs,
+                surface_selection_mode: effective_surface_selection_mode,
+                surface_selection,
+                apply_modes_supported: supported_apply_modes(&params.target_capability),
+                brownfield_mode: params.resolve_graph.brownfield_mode.clone(),
+                degradations,
+                durable: params.durable_staging,
+            },
         )?;
 
         Ok(CompileResult {
@@ -772,6 +1000,30 @@ impl LibraryRegistry {
         apply_mode: &ApplyMode,
     ) -> Result<ApplyReport> {
         materializer::apply_manifest(project_root, manifest, apply_mode)
+    }
+
+    pub fn apply_review_plan(
+        &self,
+        project_root: &Path,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+    ) -> Result<ApplyReviewPlan> {
+        materializer::build_apply_review_plan(project_root, manifest, apply_mode)
+    }
+
+    pub fn apply_manifest_bound(
+        &self,
+        project_root: &Path,
+        manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
+        expected_plan_digest: &str,
+    ) -> Result<ApplyReport> {
+        materializer::apply_manifest_bound(
+            project_root,
+            manifest,
+            apply_mode,
+            Some(expected_plan_digest),
+        )
     }
 
     pub fn revert_target(&self, project_root: &Path, target: &Ref) -> Result<RevertReport> {
@@ -1079,20 +1331,33 @@ fn compile_project_root(project_root: Option<&str>) -> Result<PathBuf> {
     }
 }
 
+struct SynthesisContext<'a> {
+    resolve_graph: &'a ResolveGraph,
+    target: &'a TargetCapabilityMatrix,
+    library_roots: &'a [PathBuf],
+    apply_mode: &'a ApplyMode,
+    surface_selection_override: Option<SurfaceSelectionMode>,
+    auto_surface_selection: Option<&'a AutoSurfaceSelection>,
+}
+
 fn synthesize_outputs(
     role: &RoleManifest,
     policy: &PolicyManifest,
     packs: &[&DiscoveredPack],
-    resolve_graph: &ResolveGraph,
-    target: &TargetCapabilityMatrix,
-    library_roots: &[PathBuf],
-    apply_mode: &ApplyMode,
-    surface_selection_override: Option<SurfaceSelectionMode>,
+    context: SynthesisContext<'_>,
 ) -> Result<(
     Vec<StagedOutputInput>,
     Vec<SurfaceSelectionDecision>,
     Vec<CapabilityGap>,
 )> {
+    let SynthesisContext {
+        resolve_graph,
+        target,
+        library_roots,
+        apply_mode,
+        surface_selection_override,
+        auto_surface_selection,
+    } = context;
     let mut outputs = Vec::new();
     let mut surface_selection = Vec::new();
     let mut degradations = Vec::new();
@@ -1233,8 +1498,12 @@ fn synthesize_outputs(
                 );
                 for pack in packs {
                     let surfaces = derive_skill_surfaces(pack)?;
-                    let decisions =
-                        surface_selection_decisions(pack, &surfaces, selection_mode.clone());
+                    let decisions = surface_selection_decisions_with_auto_selection(
+                        pack,
+                        &surfaces,
+                        selection_mode.clone(),
+                        auto_surface_selection,
+                    );
                     surface_selection.extend(decisions.clone());
                     let emitted_surfaces = surfaces
                         .iter()
@@ -1260,7 +1529,7 @@ fn synthesize_outputs(
                                     "skill-{}-{}",
                                     pack.manifest.id, surface.surface_slug
                                 )),
-                                destination_path: destination,
+                                destination_path: destination.clone(),
                                 kind: GeneratedOutputKind::SkillFolder,
                                 contents: skill_surface_document(
                                     pack,
@@ -1281,6 +1550,12 @@ fn synthesize_outputs(
                                 materialize_as_regular_file: compile_target
                                     .materialize_as_regular_file,
                             });
+                            outputs.extend(emit_skill_package_resources(
+                                compile_target,
+                                pack,
+                                surface,
+                                &destination,
+                            )?);
                         }
                     } else {
                         let destination = expand_skill_path(
@@ -1306,7 +1581,7 @@ fn synthesize_outputs(
                         };
                         outputs.push(StagedOutputInput {
                             id: Some(format!("skill-{}", pack.manifest.id)),
-                            destination_path: destination,
+                            destination_path: destination.clone(),
                             kind: GeneratedOutputKind::SkillFolder,
                             contents: merged_skill_document(pack)?,
                             instruction_mode: None,
@@ -1342,6 +1617,14 @@ fn synthesize_outputs(
                             )),
                             materialize_as_regular_file: compile_target.materialize_as_regular_file,
                         });
+                        for surface in &emitted_surfaces {
+                            outputs.extend(emit_skill_package_resources(
+                                compile_target,
+                                pack,
+                                surface,
+                                &destination,
+                            )?);
+                        }
                     }
                 }
             }
@@ -1611,251 +1894,6 @@ fn import_stub_contents(compile_target: &crate::types::CompileTarget) -> Result<
     .into_bytes())
 }
 
-fn instruction_mode_label(mode: &InstructionProjectionMode) -> &'static str {
-    match mode {
-        InstructionProjectionMode::Inline => "inline",
-        InstructionProjectionMode::ReferenceIndex => "reference_index",
-    }
-}
-
-fn common_reference_root(references: &[InstructionReference]) -> String {
-    let mut segments = references
-        .first()
-        .map(|reference| {
-            reference
-                .path
-                .split('/')
-                .map(|segment| segment.to_string())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if segments.is_empty() {
-        return String::new();
-    }
-    for reference in references.iter().skip(1) {
-        let other = reference.path.split('/').collect::<Vec<_>>();
-        let mut prefix_len = 0usize;
-        while prefix_len < segments.len()
-            && prefix_len < other.len()
-            && segments[prefix_len] == other[prefix_len]
-        {
-            prefix_len += 1;
-        }
-        segments.truncate(prefix_len);
-    }
-    if let Some(last) = segments.last() {
-        if last.contains('.') {
-            segments.pop();
-        }
-    }
-    let mut root = segments.join("/");
-    if !root.is_empty() {
-        root.push('/');
-    }
-    root
-}
-
-fn compact_reference_locator(path: &str) -> String {
-    let trimmed = path
-        .trim_end_matches("/SKILL.md")
-        .trim_end_matches("/README.md")
-        .trim_end_matches(".md");
-    trimmed
-        .rsplit_once('/')
-        .map(|(_, tail)| tail.to_string())
-        .unwrap_or_else(|| trimmed.to_string())
-}
-
-fn when_to_open_for_pack(pack: &DiscoveredPack) -> Vec<String> {
-    if !pack.manifest.task_tags.is_empty() {
-        return pack.manifest.task_tags.clone();
-    }
-    vec![match pack.manifest.activation_class {
-        ActivationClass::Instruction => "general guidance",
-        ActivationClass::Script => "scripted workflows",
-        ActivationClass::Hook => "approval or write boundaries",
-        ActivationClass::Service => "service or MCP setup",
-    }
-    .to_string()]
-}
-
-fn summarize_inline_snippet(snippet: &str) -> String {
-    let compact = snippet
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with("---"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    if compact.len() <= 200 {
-        compact
-    } else {
-        format!("{}...", &compact[..197])
-    }
-}
-
-fn budget_instruction_document(content: String) -> Result<BudgetedInstructionDocument> {
-    let mut budgeted = content;
-    let mut truncated = false;
-    if budgeted.len() > INSTRUCTION_INDEX_WARN_BYTES {
-        budgeted = truncate_instruction_document(&budgeted, INSTRUCTION_INDEX_WARN_BYTES);
-        truncated = true;
-    }
-    if budgeted.len() > INSTRUCTION_INDEX_WARN_BYTES
-        && budgeted.len() <= INSTRUCTION_INDEX_MAX_BYTES
-    {
-        return Err(anyhow!(
-            "instruction index could not fit within {} bytes using structured truncation",
-            INSTRUCTION_INDEX_WARN_BYTES
-        ));
-    }
-    if budgeted.len() > INSTRUCTION_INDEX_MAX_BYTES {
-        return Err(anyhow!(
-            "instruction index exceeds {} bytes after truncation; reduce active pack routing detail",
-            INSTRUCTION_INDEX_MAX_BYTES
-        ));
-    }
-    Ok(BudgetedInstructionDocument {
-        content: budgeted,
-        truncated,
-    })
-}
-
-fn truncate_instruction_document(content: &str, max_bytes: usize) -> String {
-    if content.len() <= max_bytes {
-        return content.to_string();
-    }
-
-    let mut lines = content
-        .lines()
-        .map(|line| line.to_string())
-        .collect::<Vec<_>>();
-    let mut total_bytes = lines.join("\n").len();
-    let mut candidates = lines
-        .iter()
-        .enumerate()
-        .filter(|(_, line)| line.starts_with("|pack:") || line.starts_with("|inline:"))
-        .map(|(index, line)| (index, line.len()))
-        .collect::<Vec<_>>();
-    candidates.sort_by(|left, right| right.1.cmp(&left.1));
-
-    for (index, _) in candidates {
-        if total_bytes <= max_bytes {
-            break;
-        }
-        let original = &lines[index];
-        let truncated_line = truncate_instruction_line(original);
-        if truncated_line.len() < original.len() {
-            total_bytes = total_bytes - original.len() + truncated_line.len();
-            lines[index] = truncated_line;
-        }
-    }
-
-    if total_bytes > max_bytes {
-        while total_bytes > max_bytes {
-            let Some(index) = lines
-                .iter()
-                .rposition(|line| line.starts_with("|gap:") || line.starts_with("|pack:"))
-            else {
-                break;
-            };
-            total_bytes -= lines[index].len() + 1;
-            lines.remove(index);
-        }
-    }
-
-    if !lines
-        .iter()
-        .any(|line| line.contains(INSTRUCTION_INDEX_POINTER))
-    {
-        lines.push(format!("|truncated:{}", INSTRUCTION_INDEX_POINTER));
-        while lines.join("\n").len() > max_bytes {
-            let Some(index) = lines
-                .iter()
-                .rposition(|line| line.starts_with("|pack:") || line.starts_with("|gap:"))
-            else {
-                break;
-            };
-            lines.remove(index);
-        }
-    }
-
-    lines.join("\n")
-}
-
-fn truncate_instruction_line(line: &str) -> String {
-    if line.len() <= 180 {
-        return line.to_string();
-    }
-    let prefix: String = line.chars().take(140).collect();
-    format!("{prefix}…|truncated:{INSTRUCTION_INDEX_POINTER}")
-}
-
-fn capitalize_surface_word(word: &str) -> String {
-    let mut chars = word.chars();
-    match chars.next() {
-        Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
-        None => String::new(),
-    }
-}
-
-trait IfEmptyThen {
-    fn if_empty_then(self, fallback: String) -> String;
-}
-
-impl IfEmptyThen for String {
-    fn if_empty_then(self, fallback: String) -> String {
-        if self.trim().is_empty() {
-            fallback
-        } else {
-            self
-        }
-    }
-}
-
-fn instruction_resource_heading(resource: &PackResource) -> String {
-    resource
-        .path
-        .rsplit('/')
-        .next()
-        .unwrap_or(resource.path.as_str())
-        .trim_end_matches(".md")
-        .replace(['-', '_'], " ")
-}
-
-fn pack_resource_relative_path(pack: &DiscoveredPack, resource: &PackResource) -> String {
-    let prefix = format!("packs/{}/", pack.manifest.id);
-    let stripped = resource
-        .path
-        .strip_prefix(&prefix)
-        .unwrap_or(resource.path.as_str());
-    // Also strip a leading kind-directory segment (e.g. "commands/") so target
-    // templates of the form "{kind}/{pack_id}/{resource_path}" do not double-nest
-    // the kind segment (bug: spec 019 task 1.1).
-    let kind_prefix = format!("{}/", resource.kind.as_directory_segment());
-    stripped
-        .strip_prefix(&kind_prefix)
-        .unwrap_or(stripped)
-        .to_string()
-}
-
-fn pack_resource_output_id(pack_id: &str, relative_path: &str) -> String {
-    let slug = relative_path
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    format!("resource-{}-{}", pack_id, slug)
-}
-
 fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<Vec<u8>> {
     let path = pack.library_root.join(&resource.path);
     if path.exists() {
@@ -1870,6 +1908,32 @@ fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<
             .unwrap_or_else(|| "No bundled instruction resource was available.".to_string())
     )
     .into_bytes())
+}
+
+fn routing_terms(query: &str) -> BTreeSet<String> {
+    query
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|term| !term.is_empty())
+        .map(|term| term.to_ascii_lowercase())
+        .collect()
+}
+
+fn score_routing_field(
+    terms: &BTreeSet<String>,
+    field: &str,
+    weight: i64,
+    field_name: &str,
+    matched_fields: &mut Vec<String>,
+) -> i64 {
+    let field_terms = routing_terms(field);
+    if !terms.is_disjoint(&field_terms) {
+        if !matched_fields.iter().any(|item| item == field_name) {
+            matched_fields.push(field_name.to_string());
+        }
+        weight
+    } else {
+        0
+    }
 }
 
 fn read_cached_pack_resource(path: &Path) -> Result<Vec<u8>> {
@@ -2018,336 +2082,6 @@ fn ref_matches_version(reference: &Ref, version: &str) -> bool {
         .unwrap_or(true)
 }
 
-fn normalize_candidate(root: &Path, path: &Path) -> Result<(PackManifest, ProvenanceEnvelope)> {
-    match path.file_name().and_then(|value| value.to_str()) {
-        Some("AGENTS.md") => normalize_agents_candidate(root, path),
-        Some("SKILL.md") => normalize_skill_candidate(root, path),
-        _ => Err(anyhow!("unsupported import candidate {}", path.display())),
-    }
-}
-
-fn normalize_agents_candidate(
-    root: &Path,
-    path: &Path,
-) -> Result<(PackManifest, ProvenanceEnvelope)> {
-    let contents = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let pack_id = path
-        .parent()
-        .and_then(|item| item.file_name())
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| anyhow!("unable to infer candidate id from {}", path.display()))?
-        .to_string();
-    let digest = sha256_digest(path)?;
-    let title = first_heading(&contents).unwrap_or_else(|| format!("Imported {}", pack_id));
-    let description = first_body_line(&contents);
-    let manifest = PackManifest {
-        kind: "pack".to_string(),
-        id: pack_id.clone(),
-        version: CANDIDATE_VERSION.to_string(),
-        title,
-        description,
-        activation_class: ActivationClass::Instruction,
-        side_effect_class: SideEffectClass::None,
-        trust_tier: TrustTier::CandidateQuarantined,
-        requires_confirmation: false,
-        task_tags: infer_tags(&contents, &pack_id),
-        compatible_roles: Vec::new(),
-        compatible_targets: Vec::new(),
-        knowledge_refs: Vec::new(),
-        resources: vec![PackResource {
-            path: relative_path(root, path)?,
-            kind: ResourceKind::Instruction,
-            required: true,
-            surface_relevance: None,
-        }],
-        imports: vec![PackImport {
-            ecosystem: ImportEcosystem::AgentsMd,
-            origin: path.display().to_string(),
-            digest: Some(digest.clone()),
-        }],
-        visibility_scope: VisibilityScope::default(),
-        lifecycle: None,
-        metadata: BTreeMap::from([("normalized_from".to_string(), "AGENTS.md".to_string())]),
-    };
-    let provenance = candidate_provenance(&manifest, digest, path, ImportEcosystem::AgentsMd);
-    Ok((manifest, provenance))
-}
-
-fn normalize_skill_candidate(
-    root: &Path,
-    path: &Path,
-) -> Result<(PackManifest, ProvenanceEnvelope)> {
-    let contents = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let pack_id = path
-        .parent()
-        .and_then(|item| item.file_name())
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| anyhow!("unable to infer candidate id from {}", path.display()))?
-        .to_string();
-    let digest = sha256_digest(path)?;
-    let title = first_heading(&contents).unwrap_or_else(|| format!("Imported {}", pack_id));
-    let description = first_body_line(&contents);
-    let resources = sorted_files(path.parent().expect("skill parent"))?
-        .into_iter()
-        .filter(|item| item.is_file())
-        .map(|item| {
-            Ok(PackResource {
-                path: relative_path(root, &item)?,
-                kind: infer_resource_kind(path.parent().expect("skill parent"), &item),
-                required: item.file_name().and_then(|value| value.to_str()) == Some("SKILL.md"),
-                surface_relevance: None,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let manifest = PackManifest {
-        kind: "pack".to_string(),
-        id: pack_id.clone(),
-        version: CANDIDATE_VERSION.to_string(),
-        title,
-        description,
-        activation_class: ActivationClass::Instruction,
-        side_effect_class: SideEffectClass::None,
-        trust_tier: TrustTier::CandidateQuarantined,
-        requires_confirmation: false,
-        task_tags: infer_tags(&contents, &pack_id),
-        compatible_roles: Vec::new(),
-        compatible_targets: Vec::new(),
-        knowledge_refs: Vec::new(),
-        resources,
-        imports: vec![PackImport {
-            ecosystem: ImportEcosystem::SkillMd,
-            origin: path.display().to_string(),
-            digest: Some(digest.clone()),
-        }],
-        visibility_scope: VisibilityScope::default(),
-        lifecycle: None,
-        metadata: BTreeMap::from([("normalized_from".to_string(), "SKILL.md".to_string())]),
-    };
-    let provenance = candidate_provenance(&manifest, digest, path, ImportEcosystem::SkillMd);
-    Ok((manifest, provenance))
-}
-
-fn candidate_provenance(
-    manifest: &PackManifest,
-    digest: String,
-    path: &Path,
-    ecosystem: ImportEcosystem,
-) -> ProvenanceEnvelope {
-    ProvenanceEnvelope {
-        api_version: crate::types::API_VERSION.to_string(),
-        subject_ref: manifest.pack_ref(),
-        digest,
-        origin: path.display().to_string(),
-        imported_from_ecosystem: ecosystem,
-        imported_at: None,
-        review: Some(ProvenanceReview {
-            reviewed_by: None,
-            reviewed_at: None,
-            promotion_status: Some(PromotionStatus::Candidate),
-        }),
-        attestation_refs: Vec::new(),
-        validation_refs: Vec::new(),
-    }
-}
-
-fn provenance_ref_for(manifest: &PackManifest) -> Ref {
-    Ref {
-        kind: RefKind::Artifact,
-        id: format!("{}-provenance", manifest.id),
-        version: None,
-    }
-}
-
-fn query_terms(query: &str) -> Vec<String> {
-    query
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .map(|item| item.trim().to_ascii_lowercase())
-        .filter(|item| item.len() >= 3)
-        .collect()
-}
-
-fn search_match_evidence(
-    pack: &DiscoveredPack,
-    query_terms: &[String],
-) -> Result<SearchMatchEvidence> {
-    let mut matched_fields = Vec::new();
-    let mut matched_resource_paths = Vec::new();
-    let mut matched_terms = BTreeSet::new();
-
-    let metadata_fields = [
-        ("id", pack.manifest.id.to_ascii_lowercase()),
-        ("title", pack.manifest.title.to_ascii_lowercase()),
-        (
-            "description",
-            pack.manifest
-                .description
-                .clone()
-                .unwrap_or_default()
-                .to_ascii_lowercase(),
-        ),
-        (
-            "task_tags",
-            pack.manifest.task_tags.join(" ").to_ascii_lowercase(),
-        ),
-    ];
-    for term in query_terms {
-        for (field, value) in &metadata_fields {
-            if value.contains(term) {
-                matched_fields.push((*field).to_string());
-                matched_terms.insert(term.clone());
-            }
-        }
-    }
-
-    for resource in pack.manifest.resources.iter().filter(|resource| {
-        matches!(
-            resource.kind,
-            ResourceKind::Instruction | ResourceKind::Example
-        )
-    }) {
-        let contents =
-            String::from_utf8_lossy(&read_pack_resource(pack, resource)?).to_ascii_lowercase();
-        if query_terms.iter().any(|term| contents.contains(term)) {
-            matched_resource_paths.push(resource.path.clone());
-            for term in query_terms {
-                if contents.contains(term) {
-                    matched_terms.insert(term.clone());
-                }
-            }
-        }
-    }
-
-    matched_fields.sort();
-    matched_fields.dedup();
-    matched_resource_paths.sort();
-    matched_resource_paths.dedup();
-
-    Ok(SearchMatchEvidence {
-        matched_fields,
-        matched_resource_paths,
-        matched_terms: matched_terms.into_iter().collect(),
-    })
-}
-
-fn relevance_score(
-    pack: &DiscoveredPack,
-    query_terms: &[String],
-    role: &RoleManifest,
-    target: &Ref,
-    evidence: &SearchMatchEvidence,
-) -> f64 {
-    let mut score = 0.0_f64;
-    let haystack = format!(
-        "{} {} {} {}",
-        pack.manifest.id,
-        pack.manifest.title,
-        pack.manifest.description.clone().unwrap_or_default(),
-        pack.manifest.task_tags.join(" ")
-    )
-    .to_ascii_lowercase();
-
-    for term in query_terms {
-        if haystack.contains(term) {
-            score += 0.18;
-        }
-    }
-    score += evidence.matched_resource_paths.len() as f64 * 0.18;
-    score += evidence.matched_fields.len() as f64 * 0.04;
-    if pack.manifest.compatible_roles.is_empty()
-        || pack
-            .manifest
-            .compatible_roles
-            .iter()
-            .any(|item| item == &role.id)
-    {
-        score += 0.15;
-    }
-    if pack.manifest.compatible_targets.is_empty()
-        || pack
-            .manifest
-            .compatible_targets
-            .iter()
-            .any(|item| item == &target.id)
-    {
-        score += 0.1;
-    }
-    if !pack.is_candidate() {
-        score += 0.1;
-    }
-    (score * 100.0).round() / 100.0
-}
-
-fn why_string(pack: &DiscoveredPack, evidence: &SearchMatchEvidence) -> String {
-    if evidence.matched_fields.iter().any(|field| field == "id") {
-        return "Query matched the pack identifier directly.".to_string();
-    }
-    if evidence
-        .matched_fields
-        .iter()
-        .any(|field| field == "task_tags")
-    {
-        return "Query aligned with normalized pack task tags.".to_string();
-    }
-    if !evidence.matched_resource_paths.is_empty() {
-        return "Query matched instruction or reference content in the pack body.".to_string();
-    }
-    if pack.is_candidate() {
-        return "Candidate remained discoverable because search mode and policy allowed it."
-            .to_string();
-    }
-    "Pack satisfied current role, target, and policy constraints.".to_string()
-}
-
-fn infer_tags(contents: &str, pack_id: &str) -> Vec<String> {
-    let mut tags = BTreeSet::new();
-    for token in pack_id
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .chain(contents.split(|ch: char| !ch.is_ascii_alphanumeric()))
-    {
-        let token = token.trim().to_ascii_lowercase();
-        if token.len() >= 4 {
-            tags.insert(token);
-        }
-        if tags.len() == 6 {
-            break;
-        }
-    }
-    tags.into_iter().collect()
-}
-
-fn infer_resource_kind(root: &Path, path: &Path) -> ResourceKind {
-    if path.file_name().and_then(|value| value.to_str()) == Some("SKILL.md") {
-        return ResourceKind::Instruction;
-    }
-    let relative = path.strip_prefix(root).unwrap_or(path);
-    let rel_str = relative.to_string_lossy();
-    if rel_str.starts_with("references/")
-        || path.extension().and_then(|value| value.to_str()) == Some("md")
-    {
-        ResourceKind::Example
-    } else if rel_str.starts_with("scripts/") {
-        ResourceKind::Script
-    } else {
-        ResourceKind::Asset
-    }
-}
-
-fn first_heading(contents: &str) -> Option<String> {
-    contents
-        .lines()
-        .find_map(|line| line.strip_prefix('#').map(str::trim))
-        .filter(|line| !line.is_empty())
-        .map(|line| line.to_string())
-}
-
-fn first_body_line(contents: &str) -> Option<String> {
-    contents
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(|line| line.to_string())
-}
-
 fn digest_json<T: Serialize>(value: &T) -> Result<String> {
     let bytes = serde_json::to_vec(value)?;
     Ok(format!("sha256:{}", hex::encode(Sha256::digest(bytes))))
@@ -2485,9 +2219,11 @@ fn substitute_tokens(src: &str, ctx: &std::collections::BTreeMap<String, String>
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use std::collections::BTreeMap;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use pretty_assertions::assert_eq;
     use tempfile::TempDir;
@@ -2502,10 +2238,11 @@ mod tests {
     use crate::kernel::MetactlKernel;
     use crate::reference_kernel::ReferenceKernel;
     use crate::types::{
-        ActivationClass, ApplyMode, CompileParams, Config, ConfigDefaults, DiscoveryMode,
-        EntryPoint, ImportEcosystem, InvocationOverlay, LifecycleStatus, PackImport, PackLifecycle,
-        PackManifest, PackResource, Ref, RefKind, ResolveParams, ResourceKind, SearchParams,
-        SideEffectClass, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier, VisibilityScope,
+        ActivationClass, ApplyMode, AutoSurfaceSelection, CompileParams, Config, ConfigDefaults,
+        DiscoveryMode, EntryPoint, ImportEcosystem, InvocationOverlay, LifecycleStatus, PackImport,
+        PackLifecycle, PackManifest, PackResource, Ref, RefKind, ResolveParams, ResourceKind,
+        SearchParams, SideEffectClass, SurfaceSelectionMode, TargetCapabilityMatrix, TrustTier,
+        VisibilityScope,
     };
 
     fn fixtures_root() -> PathBuf {
@@ -2541,6 +2278,7 @@ mod tests {
                 brownfield_mode: None,
                 discovery_mode: Some(DiscoveryMode::CandidateSearch),
                 surface_selection_mode: None,
+                auto_surface_selection: None,
             }),
             metadata: Default::default(),
         }
@@ -2579,13 +2317,14 @@ mod tests {
             defaults: Some(ConfigDefaults {
                 brownfield_mode: None,
                 discovery_mode: Some(DiscoveryMode::CandidateSearch),
-                surface_selection_mode: None,
+                surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+                auto_surface_selection: None,
             }),
             metadata: Default::default(),
         }
     }
 
-    fn seed_search_lifecycle_library(root: &PathBuf) {
+    fn seed_search_lifecycle_library(root: &Path) {
         fs::create_dir_all(root.join("packs")).expect("packs dir");
         fs::create_dir_all(root.join("vendor/legacy-python-audit")).expect("skill dir");
         fs::write(
@@ -2783,7 +2522,7 @@ mod tests {
     #[test]
     fn search_full_text_matches_instruction_body_terms() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -2809,7 +2548,7 @@ mod tests {
     #[test]
     fn search_results_include_match_evidence_and_lifecycle_hints() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -2983,7 +2722,7 @@ mod tests {
     #[test]
     fn search_ranking_remains_pack_first_and_deterministic() {
         let custom_root = TempDir::new().expect("custom root");
-        seed_search_lifecycle_library(&custom_root.path().to_path_buf());
+        seed_search_lifecycle_library(custom_root.path());
         let kernel = ReferenceKernel::load_from_library_roots(vec![
             starter_root(),
             custom_root.path().to_path_buf(),
@@ -3101,6 +2840,184 @@ mod tests {
                     && item.surface_slug == "contracts"
                     && item.emitted
             }));
+    }
+
+    #[test]
+    fn relevance_selector_auto_uses_saved_selection() {
+        let project = TempDir::new().expect("tempdir");
+        let kernel =
+            ReferenceKernel::load_from_library_roots(vec![starter_root()]).expect("library kernel");
+        let target = starter_target("codex-cli");
+        let mut config = starter_config("builder", "brownfield-safe-builder", "codex-cli");
+        config.defaults = Some(ConfigDefaults {
+            brownfield_mode: None,
+            discovery_mode: Some(DiscoveryMode::CandidateSearch),
+            surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+            auto_surface_selection: Some(AutoSurfaceSelection {
+                selected_surface_ids: BTreeSet::from(["python-refactor:contracts".to_string()]),
+                pinned_surface_ids: BTreeSet::new(),
+                blocked_surface_ids: BTreeSet::new(),
+            }),
+        });
+        let resolve = kernel
+            .resolve(ResolveParams {
+                config,
+                overlay: None,
+                available_targets: vec![target.clone()],
+                provenance: None,
+            })
+            .expect("resolve");
+        let compile = kernel
+            .compile(CompileParams {
+                resolve_graph: resolve,
+                target_capability: target,
+                apply_mode: ApplyMode::Copy,
+                emit_policy_report: true,
+                durable_staging: true,
+                project_root: Some(project.path().to_string_lossy().into_owned()),
+                surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+            })
+            .expect("compile");
+        assert!(compile
+            .compile_manifest
+            .surface_selection
+            .iter()
+            .any(|item| {
+                item.pack_ref.id == "python-refactor"
+                    && item.surface_slug == "contracts"
+                    && item.emitted
+            }));
+    }
+
+    #[test]
+    fn route_skills_uses_declared_card_aliases_and_reports_target_suppression() {
+        let root = TempDir::new().expect("tempdir");
+        let skill_dir = root.path().join("packs/demo-route");
+        fs::create_dir_all(&skill_dir).expect("skill dir");
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: delegated-work\ndescription: Delegate independent work safely.\n---\n",
+        )
+        .expect("skill");
+        fs::write(
+            skill_dir.join("skill-card.json"),
+            r#"{"schema_version":"2alpha1","name":"delegated-work","version":"1","summary":"Route independent work to agents.","aliases":["repo orchestrator"],"intents":{"positive":["delegate independent tasks"],"negative":["rename files"]},"facets":{"workflow":["delegation"]},"reviewed_relations":[],"host_compatibility":{"targets":["codex-cli"]},"provenance":{"source_kind":"first_party","reviewed_by":"test","reviewed_at":"2026-08-20"}}"#,
+        )
+        .expect("card");
+        let pack = DiscoveredPack {
+            manifest: PackManifest {
+                kind: "pack".to_string(),
+                id: "demo-route".to_string(),
+                version: "1.0.0".to_string(),
+                title: "Demo route".to_string(),
+                description: None,
+                activation_class: ActivationClass::Instruction,
+                side_effect_class: SideEffectClass::None,
+                trust_tier: TrustTier::FirstPartyValidated,
+                requires_confirmation: false,
+                task_tags: Vec::new(),
+                compatible_roles: Vec::new(),
+                compatible_targets: Vec::new(),
+                knowledge_refs: Vec::new(),
+                resources: vec![
+                    PackResource {
+                        path: "packs/demo-route/SKILL.md".to_string(),
+                        kind: ResourceKind::Instruction,
+                        required: true,
+                        surface_relevance: None,
+                    },
+                    PackResource {
+                        path: "packs/demo-route/skill-card.json".to_string(),
+                        kind: ResourceKind::Example,
+                        required: true,
+                        surface_relevance: None,
+                    },
+                ],
+                imports: Vec::new(),
+                visibility_scope: VisibilityScope::default(),
+                lifecycle: None,
+                metadata: BTreeMap::new(),
+            },
+            provenance: None,
+            provenance_ref: None,
+            source_path: root.path().join("packs/demo-route.json"),
+            library_root: root.path().to_path_buf(),
+            promotion_status: crate::types::PromotionStatus::Promoted,
+        };
+        let registry = LibraryRegistry {
+            roots: vec![root.path().to_path_buf()],
+            roles: BTreeMap::new(),
+            policies: BTreeMap::new(),
+            targets: BTreeMap::new(),
+            knowledge_sources: BTreeMap::new(),
+            packs: BTreeMap::from([("demo-route".to_string(), pack)]),
+        };
+        let result = registry
+            .route_skills("repo orchestrator", Some("claude-code"), None)
+            .expect("route");
+        assert_eq!(result.candidates.len(), 1);
+        assert_eq!(result.candidates[0].skill_name, "delegated-work");
+        assert_eq!(
+            result.candidates[0].surface_ids,
+            vec!["demo-route:delegated-work".to_string()]
+        );
+        assert_eq!(result.candidates[0].matched_fields, vec!["alias"]);
+        assert_eq!(
+            result.candidates[0].suppressed_reasons,
+            vec!["target_not_compatible"]
+        );
+    }
+
+    #[test]
+    fn public_curator_card_routes_naming_audits_and_rejects_patch_execution() {
+        let registry = LibraryRegistry::load_from_roots(&[starter_root()]).expect("registry");
+        let result = registry
+            .route_skills("skill naming audit", Some("codex-cli"), None)
+            .expect("route");
+        let candidate = result.candidates.first().expect("curator candidate");
+        assert_eq!(candidate.skill_name, "metactl-skill-library-curator");
+        assert_eq!(candidate.pack_ref.id, "metactl-skill-library-curator");
+        assert_eq!(
+            candidate.surface_ids,
+            vec!["metactl-skill-library-curator:metactl-skill-library-curator".to_string()]
+        );
+
+        let negative = registry
+            .route_skills("apply an already approved patch", Some("codex-cli"), None)
+            .expect("negative route");
+        assert!(negative
+            .candidates
+            .iter()
+            .all(|item| item.skill_name != "metactl-skill-library-curator"));
+    }
+
+    #[test]
+    fn resolve_warns_when_saved_auto_selection_is_not_active() {
+        let registry = LibraryRegistry::load_from_roots(&[starter_root()]).expect("registry");
+        let target = starter_target("codex-cli");
+        let mut config = starter_config("builder", "brownfield-safe-builder", "codex-cli");
+        config.defaults = Some(ConfigDefaults {
+            brownfield_mode: None,
+            discovery_mode: None,
+            surface_selection_mode: Some(SurfaceSelectionMode::Auto),
+            auto_surface_selection: Some(AutoSurfaceSelection {
+                selected_surface_ids: BTreeSet::from(["missing-pack:missing-surface".to_string()]),
+                pinned_surface_ids: BTreeSet::new(),
+                blocked_surface_ids: BTreeSet::new(),
+            }),
+        });
+        let resolved = registry
+            .resolve(ResolveParams {
+                config,
+                overlay: None,
+                available_targets: vec![target],
+                provenance: None,
+            })
+            .expect("resolve");
+        assert!(resolved.capability_gaps.iter().any(|gap| {
+            gap.feature == "auto_surface_selection:missing-pack:missing-surface"
+                && gap.reason_code == crate::types::ReasonCode::NotFound
+        }));
     }
 
     #[test]

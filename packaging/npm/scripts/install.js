@@ -16,6 +16,14 @@ if (!target) {
   throw new Error(`No prebuilt metactl release for ${process.platform}-${process.arch}; use cargo install metactl --version ${requestedVersion} --locked.`);
 }
 
+function warnUnverifiedAttestation(archive, warn = console.warn) {
+  warn(
+    `metactl install warning: SHA-256 verified for ${archive}, but build provenance was not ` +
+    "verified automatically. Verify it manually with GitHub CLI: " +
+    "https://github.com/pylit-ai/metactl/blob/main/docs/user/install-verification.md"
+  );
+}
+
 function get(url) {
   return new Promise((resolve, reject) => {
     https.get(url, { headers: { "User-Agent": "metactl-npm-installer" } }, response => {
@@ -49,6 +57,7 @@ async function install() {
   const expected = checksumBytes.toString("utf8").trim().split(/\s+/)[0].toLowerCase();
   const actual = crypto.createHash("sha256").update(archiveBytes).digest("hex");
   if (!/^[a-f0-9]{64}$/.test(expected) || actual !== expected) throw new Error(`SHA-256 verification failed for ${archive}`);
+  warnUnverifiedAttestation(archive);
 
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "metactl-npm-"));
   const archivePath = path.join(temporary, archive);
@@ -64,4 +73,8 @@ async function install() {
   fs.rmSync(temporary, { recursive: true, force: true });
 }
 
-install().catch(error => { console.error(`metactl install failed: ${error.message}`); process.exit(1); });
+if (require.main === module) {
+  install().catch(error => { console.error(`metactl install failed: ${error.message}`); process.exit(1); });
+}
+
+module.exports = { warnUnverifiedAttestation };

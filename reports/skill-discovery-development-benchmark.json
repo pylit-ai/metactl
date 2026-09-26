@@ -1,0 +1,1294 @@
+{
+  "schema": "metactl.discovery_benchmark.v1",
+  "fixture_sha256": "0e9f1b69de3203f5ff3a74449e6e51064254c989d7637c45f8387e2287b3bbf3",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "python": "3.14.4",
+  "binary_sha256": "db1181bbb9756165e0d8a0de8f341385f9ac56d0fe0ebc60e7556f10e60efb4d",
+  "repeats": 3,
+  "unique_cases": 12,
+  "catalog_size": 208,
+  "native_style_metadata_bytes": 32002,
+  "discovery_front_door_bytes": 1051,
+  "metadata_byte_reduction_fraction": 0.9671583026060872,
+  "summary": {
+    "existing_route": {
+      "runs": 36,
+      "latency_p50_ms": 59.43585454951972,
+      "latency_p95_ms": 64.37083298806101,
+      "recall_at_5": 0.35,
+      "precision_at_5": 0.08,
+      "mrr": 0.4,
+      "no_match_accuracy": 1
+    },
+    "deterministic_host": {
+      "runs": 36,
+      "latency_p50_ms": 126.18708348600194,
+      "latency_p95_ms": 130.45479101128876,
+      "recall_at_5": 0.75,
+      "precision_at_5": 0.16,
+      "mrr": 0.6583333333333333,
+      "no_match_accuracy": 1
+    }
+  },
+  "rows": [
+    {
+      "case": "reconnect",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "fault-isolation"
+      ],
+      "elapsed_ms": 59.027999988757074,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 211
+    },
+    {
+      "case": "reconnect",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "fault-isolation"
+      ],
+      "relevant": [
+        "fault-isolation"
+      ],
+      "elapsed_ms": 125.15341700054705,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 804
+    },
+    {
+      "case": "accessibility",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [
+        "release-check"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 59.74900000728667,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 444
+    },
+    {
+      "case": "accessibility",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "release-check",
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 127.27900000754744,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 0.3333333333333333,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "release",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [
+        "release-check"
+      ],
+      "relevant": [
+        "release-check"
+      ],
+      "elapsed_ms": 59.992666938342154,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 438
+    },
+    {
+      "case": "release",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "release-check",
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change"
+      ],
+      "relevant": [
+        "release-check"
+      ],
+      "elapsed_ms": 130.45479101128876,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "migration",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "data-change"
+      ],
+      "elapsed_ms": 60.89762493502349,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 205
+    },
+    {
+      "case": "migration",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "data-change"
+      ],
+      "elapsed_ms": 133.68745800107718,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 0.25,
+      "no_match_correct": null,
+      "result_bytes": 2112
+    },
+    {
+      "case": "tests",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [
+        "test-design"
+      ],
+      "relevant": [
+        "test-design"
+      ],
+      "elapsed_ms": 60.534166055731475,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 425
+    },
+    {
+      "case": "tests",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "test-design"
+      ],
+      "elapsed_ms": 127.40945804398507,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "review",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [
+        "interface-review"
+      ],
+      "relevant": [
+        "code-inspection"
+      ],
+      "elapsed_ms": 59.169874992221594,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 452
+    },
+    {
+      "case": "review",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "interface-review",
+        "test-design",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "code-inspection"
+      ],
+      "elapsed_ms": 125.48266700468957,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "docs",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "documentation"
+      ],
+      "elapsed_ms": 59.63087501004338,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 215
+    },
+    {
+      "case": "docs",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "documentation"
+      ],
+      "elapsed_ms": 124.69254096504301,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "dependencies",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "dependency-map"
+      ],
+      "elapsed_ms": 59.33091591577977,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 216
+    },
+    {
+      "case": "dependencies",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "dependency-map"
+      ],
+      "relevant": [
+        "dependency-map"
+      ],
+      "elapsed_ms": 125.37804106250405,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 768
+    },
+    {
+      "case": "multi",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [
+        "test-design"
+      ],
+      "relevant": [
+        "fault-isolation",
+        "test-design"
+      ],
+      "elapsed_ms": 59.40500006545335,
+      "recall_at_5": 0.5,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 442
+    },
+    {
+      "case": "multi",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "fault-isolation",
+        "test-design"
+      ],
+      "elapsed_ms": 126.9135419279337,
+      "recall_at_5": 0.5,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "exact",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [
+        "interface-review"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 60.02062500920147,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 425
+    },
+    {
+      "case": "exact",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [
+        "interface-review",
+        "code-inspection"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 128.02220799494535,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 1123
+    },
+    {
+      "case": "none-arithmetic",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 59.36062498949468,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 176
+    },
+    {
+      "case": "none-arithmetic",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 123.77658300101757,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 436
+    },
+    {
+      "case": "none-greeting",
+      "repetition": 0,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 60.43954205233604,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 173
+    },
+    {
+      "case": "none-greeting",
+      "repetition": 0,
+      "arm": "deterministic_host",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 122.59483407251537,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 436
+    },
+    {
+      "case": "reconnect",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "fault-isolation"
+      ],
+      "relevant": [
+        "fault-isolation"
+      ],
+      "elapsed_ms": 126.78495806176215,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 803
+    },
+    {
+      "case": "reconnect",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "fault-isolation"
+      ],
+      "elapsed_ms": 57.978791068308055,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 211
+    },
+    {
+      "case": "accessibility",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "release-check",
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 126.55391695443541,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 0.3333333333333333,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "accessibility",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [
+        "release-check"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 57.656874996609986,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 444
+    },
+    {
+      "case": "release",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "release-check",
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change"
+      ],
+      "relevant": [
+        "release-check"
+      ],
+      "elapsed_ms": 129.88495803438127,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "release",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [
+        "release-check"
+      ],
+      "relevant": [
+        "release-check"
+      ],
+      "elapsed_ms": 62.30537500232458,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 438
+    },
+    {
+      "case": "migration",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "data-change"
+      ],
+      "elapsed_ms": 127.12499999906868,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 0.25,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "migration",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "data-change"
+      ],
+      "elapsed_ms": 58.6872500134632,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 205
+    },
+    {
+      "case": "tests",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "test-design"
+      ],
+      "elapsed_ms": 125.74554095044732,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "tests",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [
+        "test-design"
+      ],
+      "relevant": [
+        "test-design"
+      ],
+      "elapsed_ms": 60.93629205133766,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 425
+    },
+    {
+      "case": "review",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "interface-review",
+        "test-design",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "code-inspection"
+      ],
+      "elapsed_ms": 124.48591704014689,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "review",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [
+        "interface-review"
+      ],
+      "relevant": [
+        "code-inspection"
+      ],
+      "elapsed_ms": 59.15062502026558,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 452
+    },
+    {
+      "case": "docs",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "documentation"
+      ],
+      "elapsed_ms": 127.54587491508573,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "docs",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "documentation"
+      ],
+      "elapsed_ms": 57.07004095893353,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 215
+    },
+    {
+      "case": "dependencies",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "dependency-map"
+      ],
+      "relevant": [
+        "dependency-map"
+      ],
+      "elapsed_ms": 128.21862497366965,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 768
+    },
+    {
+      "case": "dependencies",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "dependency-map"
+      ],
+      "elapsed_ms": 58.74537501949817,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 216
+    },
+    {
+      "case": "multi",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "fault-isolation",
+        "test-design"
+      ],
+      "elapsed_ms": 125.98191702272743,
+      "recall_at_5": 0.5,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "multi",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [
+        "test-design"
+      ],
+      "relevant": [
+        "fault-isolation",
+        "test-design"
+      ],
+      "elapsed_ms": 59.95729204732925,
+      "recall_at_5": 0.5,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 442
+    },
+    {
+      "case": "exact",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [
+        "interface-review",
+        "code-inspection"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 123.8131670979783,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 1123
+    },
+    {
+      "case": "exact",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [
+        "interface-review"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 64.37083298806101,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 425
+    },
+    {
+      "case": "none-arithmetic",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 129.76787495426834,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 436
+    },
+    {
+      "case": "none-arithmetic",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 60.511708026751876,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 176
+    },
+    {
+      "case": "none-greeting",
+      "repetition": 1,
+      "arm": "deterministic_host",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 133.56287509668618,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 436
+    },
+    {
+      "case": "none-greeting",
+      "repetition": 1,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 65.28287497349083,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 173
+    },
+    {
+      "case": "reconnect",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "fault-isolation"
+      ],
+      "elapsed_ms": 64.68458299059421,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 211
+    },
+    {
+      "case": "reconnect",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "fault-isolation"
+      ],
+      "relevant": [
+        "fault-isolation"
+      ],
+      "elapsed_ms": 128.93766700290143,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 803
+    },
+    {
+      "case": "accessibility",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [
+        "release-check"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 60.30270899645984,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 444
+    },
+    {
+      "case": "accessibility",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "release-check",
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 127.25737493019551,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 0.3333333333333333,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "release",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [
+        "release-check"
+      ],
+      "relevant": [
+        "release-check"
+      ],
+      "elapsed_ms": 59.62012498639524,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 438
+    },
+    {
+      "case": "release",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "release-check",
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change"
+      ],
+      "relevant": [
+        "release-check"
+      ],
+      "elapsed_ms": 126.53545802459121,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "migration",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "data-change"
+      ],
+      "elapsed_ms": 58.8866249890998,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 205
+    },
+    {
+      "case": "migration",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "data-change"
+      ],
+      "elapsed_ms": 125.37116708699614,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 0.25,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "tests",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [
+        "test-design"
+      ],
+      "relevant": [
+        "test-design"
+      ],
+      "elapsed_ms": 57.93979100417346,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 425
+    },
+    {
+      "case": "tests",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "test-design"
+      ],
+      "elapsed_ms": 126.39224994927645,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "review",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [
+        "interface-review"
+      ],
+      "relevant": [
+        "code-inspection"
+      ],
+      "elapsed_ms": 58.84475004859269,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 452
+    },
+    {
+      "case": "review",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "interface-review",
+        "test-design",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "code-inspection"
+      ],
+      "elapsed_ms": 123.76337498426437,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "docs",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "documentation"
+      ],
+      "elapsed_ms": 57.932249968871474,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 215
+    },
+    {
+      "case": "docs",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "documentation"
+      ],
+      "elapsed_ms": 124.4985000230372,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 2113
+    },
+    {
+      "case": "dependencies",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [
+        "dependency-map"
+      ],
+      "elapsed_ms": 58.861208031885326,
+      "recall_at_5": 0,
+      "precision_at_5": 0,
+      "reciprocal_rank": 0,
+      "no_match_correct": null,
+      "result_bytes": 216
+    },
+    {
+      "case": "dependencies",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "dependency-map"
+      ],
+      "relevant": [
+        "dependency-map"
+      ],
+      "elapsed_ms": 123.4169160015881,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 768
+    },
+    {
+      "case": "multi",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [
+        "test-design"
+      ],
+      "relevant": [
+        "fault-isolation",
+        "test-design"
+      ],
+      "elapsed_ms": 58.14354203175753,
+      "recall_at_5": 0.5,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 442
+    },
+    {
+      "case": "multi",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "test-design",
+        "interface-review",
+        "dependency-map",
+        "data-change",
+        "release-check"
+      ],
+      "relevant": [
+        "fault-isolation",
+        "test-design"
+      ],
+      "elapsed_ms": 125.53824996575713,
+      "recall_at_5": 0.5,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 2114
+    },
+    {
+      "case": "exact",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [
+        "interface-review"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 60.268874978646636,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 425
+    },
+    {
+      "case": "exact",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [
+        "interface-review",
+        "code-inspection"
+      ],
+      "relevant": [
+        "interface-review"
+      ],
+      "elapsed_ms": 124.83287509530783,
+      "recall_at_5": 1,
+      "precision_at_5": 0.2,
+      "reciprocal_rank": 1,
+      "no_match_correct": null,
+      "result_bytes": 1122
+    },
+    {
+      "case": "none-arithmetic",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 59.466709033586085,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 176
+    },
+    {
+      "case": "none-arithmetic",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 124.45029197260737,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 436
+    },
+    {
+      "case": "none-greeting",
+      "repetition": 2,
+      "arm": "existing_route",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 58.43374994583428,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 173
+    },
+    {
+      "case": "none-greeting",
+      "repetition": 2,
+      "arm": "deterministic_host",
+      "returned": [],
+      "relevant": [],
+      "elapsed_ms": 123.89925005845726,
+      "recall_at_5": null,
+      "precision_at_5": null,
+      "reciprocal_rank": null,
+      "no_match_correct": true,
+      "result_bytes": 433
+    }
+  ],
+  "claims": {
+    "host_prompt_tokens": null,
+    "end_to_end_task_success": null,
+    "dollar_savings": null,
+    "live_jev": "not run",
+    "native_catalog_suppression": "not tested",
+    "limitations": [
+      "Authored development set, not held-out",
+      "Synthetic distractors",
+      "Cold CLI process; filesystem cache uncontrolled",
+      "No coding-model requests",
+      "Metadata bytes are not actual host prompt tokens"
+    ]
+  }
+}

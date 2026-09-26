@@ -3,6 +3,87 @@ use super::*;
 // Compile workflow tests.
 
 #[test]
+fn cli_compile_inline_snippets_preserves_utf8_and_byte_budget() {
+    let starter = PathBuf::from(starter_library_root());
+    for (label, body, expected) in [
+        ("cjk", "界".repeat(67), format!("{}...", "界".repeat(65))),
+        ("emoji", "🦊".repeat(51), format!("{}...", "🦊".repeat(49))),
+        (
+            "mixed",
+            format!("{}界tail", "a".repeat(196)),
+            format!("{}...", "a".repeat(196)),
+        ),
+        ("ascii", "a".repeat(201), format!("{}...", "a".repeat(197))),
+        (
+            "exact",
+            format!("{}界", "a".repeat(197)),
+            format!("{}界", "a".repeat(197)),
+        ),
+    ] {
+        let project = TempDir::new().unwrap();
+        let library = project.path().join("fixture-library");
+        fs::create_dir_all(library.join("targets")).unwrap();
+        fs::create_dir_all(library.join("packs")).unwrap();
+        let mut target: Value =
+            serde_json::from_slice(&fs::read(starter.join("targets/codex-cli.json")).unwrap())
+                .unwrap();
+        target["target_id"] = json!("inline-fixture");
+        target["aliases"] = json!([]);
+        target["compile_targets"]
+            .as_array_mut()
+            .unwrap()
+            .truncate(1);
+        fs::write(
+            library.join("targets/inline-fixture.json"),
+            serde_json::to_vec(&target).unwrap(),
+        )
+        .unwrap();
+        let mut pack: Value =
+            serde_json::from_slice(&fs::read(starter.join("packs/python-refactor.json")).unwrap())
+                .unwrap();
+        pack["id"] = json!("inline-fixture");
+        pack["compatible_targets"] = json!(["inline-fixture"]);
+        pack["resources"] =
+            json!([{"path":"packs/body.md", "kind":"instruction", "required":true}]);
+        fs::write(
+            library.join("packs/inline-fixture.json"),
+            serde_json::to_vec(&pack).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            library.join("packs/body.md"),
+            format!("# Instructions\n\n{body}\n"),
+        )
+        .unwrap();
+        fs::write(project.path().join("metactl.yaml"), format!("api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets: [inline-fixture]\npacks: [inline-fixture]\nstarter_library:\n- {}\n- {}\n", starter.display(), library.display())).unwrap();
+        let output = run_cli(project.path(), &["--json", "compile"]);
+        assert!(
+            output.status.success(),
+            "{label}: stdout={} stderr={}",
+            stdout(&output),
+            stderr(&output)
+        );
+        assert_json_contract(&json_output(&output), "compile", Some(project.path()));
+        let document = fs::read_to_string(
+            project
+                .path()
+                .join(".metactl/generated/inline-fixture/AGENTS.md"),
+        )
+        .unwrap();
+        let summary = document
+            .lines()
+            .find_map(|line| line.strip_prefix("|inline:inline-fixture|summary:"))
+            .expect("inline fallback summary");
+        assert_eq!(summary, expected, "{label}");
+        assert!(summary.len() <= 200, "{label}: byte budget exceeded");
+        assert!(!project
+            .path()
+            .join(".metactl/state/operation.lock")
+            .exists());
+    }
+}
+
+#[test]
 fn cli_init_compile_apply_revert_greenfield() {
     let project = TempDir::new().expect("tempdir");
     init_project(project.path());
@@ -24,12 +105,12 @@ fn cli_init_compile_apply_revert_greenfield() {
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md")
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
         .exists());
     assert!(
         !project
             .path()
-            .join(".codex/skills/python-refactor/contracts/SKILL.md")
+            .join(".agents/skills/python-refactor/contracts/SKILL.md")
             .exists(),
         "contracts surface should stay suppressed in default minimal mode"
     );
@@ -41,7 +122,7 @@ fn cli_init_compile_apply_revert_greenfield() {
     let revert = run_cli(project.path(), &["revert"]);
     assert!(revert.status.success(), "{}", stderr(&revert));
     assert!(!project.path().join("AGENTS.md").exists());
-    assert!(!project.path().join(".codex/skills").exists());
+    assert!(!project.path().join(".agents/skills").exists());
 }
 
 #[test]
@@ -60,7 +141,7 @@ fn cli_compile_apply_chained_greenfield() {
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/python-refactor/python-refactor/SKILL.md")
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
         .exists());
 
     let validate = run_cli(project.path(), &["validate"]);
@@ -98,7 +179,7 @@ fn cli_compile_surface_mode_controls_emitted_skill_surfaces() {
     assert!(
         !project
             .path()
-            .join(".metactl/generated/codex-cli/.codex/skills/python-refactor/contracts/SKILL.md")
+            .join(".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/SKILL.md")
             .exists(),
         "contracts surface should be suppressed in minimal mode"
     );
@@ -131,7 +212,7 @@ fn cli_compile_surface_mode_controls_emitted_skill_surfaces() {
     assert!(
         project
             .path()
-            .join(".metactl/generated/codex-cli/.codex/skills/python-refactor/contracts/SKILL.md")
+            .join(".metactl/generated/codex-cli/.agents/skills/python-refactor/contracts/SKILL.md")
             .exists(),
         "contracts surface should emit in full mode"
     );

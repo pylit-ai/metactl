@@ -34,13 +34,10 @@ fn ignore_status_agent_json_has_next_commands() {
     assert!(output.status.success(), "{}", stderr(&output));
     let value = json_output(&output);
     assert_json_contract(&value, "ignore", Some(project.path()));
-    assert!(
-        value["next_commands"]
-            .as_array()
-            .expect("next commands")
-            .len()
-            >= 1
-    );
+    assert!(!value["next_commands"]
+        .as_array()
+        .expect("next commands")
+        .is_empty());
 }
 
 #[test]
@@ -346,7 +343,7 @@ fn cli_ignore_install_repo_writes_gitignore_and_agent_allowlists() {
     assert!(cursorignore.contains("# metactl:begin agent-surface-allowlist"));
     assert!(cursorignore.contains("!/.cursor/rules/**"));
     assert!(cursorignore.contains("!/.cursor/skills/**"));
-    assert!(cursorignore.contains("!/.codex/skills/**"));
+    assert!(cursorignore.contains("!/.agents/skills/**"));
 
     let geminiignore =
         fs::read_to_string(project.path().join(".geminiignore")).expect("read geminiignore");
