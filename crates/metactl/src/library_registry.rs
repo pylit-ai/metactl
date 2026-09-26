@@ -816,6 +816,7 @@ impl LibraryRegistry {
             ));
         }
 
+        self.validate_privacy_graph(&params.resolve_graph)?;
         let project_root = compile_project_root(params.project_root.as_deref())?;
         let role = self.find_role(&params.resolve_graph.role)?;
         let policy_ref = params
@@ -880,6 +881,7 @@ impl LibraryRegistry {
             &project_root,
             &params.target_capability.target_ref(),
             materializer::StageOutputsParams {
+                resolve_graph: Some(params.resolve_graph.clone()),
                 inputs: outputs,
                 surface_selection_mode: effective_surface_selection_mode,
                 surface_selection,
@@ -1010,7 +1012,7 @@ impl LibraryRegistry {
         manifest: &CompileManifest,
         apply_mode: &ApplyMode,
     ) -> Result<ApplyReport> {
-        self.protect_private_manifest(project_root, manifest)?;
+        self.protect_private_manifest(project_root, manifest, apply_mode)?;
         materializer::apply_manifest(project_root, manifest, apply_mode)
     }
 
@@ -1030,7 +1032,7 @@ impl LibraryRegistry {
         apply_mode: &ApplyMode,
         expected_plan_digest: &str,
     ) -> Result<ApplyReport> {
-        self.protect_private_manifest(project_root, manifest)?;
+        self.protect_private_manifest(project_root, manifest, apply_mode)?;
         materializer::apply_manifest_bound(
             project_root,
             manifest,
@@ -1665,7 +1667,7 @@ fn synthesize_outputs(
                 let contents = serde_json::to_vec_pretty(&serde_json::json!({
                     "target": target.target_id,
                     "policies": resolve_graph.applied_policies.iter().map(|item| &item.id).collect::<Vec<_>>(),
-                    "active_packs": shared_packs.iter().map(|pack| &pack.manifest.id).collect::<Vec<_>>(),
+                    "active_packs": packs.iter().map(|pack| &pack.manifest.id).collect::<Vec<_>>(),
                 }))?;
                 outputs.push(StagedOutputInput {
                     id: Some("mcp-config".to_string()),
@@ -1673,7 +1675,10 @@ fn synthesize_outputs(
                     kind: GeneratedOutputKind::McpConfig,
                     contents,
                     instruction_mode: None,
-                    pack_ref: None,
+                    pack_ref: packs
+                        .iter()
+                        .find(|p| p.manifest.visibility_scope != VisibilityScope::Shared)
+                        .map(|p| p.manifest.pack_ref()),
                     surface_id: None,
                     surface_slug: None,
                     source_resource_paths: Vec::new(),
@@ -1693,8 +1698,24 @@ fn synthesize_outputs(
             target,
             policy,
             resolve_graph,
+            packs,
+        )?;
+        let (_, shared_contents) = expand_runtime_template(
+            library_roots,
+            template_ref,
+            target,
+            policy,
+            resolve_graph,
             &shared_packs,
         )?;
+        let private_contributor = (contents != shared_contents)
+            .then(|| {
+                packs
+                    .iter()
+                    .find(|p| p.manifest.visibility_scope != VisibilityScope::Shared)
+                    .map(|p| p.manifest.pack_ref())
+            })
+            .flatten();
         let destination = template_ref.destination_path.clone();
         let ownership = format!("{}::runtime-template", target.target_id);
         outputs.push(StagedOutputInput {
@@ -1703,7 +1724,7 @@ fn synthesize_outputs(
             kind,
             contents,
             instruction_mode: None,
-            pack_ref: None,
+            pack_ref: private_contributor,
             surface_id: None,
             surface_slug: None,
             source_resource_paths: vec![template_ref.path.clone()],

@@ -36,7 +36,12 @@ pub(super) fn private_paths(
         .filter(|o| private_output(o, graph, target))
         .map(|o| o.destination_path.clone())
         .collect();
-    if !paths.is_empty() {
+    if !paths.is_empty()
+        || graph
+            .pack_visibility
+            .values()
+            .any(|v| *v != VisibilityScope::Shared)
+    {
         // Ignoring the directory itself protects future staged payloads and
         // journals, including filenames not allocated until publication.
         paths.push(".metactl/".into());
@@ -45,16 +50,85 @@ pub(super) fn private_paths(
 }
 
 impl LibraryRegistry {
+    pub(super) fn validate_privacy_graph(&self, graph: &ResolveGraph) -> Result<()> {
+        for pack_ref in &graph.activated_pack_refs {
+            let pack = self
+                .find_pack(pack_ref)
+                .ok_or_else(|| anyhow!("missing pack {}", pack_ref.id))?;
+            if graph.pack_visibility.get(&pack.manifest.id) != Some(&pack.manifest.visibility_scope)
+            {
+                anyhow::bail!("pack visibility provenance is stale; resolve and recompile");
+            }
+        }
+        Ok(())
+    }
     pub(super) fn protect_private_manifest(
         &self,
         root: &Path,
         manifest: &CompileManifest,
+        apply_mode: &ApplyMode,
     ) -> Result<()> {
         let target = self.target_by_id(&manifest.target.id);
         let local = target
             .as_ref()
             .and_then(|t| t.local_projection.as_ref())
             .and_then(|l| l.local_surface.as_ref());
+        let proofs = if let Some(graph) = &manifest.resolve_graph {
+            let target = target
+                .clone()
+                .ok_or_else(|| anyhow!("unknown target; recompile before apply"))?;
+            if graph.selected_target != manifest.target {
+                anyhow::bail!("manifest target provenance mismatch");
+            }
+            Some(self.projection_proofs(&CompileParams {
+                resolve_graph: graph.clone(),
+                target_capability: target,
+                apply_mode: apply_mode.clone(),
+                surface_selection_mode: manifest.surface_selection_mode.clone(),
+                emit_policy_report: false,
+                durable_staging: false,
+                project_root: None,
+            })?)
+        } else {
+            None
+        };
+        let mut replay_private = std::collections::BTreeSet::new();
+        for output in &manifest.generated_outputs {
+            let Some(destination) = &output.destination_path else {
+                continue;
+            };
+            let proof = proofs
+                .as_ref()
+                .and_then(|p| p.iter().find(|p| &p.destination == destination));
+            if let Some(proof) = proof {
+                if output.path != proof.staged_path || output.digest.as_ref() != Some(&proof.digest)
+                {
+                    anyhow::bail!("stale or altered projection evidence; recompile before apply");
+                }
+                if proof.private {
+                    replay_private.insert(destination.clone());
+                }
+            } else if matches!(
+                output.kind,
+                GeneratedOutputKind::RuntimeJson
+                    | GeneratedOutputKind::HookConfig
+                    | GeneratedOutputKind::McpConfig
+            ) || target
+                .as_ref()
+                .and_then(|t| t.runtime_template.as_ref())
+                .is_some_and(|t| &t.destination_path == destination)
+                || target.as_ref().is_some_and(|t| {
+                    t.compile_targets.iter().any(|c| {
+                        c.output_kind == CompileTargetKind::McpConfig
+                            && &c.path_template == destination
+                    })
+                })
+            {
+                // Legacy aggregates lack independent synthesis evidence. They may
+                // only be applied into protected private destinations.
+                replay_private.insert(destination.clone());
+            }
+        }
         let mut paths: Vec<String> = manifest
             .generated_outputs
             .iter()
@@ -62,14 +136,19 @@ impl LibraryRegistry {
                 o.pack_ref.as_ref().is_some_and(|p| {
                     self.find_pack(p)
                         .is_none_or(|p| p.manifest.visibility_scope != VisibilityScope::Shared)
-                }) || o
-                    .destination_path
-                    .as_ref()
-                    .is_some_and(|p| Some(p) == local)
+                }) || o.destination_path.as_ref().is_some_and(|p| {
+                    target.is_none() || Some(p) == local || replay_private.contains(p)
+                })
             })
             .filter_map(|o| o.destination_path.clone())
             .collect();
-        if !paths.is_empty() {
+        if !paths.is_empty()
+            || manifest.resolve_graph.as_ref().is_some_and(|g| {
+                g.pack_visibility
+                    .values()
+                    .any(|v| *v != VisibilityScope::Shared)
+            })
+        {
             paths.push(".metactl/".into());
         }
         crate::git_privacy::require_private(root, &paths)
@@ -92,6 +171,7 @@ impl LibraryRegistry {
                     .ok_or_else(|| anyhow!("missing pack {}", r.id))
             })
             .collect::<Result<Vec<_>>>()?;
+        self.validate_privacy_graph(graph)?;
         let (outputs, _, _) = synthesize_outputs(
             role,
             policy,
@@ -119,3 +199,7 @@ impl LibraryRegistry {
             .collect())
     }
 }
+
+#[cfg(test)]
+#[path = "library_privacy/tests.rs"]
+mod tests;

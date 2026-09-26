@@ -36,6 +36,7 @@ pub(crate) struct StagedOutputInput {
 
 #[derive(Debug, Clone)]
 pub(crate) struct StageOutputsParams {
+    pub resolve_graph: Option<crate::types::ResolveGraph>,
     pub inputs: Vec<StagedOutputInput>,
     pub surface_selection_mode: Option<crate::types::SurfaceSelectionMode>,
     pub surface_selection: Vec<crate::types::SurfaceSelectionDecision>,
@@ -242,6 +243,7 @@ pub(crate) fn stage_outputs(
     )?;
 
     let manifest = CompileManifest {
+        resolve_graph: params.resolve_graph,
         api_version: crate::types::API_VERSION.to_string(),
         target: target.clone(),
         generated_outputs: outputs,
@@ -2508,6 +2510,7 @@ mod tests {
         fs::create_dir_all(staged.parent().expect("staged parent")).expect("staged directory");
         fs::write(&staged, "---\nname: demo\n---\n\n# Demo\n").expect("staged skill");
         CompileManifest {
+            resolve_graph: None,
             api_version: "metactl/v2alpha1".to_string(),
             target: Ref {
                 kind: RefKind::Target,
@@ -2835,6 +2838,7 @@ mod tests {
             });
         }
         let manifest = CompileManifest {
+            resolve_graph: None,
             api_version: "metactl/v2alpha1".to_string(),
             target: target.clone(),
             generated_outputs: outputs,
@@ -2951,6 +2955,7 @@ mod tests {
             materialize_as_regular_file: false,
         };
         let params = |inputs| StageOutputsParams {
+            resolve_graph: None,
             inputs,
             surface_selection_mode: None,
             surface_selection: Vec::new(),
@@ -3017,6 +3022,7 @@ mod tests {
             materialize_as_regular_file: false,
         };
         let params = |inputs| StageOutputsParams {
+            resolve_graph: None,
             inputs,
             surface_selection_mode: None,
             surface_selection: Vec::new(),
@@ -3071,6 +3077,7 @@ mod tests {
             version: None,
         };
         let manifest = CompileManifest {
+            resolve_graph: None,
             api_version: "metactl/v2alpha1".to_string(),
             target: target.clone(),
             generated_outputs: vec![output],
