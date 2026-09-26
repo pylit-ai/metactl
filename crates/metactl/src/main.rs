@@ -868,6 +868,40 @@ enum SkillsCommand {
     Select(SkillsSelectArgs),
     /// Private discovery event reports and session outcome recording
     Trials(SkillsTrialsArgs),
+    /// Persistent Jev defaults and explicit project enrollment (no provider calls)
+    Preferences(SkillsPreferencesArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsPreferencesArgs {
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    /// Default for enrolled projects; omit all options to show effective policy
+    #[arg(long, value_parser = ["enabled", "disabled"])]
+    mode: Option<String>,
+    /// Save permission once to send task text and skill metadata to TypeSafe
+    #[arg(long, conflicts_with = "revoke_provider_data")]
+    allow_provider_data: bool,
+    /// Withdraw saved data permission; enabling again requires explicit consent
+    #[arg(long)]
+    revoke_provider_data: bool,
+    /// Explicitly enroll this canonical project path in the saved default
+    #[arg(long, requires_all = ["gateway_project", "data_class"])]
+    enroll: bool,
+    #[arg(long, requires = "enroll")]
+    gateway_project: Option<String>,
+    #[arg(long, value_parser = ["public-nonsensitive", "private-owned"], requires = "enroll")]
+    data_class: Option<String>,
+    /// Project opt-out overrides the user default, including in running hosts
+    #[arg(long, value_parser = ["inherit", "disabled"])]
+    project_mode: Option<String>,
+    #[arg(long)]
+    gateway_command: Option<PathBuf>,
+    /// Per-host ceiling; does not override shared gateway limits
+    #[arg(long)]
+    max_provider_calls: Option<u32>,
+    #[arg(long)]
+    provider_deadline: Option<f64>,
 }
 
 #[derive(Debug, Args)]
@@ -880,6 +914,9 @@ struct SkillsTrialsArgs {
 
 #[derive(Debug, Args)]
 struct SkillsHostArgs {
+    /// Re-read persistent Jev preferences before every discovery request
+    #[arg(long)]
+    use_preferences: bool,
     /// Python 3.10+ executable; useful where system python3 is older
     #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
     python: PathBuf,
@@ -967,6 +1004,9 @@ struct SkillsDoctorArgs {
 
 #[derive(Debug, Args)]
 struct DiscoveryRoutingArgs {
+    /// Inherit saved Jev preferences, including live project opt-outs
+    #[arg(long, conflicts_with_all = ["allow_provider_data", "gateway_project", "gateway_data_class"])]
+    use_preferences: bool,
     /// Baseline makes no Jev calls; shadow observes; advisory may apply validated ordering
     #[arg(long, default_value = "baseline", value_parser = ["baseline", "shadow", "advisory"])]
     trial_mode: String,
@@ -2069,6 +2109,12 @@ fn main() -> ExitCode {
     {
         return cli_skills::run_discovery_trials(args);
     }
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Preferences(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_preferences(&cli, args);
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
@@ -2276,6 +2322,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             | SkillsCommand::Host(_)
             | SkillsCommand::Doctor(_)
             | SkillsCommand::Trials(_) => None,
+            SkillsCommand::Preferences(_) => None,
             SkillsCommand::Connect(args) if args.apply || args.remove => Some("skills connect"),
             SkillsCommand::Connect(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),

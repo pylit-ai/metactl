@@ -6,8 +6,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current source crate version: `0.1.23`. The crates.io badges show the latest
-published versions; use the pinned 0.1.23 install commands below after that
+Current source crate version: `0.1.24`. The crates.io badges show the latest
+published versions; use the pinned 0.1.24 install commands below after that
 version appears in the registry.
 
 `metactl` lets an individual developer define agent instructions once, review the generated files, and work across supported coding agents without hand-copying prompt state.
@@ -62,7 +62,7 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
 | npm shim (unpublished) | See [`packaging/npm`](packaging/npm) | Installer scaffold; the npm package is not yet published. |
 | This source checkout | `cargo install --path crates/metactl --locked` | Use the checked-out version before its registry release. |
-| crates.io, after 0.1.23 publication | `cargo install metactl --version 0.1.23 --locked` | Portable source build. |
+| crates.io, after 0.1.24 publication | `cargo install metactl --version 0.1.24 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 
 All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Action also verifies GitHub build provenance when the runner provides a compatible GitHub CLI. The npm shim emits an explicit warning and supports [manual provenance verification](docs/user/install-verification.md). `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
@@ -70,13 +70,13 @@ All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Ac
 ## Quickstart
 
 From this source checkout, `cargo install --path crates/metactl --locked`
-installs 0.1.23 before registry publication. For a registry install, check the
-crates.io badge above; when it shows 0.1.23, use:
+installs 0.1.24 before registry publication. For a registry install, check the
+crates.io badge above; when it shows 0.1.24, use:
 
 ```bash
-cargo install metactl --version 0.1.23 --locked
+cargo install metactl --version 0.1.24 --locked
 metactl version
-# metactl 0.1.23 (metactl/v2alpha1)
+# metactl 0.1.24 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -133,7 +133,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.23 (metactl/v2alpha1)
+# metactl 0.1.24 (metactl/v2alpha1)
 ```
 
 </details>
@@ -142,12 +142,12 @@ metactl version
 <summary>Install the daemon for JSON-RPC or MCP</summary>
 
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
-Install this pinned version after 0.1.23 appears on crates.io:
+Install this pinned version after 0.1.24 appears on crates.io:
 
 ```bash
-cargo install metactld --version 0.1.23 --locked
+cargo install metactld --version 0.1.24 --locked
 metactld --version
-# metactld 0.1.23
+# metactld 0.1.24
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -704,7 +704,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current source crate version: `0.1.23` for both `metactl` and `metactld`.
+Current source crate version: `0.1.24` for both `metactl` and `metactld`.
 Check the crates.io badges above for the versions available to install.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.

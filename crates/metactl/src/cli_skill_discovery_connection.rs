@@ -175,6 +175,12 @@ fn host_command(
         }
     }
     let provider = routing.trial_mode != "baseline";
+    if routing.use_preferences && provider {
+        return Err(CliError::new(
+            EXIT_VALIDATION,
+            "--use-preferences resolves routing dynamically; omit --trial-mode.",
+        ));
+    }
     if !provider
         && (routing.allow_provider_data
             || routing.gateway_project.is_some()
@@ -264,6 +270,9 @@ fn host_command(
             "--provider-deadline".into(),
             routing.provider_deadline.to_string(),
         ]);
+    }
+    if routing.use_preferences {
+        args.push("--use-preferences".into());
     }
     args.extend(["--event-log".into(), ledger.to_string_lossy().into_owned()]);
     Ok((exe.to_string_lossy().into_owned(), args))
@@ -484,6 +493,12 @@ fn managed_entry(
         j += 13;
     } else {
         return None;
+    }
+    if args.get(j).map(String::as_str) == Some("--use-preferences") {
+        if mode != "baseline" {
+            return None;
+        }
+        j += 1;
     }
     if args.get(j)?.as_str() != "--event-log" || args.len() != j + 2 {
         return None;
@@ -1063,10 +1078,9 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
                     return ("invalid_status".into(), Value::Null);
                 }
                 return match serde_json::from_slice::<Value>(&output) {
-                    Ok(value) if value.get("project_ready") == Some(&Value::Bool(true)) => (
-                        "ready".into(),
-                        value.get("eligible_skills").cloned().unwrap_or(Value::Null),
-                    ),
+                    Ok(value) if value.get("project_ready") == Some(&Value::Bool(true)) => {
+                        ("ready".into(), value)
+                    }
                     _ => ("invalid_status".into(), Value::Null),
                 };
             }
@@ -1128,7 +1142,11 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             "An opencode.jsonc configuration already exists. MetaCTL will not create a second OpenCode config; add the server entry manually."));
     }
     if !options.remove {
-        let (host, count) = offline_status(&command, &args);
+        let (host, status) = offline_status(&command, &args);
+        let count = status
+            .get("eligible_skills")
+            .cloned()
+            .unwrap_or(Value::Null);
         if host != "ready" || count.as_u64().unwrap_or(0) == 0 {
             return Err(CliError::new(EXIT_STATE, format!(
                 "Discovery host status is {host} (eligible skills: {}). Check Python 3.10+ (use --python if needed), the project/profile, then run `metactl skills host --status` and `metactl skills catalog --json`.",
@@ -1252,8 +1270,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             json!({
                 "action": phase, "target": options.target, "scope": format!("{:?}", options.scope).to_lowercase(),
                 "config_path": path, "server": SERVER, "command": command, "args": args,
-                "mode": options.routing.trial_mode, "provider_calls_this_check": 0,
-                "gateway_response": if options.routing.trial_mode == "baseline" { "not_applicable" } else { "unknown_not_called" }, "event_log": ledger,
+                "mode": if options.routing.use_preferences { "preferences" } else { &options.routing.trial_mode }, "provider_calls_this_check": 0,
+                "gateway_response": if !options.routing.use_preferences && options.routing.trial_mode == "baseline" { "not_applicable" } else { "unknown_not_called" }, "event_log": ledger,
                 "entry_preview": entry,
                 "git_visibility": visibility, "allow_unignored": options.allow_unignored,
                 "native_acceptance_note": acceptance_note(&options.target, options.scope),
@@ -1381,6 +1399,9 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         .as_ref()
         .and_then(|entry| entry.args.last().map(String::as_str));
     let registered_mode = registered.as_ref().and_then(|entry| {
+        if entry.args.iter().any(|arg| arg == "--use-preferences") {
+            return Some("preferences");
+        }
         entry
             .args
             .iter()
@@ -1398,6 +1419,8 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     });
     let registered_gateway_command_state = if registered_mode == Some("baseline") {
         "not_applicable"
+    } else if registered_mode == Some("preferences") {
+        "resolved_from_preferences"
     } else {
         registered_gateway_command
             .map(|path| executable_state(Path::new(path)))
@@ -1424,7 +1447,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         }
     });
     // A project-controlled client config is data for doctor, never a command to execute.
-    let (host, host_catalog) = if python_unavailable {
+    let (host, host_status) = if python_unavailable {
         ("unavailable_python".into(), Value::Null)
     } else if registered.is_some() && !matches_requested {
         ("unknown_registration_drift".into(), Value::Null)
@@ -1500,6 +1523,10 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     };
     let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered mode: {}\nRegistered gateway command: {} ({})\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nGateway response: {}\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nProvider calls on this check: 0",
         options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_mode.unwrap_or("unknown"), registered_gateway_command.unwrap_or("unknown"), registered_gateway_command_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; {drift_hint})")).unwrap_or_default(), host, gateway_response, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
+    let human = format!("{human}\nEffective preference: {}\nEffective gateway executable: {}\nLegacy provider registration ignores saved preferences: {}",
+        host_status.pointer("/preferences/reason").and_then(Value::as_str).unwrap_or("not_used"),
+        host_status.pointer("/preferences/gateway_state").and_then(Value::as_str).unwrap_or("not_used"),
+        matches!(registered_mode, Some("advisory" | "shadow")));
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -1515,7 +1542,12 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                 "registered_gateway_command_state": registered_gateway_command_state,
                 "gateway_response": gateway_response,
                 "registered_event_log": registered_log,
-                "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_catalog,
+                "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_status.get("eligible_skills"),
+                "preferences": host_status.get("preferences"),
+                "effective_gateway_state": host_status.pointer("/preferences/gateway_state"),
+                "provider_ready": host_status.get("provider_ready"),
+                "registration_ignores_preferences": matches!(registered_mode, Some("advisory" | "shadow")),
+                "effective_mode": host_status.get("trial_mode"),
                 "agent_tools": "unknown",
                 "routing": routing, "routing_source": "any_process_including_manual",
                 "matching_discoveries": observed, "latest_discovery": latest,

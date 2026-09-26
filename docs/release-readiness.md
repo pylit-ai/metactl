@@ -1,6 +1,6 @@
 # Release Readiness
 
-Release candidate: **0.1.23**, prepared September 25, 2026. Distribution unit:
+Release candidate: **0.1.24**, prepared September 25, 2026. Distribution unit:
 GitHub native binary archives and existing metactl/metactld crates, in dependency
 order. npm remains an unpublished scaffold; no new registry distribution.
 
@@ -45,10 +45,10 @@ before publishing. See [install verification](user/install-verification.md).
 ## Publication order and recovery
 
 1. Push candidate and require green exact-head CI; merge through normal PR flow.
-2. Verify merged main, then push an annotated v0.1.23 tag. Never move a published tag.
+2. Verify merged main, then push an annotated v0.1.24 tag. Never move a published tag.
 3. Verify workflow and draft assets before public release.
 4. Publish metactl to crates.io after its dry-run passes.
-5. Wait for metactl 0.1.23 to be visible; dry-run and publish metactld next.
+5. Wait for metactl 0.1.24 to be visible; dry-run and publish metactld next.
 6. Verify both registry versions and installed binary provenance.
 
 A private overlay records the same public version and tag, never a competing
