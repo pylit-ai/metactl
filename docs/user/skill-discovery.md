@@ -78,11 +78,33 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    Reapplying with a different profile, config, overlay or log destination
    requires an explicit preview with `--replace`, followed by `--apply --replace`.
    Changing only the installed binary or Python path updates the managed entry.
-   For `--exclude-skill` or an approved Jev gateway mode, use
-   `skills host --client-config` and the manual adapter guide; `connect` currently
-   installs baseline without exclusions.
-   The older `skills host --client-config` command remains available for custom
-   clients and explicitly approved gateway evaluation.
+   For `--exclude-skill` or a custom client, use `skills host --client-config`
+   and the manual adapter guide.
+
+   **Approved public data only:** `connect` can also register gateway-backed
+   `shadow` or `advisory` mode when the project and query are authorized for
+   `public-nonsensitive` data. Use the project's scoped gateway client, an
+   explicit data-transfer opt-in, and bounded attempts:
+
+   ```sh
+   metactl --project /absolute/path/to/public-project skills connect \
+     --target codex-cli --trial-mode advisory --allow-provider-data \
+     --gateway-project APPROVED_PROJECT_ID \
+     --gateway-data-class public-nonsensitive \
+     --gateway-command /absolute/path/to/jev \
+     --max-provider-calls 2 --provider-deadline 1
+   # Review the preview, then repeat with --apply.
+   ```
+
+   `shadow` records Jev's proposed order without changing the returned order;
+   `advisory` may apply a validated proposal. Connect and doctor call only the
+   local host's offline status path, never the provider. A later discovery call
+   may contact the gateway. On unavailable, rejected, timed-out or over-budget
+   responses, the host returns deterministic ordering and records whether the
+   provider attempt or billing state is unknown. Run doctor with the same
+   routing flags to compare the requested registration. Policy changes require
+   `--replace`. Synthetic classification is reserved for `skills host --check`,
+   and private project content is not authorized by this public-data option.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
    `load_skill` are available, then request one harmless ambiguous discovery
    and load a returned ID with its digest. The `routing_receipt` should say

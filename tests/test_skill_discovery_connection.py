@@ -174,6 +174,93 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(observed["matching_discoveries"], 1)
         self.assertEqual(observed["agent_tools"], "unknown")
 
+    def test_advisory_gateway_fallback_is_bounded_and_logged(self):
+        gateway = self.base / "jev-fixture"
+        marker = self.base / "gateway-called"
+        gateway.write_text(f"#!/bin/sh\nprintf called >> {shlex.quote(str(marker))}\nprintf '{{\"available\":false}}\\n'\n")
+        gateway.chmod(0o755)
+        routing = ("--trial-mode", "advisory", "--allow-provider-data",
+                   "--gateway-project", "public-fixture",
+                   "--gateway-data-class", "public-nonsensitive",
+                   "--gateway-command", str(gateway),
+                   "--max-provider-calls", "2", "--provider-deadline", "1")
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               *routing, "--apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        receipt = json.loads(applied.stdout)
+        self.assertEqual(receipt["mode"], "advisory")
+        self.assertEqual(receipt["provider_calls"], 0)
+        self.assertFalse(marker.exists(), "connect and status must not call the gateway")
+        config = (self.project / ".codex/config.toml").read_text()
+        command = json.loads(re.search(r'^command = (.+)$', config, re.MULTILINE).group(1))
+        args = json.loads(re.search(r'^args = (.+)$', config, re.MULTILINE).group(1))
+        discovered = subprocess.run([command, *args,
+                                     "--call-tool", "discover_skills"], env=self.env,
+                                    text=True, capture_output=True, timeout=25,
+                                    input=json.dumps({"query": "Review a public CLI workflow"}))
+        self.assertEqual(discovered.returncode, 0, discovered.stdout + discovered.stderr + str(args))
+        result = json.loads(discovered.stdout)
+        self.assertIn("mode=advisory", result["routing_receipt"])
+        self.assertIn("reason=provider_or_schema_failure", result["routing_receipt"])
+        self.assertIn("provider_calls=unknown", result["routing_receipt"])
+        self.assertTrue(marker.exists())
+        ledger = pathlib.Path(receipt["event_log"]).read_text()
+        self.assertNotIn("Review a public CLI workflow", ledger)
+        self.assertEqual(json.loads(ledger.splitlines()[-1])["provider_attempts"], 1)
+        doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", *routing, "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        state = json.loads(doctor.stdout)
+        self.assertEqual(state["registered_mode"], "advisory")
+        self.assertEqual(state["routing"], "observed")
+        self.assertEqual(state["gateway_response"], "unknown_not_called")
+
+    def test_provider_connection_requires_explicit_public_authorization(self):
+        gateway = self.base / "jev-fixture"
+        gateway.write_text("#!/bin/sh\nexit 1\n")
+        gateway.chmod(0o755)
+        missing = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--trial-mode", "shadow", "--gateway-project", "public-fixture",
+                               "--gateway-data-class", "public-nonsensitive",
+                               "--gateway-command", str(gateway), "--apply")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("--allow-provider-data", missing.stderr)
+        synthetic = self.run_cli("skills", "connect", "--target", "codex-cli",
+                                 "--trial-mode", "advisory", "--allow-provider-data",
+                                 "--gateway-project", "public-fixture",
+                                 "--gateway-data-class", "synthetic",
+                                 "--gateway-command", str(gateway), "--apply")
+        self.assertNotEqual(synthetic.returncode, 0)
+        self.assertIn("cannot classify real agent queries as synthetic", synthetic.stderr)
+        self.assertFalse((self.project / ".codex/config.toml").exists())
+
+    def test_baseline_to_advisory_requires_replace_and_removes_without_gateway_flags(self):
+        gateway = self.base / "jev-fixture"
+        gateway.write_text("#!/bin/sh\nexit 1\n")
+        gateway.chmod(0o755)
+        baseline = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertEqual(baseline.returncode, 0, baseline.stdout + baseline.stderr)
+        path = self.project / ".cursor/mcp.json"
+        original = path.read_text()
+        routing = ("--trial-mode", "advisory", "--allow-provider-data",
+                   "--gateway-project", "public-fixture",
+                   "--gateway-data-class", "public-nonsensitive",
+                   "--gateway-command", str(gateway))
+        refused = self.run_cli("skills", "connect", "--target", "cursor", *routing, "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("--replace", refused.stderr)
+        self.assertEqual(path.read_text(), original)
+        preview = self.run_cli("skills", "connect", "--target", "cursor", *routing,
+                               "--replace", "--json")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertEqual(path.read_text(), original)
+        replaced = self.run_cli("skills", "connect", "--target", "cursor", *routing,
+                                "--replace", "--apply")
+        self.assertEqual(replaced.returncode, 0, replaced.stdout + replaced.stderr)
+        self.assertIn("advisory", path.read_text())
+        removed = self.run_cli("skills", "connect", "--target", "cursor", "--remove")
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertNotIn("metactl-skills", path.read_text())
+
     def test_no_profile_printed_rollback_and_doctor(self):
         apply = self.run_cli("--no-profile", "skills", "connect", "--target", "claude-code",
                              "--apply", "--json")

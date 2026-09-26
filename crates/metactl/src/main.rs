@@ -934,6 +934,8 @@ struct SkillsConnectArgs {
     /// Python 3.10+ executable used by the packaged discovery host
     #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
     python: PathBuf,
+    #[command(flatten)]
+    routing: DiscoveryRoutingArgs,
     /// Write the previewed registration; ordinary connect previews without writing
     #[arg(long, conflicts_with = "remove")]
     apply: bool,
@@ -959,6 +961,33 @@ struct SkillsDoctorArgs {
     /// Python 3.10+ executable used by the packaged discovery host
     #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
     python: PathBuf,
+    #[command(flatten)]
+    routing: DiscoveryRoutingArgs,
+}
+
+#[derive(Debug, Args)]
+struct DiscoveryRoutingArgs {
+    /// Baseline makes no Jev calls; shadow observes; advisory may apply validated ordering
+    #[arg(long, default_value = "baseline", value_parser = ["baseline", "shadow", "advisory"])]
+    trial_mode: String,
+    /// Explicit consent to send this project's query and candidate descriptions
+    #[arg(long)]
+    allow_provider_data: bool,
+    /// Scoped gateway project ID, required for shadow/advisory
+    #[arg(long)]
+    gateway_project: Option<String>,
+    /// Data class authorized by the current gateway policy
+    #[arg(long, value_parser = ["synthetic", "public-nonsensitive"])]
+    gateway_data_class: Option<String>,
+    /// Gateway client executable; resolved to an absolute path
+    #[arg(long, default_value = "jev")]
+    gateway_command: PathBuf,
+    /// Per-process provider attempt ceiling; gateway enforces additional shared limits
+    #[arg(long, default_value_t = 4)]
+    max_provider_calls: u32,
+    /// Maximum seconds per provider attempt
+    #[arg(long, default_value_t = 5.0)]
+    provider_deadline: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
