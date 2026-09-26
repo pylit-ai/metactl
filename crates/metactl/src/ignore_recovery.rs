@@ -1,9 +1,10 @@
 use super::*;
+use metactl::git_privacy::git_path_argument;
 
 pub(super) fn git_worktree_present(project_root: &Path) -> Result<bool> {
     let probe = Command::new("git")
         .arg("-C")
-        .arg(project_root)
+        .arg(git_path_argument(project_root))
         .args(["rev-parse", "--is-inside-work-tree"])
         .output()?;
     if probe.status.success() {
@@ -112,7 +113,8 @@ pub(super) fn ensure_ignore_recovery_dir(
     let guard = recovery.join(".gitignore");
     let probe = recovery.join(".metactl-recovery-probe");
     if in_git_worktree {
-        let probe_text = probe.to_str().ok_or_else(|| {
+        let probe_argument = git_path_argument(&probe);
+        let probe_text = probe_argument.to_str().ok_or_else(|| {
             state_error(anyhow!(
                 "non-UTF-8 ignore recovery path: {}",
                 probe.display()
@@ -120,7 +122,7 @@ pub(super) fn ensure_ignore_recovery_dir(
         })?;
         let mut prior_check = Command::new("git")
             .arg("-C")
-            .arg(project_root)
+            .arg(git_path_argument(project_root))
             .args(["check-ignore", "--verbose", "-z", "--stdin", "--no-index"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -200,9 +202,9 @@ pub(super) fn recovery_copies_ignored_by_git(
     for (_, backup) in written {
         let output = Command::new("git")
             .arg("-C")
-            .arg(project_root)
+            .arg(git_path_argument(project_root))
             .args(["check-ignore", "--quiet", "--no-index", "--"])
-            .arg(backup)
+            .arg(git_path_argument(backup))
             .output()?;
         if !output.status.success() {
             return Err(anyhow!(
@@ -212,4 +214,39 @@ pub(super) fn recovery_copies_ignored_by_git(
         }
     }
     Ok(())
+}
+
+pub(super) fn rollback_ignore_writes(
+    prepared: &[PreparedIgnoreWrite],
+    written: &[(usize, PathBuf)],
+) -> Vec<String> {
+    let mut outcomes = Vec::new();
+    for (index, backup) in written.iter().rev() {
+        let item = &prepared[*index];
+        if item.original.is_none() {
+            outcomes.push(format!(
+                "created {} left in place; recovery copy: {}",
+                item.path.display(),
+                backup.display()
+            ));
+            continue;
+        }
+        match ignore_publication::restore_preserving_live(backup, &item.path) {
+            Err(err) => {
+                outcomes.push(format!(
+                    "rollback replacement failed for {}: {err}; recovery source: {}",
+                    item.path.display(),
+                    backup.display()
+                ));
+            }
+            Ok(displaced) => {
+                outcomes.push(format!(
+                    "rollback restored {}; displaced bytes retained at recovery copy: {}",
+                    item.path.display(),
+                    displaced.display()
+                ));
+            }
+        }
+    }
+    outcomes
 }

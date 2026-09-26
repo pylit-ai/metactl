@@ -10,6 +10,16 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  windows-ignore:
+    name: Windows ignore safety
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check Windows source build
+        run: cargo check --locked -p metactl -p metactld
+      - name: Exercise Windows ignore publication and recovery
+        run: cargo test --locked -p metactl --test ignore_platform -- --nocapture
   test:
     runs-on: ubuntu-latest
     steps:

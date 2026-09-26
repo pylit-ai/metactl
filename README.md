@@ -371,9 +371,11 @@ before explicitly publishing it; tracked non-generated authored files remain
 untouched. Generated paths still require matching shared synthesis evidence.
 Ambiguous paths, symlink parents and incomplete rule evidence refuse before writes.
 Protection is checked at operation time; later external rule changes invalidate it.
-Replacing existing ignore files currently requires Linux or macOS atomic
-exchange support. On other platforms this mutation fails closed; source
-installation support does not imply support for ignore-file replacement.
+Existing ignore files use Linux/macOS atomic exchange or Windows backed
+replacement, retaining the displaced live file. Other source platforms use
+capture followed by no-clobber publication, with a possible missing-path
+interval. Recovery copies preserve edits; Windows directory metadata is not
+guaranteed durable across power loss.
 `--untrack-generated` is refused until exclusive ownership can be proven.
 Changed ignore files retain a reported recovery copy under the private,
 Git-ignored `.metactl/ignore-recovery/` directory. Review these copies before

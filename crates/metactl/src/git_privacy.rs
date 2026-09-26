@@ -6,6 +6,48 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// Git for Windows uses ordinary drive/UNC paths, not Rust's verbatim prefix.
+/// Convert separators without changing case or resolving symlinks.
+pub fn git_path_argument(path: &Path) -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let mut path: Vec<u16> = path.as_os_str().encode_wide().collect();
+        let prefix: Vec<u16> = "\\\\?\\".encode_utf16().collect();
+        if path.starts_with(&prefix) {
+            path.drain(..4);
+            if path.starts_with(&"UNC\\".encode_utf16().collect::<Vec<_>>()) {
+                path.splice(..4, "\\\\".encode_utf16());
+            }
+        }
+        for c in &mut path {
+            if *c == b'\\' as u16 {
+                *c = b'/' as u16;
+            }
+        }
+        std::ffi::OsString::from_wide(&path)
+    }
+    #[cfg(not(windows))]
+    path.as_os_str().to_owned()
+}
+
+fn same_source_path(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        git_path_argument(left) == git_path_argument(right)
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
+}
+
+fn git_relative(path: &Path) -> Result<String> {
+    git_path_argument(path)
+        .into_string()
+        .map_err(|_| anyhow!("non-UTF8 Git path"))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Match {
     source: String,
@@ -41,7 +83,7 @@ fn git(root: &Path) -> Command {
             cmd.env_remove(name);
         }
     }
-    cmd.arg("-C").arg(root);
+    cmd.arg("-C").arg(git_path_argument(root));
     cmd
 }
 
@@ -155,9 +197,9 @@ fn probe(
         } else {
             root.join(text[0])
         };
-        let source = if source_path == exclude {
+        let source = if same_source_path(&source_path, exclude) {
             "<exclude>".into()
-        } else if global.is_some_and(|p| p == source_path) {
+        } else if global.is_some_and(|p| same_source_path(p, &source_path)) {
             "<global>".into()
         } else {
             text[0].to_string()
@@ -233,20 +275,16 @@ pub fn evaluate(
     )?)?;
     for path in requested {
         relative(path)?;
-        paths.insert(
-            prefix
-                .join(path)
-                .to_str()
-                .ok_or_else(|| anyhow!("non-UTF8 project path"))?
-                .into(),
-        );
+        paths.insert(git_relative(&prefix.join(path))?);
     }
     let temp = tempfile::tempdir()?;
     let shadow = temp.path().join("worktree");
     fs::create_dir(&shadow)?;
+    let empty_config = temp.path().join("empty-config");
+    fs::write(&empty_config, [])?;
     let mut init = git(&shadow);
     init.env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_GLOBAL", &empty_config)
         .args(["init", "-q"]);
     if !init.status()?.success() {
         bail!("cannot create Git privacy probe");
@@ -365,7 +403,7 @@ pub fn evaluate(
             .and_then(|p| fs::canonicalize(p).ok())
             .map(|p| p.join(path.file_name().unwrap()))
             .unwrap_or_else(|| path.clone());
-        let destination = if absolute == exclude {
+        let destination = if same_source_path(&absolute, &exclude) {
             shadow_exclude.clone()
         } else if path.file_name().is_some_and(|n| n == ".gitignore") {
             shadow.join(absolute.strip_prefix(&root)?)
@@ -438,7 +476,7 @@ pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
     let project = fs::canonicalize(project)?;
     let prefix = project.strip_prefix(root)?;
     for path in paths {
-        let key = prefix.join(path).to_string_lossy().to_string();
+        let key = git_relative(&prefix.join(path))?;
         let proof = &evidence[&key];
         if !proof.after || proof.tracked {
             bail!("private destination {path} must be effectively Git ignored and untracked before publication; run metactl ignore install and resolve conflicting rules");

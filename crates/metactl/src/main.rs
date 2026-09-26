@@ -45,6 +45,7 @@ use sha2::{Digest, Sha256};
 
 mod git_plan;
 mod ignore_privacy;
+mod ignore_publication;
 mod ignore_recovery;
 mod noise_report;
 mod project_import;
@@ -53,7 +54,10 @@ use ignore_privacy::{
     ensure_private_projection_safe_for_ignore_change, managed_ignore_file_has_broad_roots,
     managed_ignore_has_broad_roots, tracked_generated_roots_json,
 };
-use ignore_recovery::{ensure_ignore_recovery_dir, recovery_copies_ignored_by_git};
+use ignore_publication::publish_ignore_preserving_live;
+use ignore_recovery::{
+    ensure_ignore_recovery_dir, recovery_copies_ignored_by_git, rollback_ignore_writes,
+};
 use project_import::{
     cmd_project_import, cmd_project_import_apply, cmd_project_import_browse,
     cmd_project_import_plan, project_import_error, ProjectImportApplyMode, ProjectImportBrowseArgs,
@@ -10811,81 +10815,6 @@ struct PreparedIgnoreWrite {
     permissions: Option<fs::Permissions>,
 }
 
-// Keep the displaced inode: an editor may have it open even after the exchange.
-// A read-before-rename check alone cannot protect that editor's later writes.
-fn publish_ignore_preserving_live(
-    path: &Path,
-    recovery_dir: &Path,
-    original: Option<&[u8]>,
-    bytes: &[u8],
-    permissions: Option<&fs::Permissions>,
-) -> Result<PathBuf> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow!("{} has no parent", path.display()))?;
-    fs::create_dir_all(parent)?;
-    // This directory is already covered by MetaCTL's existing `.metactl/`
-    // ignore rule. A same-filesystem exchange fails closed if it is not.
-    let mut temporary = tempfile::NamedTempFile::new_in(recovery_dir)?;
-    temporary.write_all(bytes)?;
-    if let Some(permissions) = permissions {
-        temporary.as_file().set_permissions(permissions.clone())?;
-    }
-    temporary.as_file().sync_all()?;
-    if original.is_none() {
-        // hard_link is atomic and fails rather than replacing a file created
-        // after the preimage read. Keep the staging link for recovery.
-        fs::hard_link(temporary.path(), path)?;
-        let (_, backup) = temporary.keep()?;
-        return Ok(backup);
-    }
-    let (_, backup) = temporary.keep()?;
-    if let Err(err) = exchange_ignore_paths(&backup, path) {
-        let _ = fs::remove_file(&backup);
-        return Err(err);
-    }
-    // The live version displaced by the exchange is always retained. If it
-    // differs, abort and point the operator at the recoverable exact bytes.
-    let displaced = fs::read(&backup).map_err(|err| {
-        anyhow!(
-            "read displaced ignore file: {err}; recovery copy: {}",
-            backup.display()
-        )
-    })?;
-    if Some(displaced.as_slice()) != original {
-        return Err(anyhow!(
-            "concurrent ignore edit retained at {}; destination {} also retained",
-            backup.display(),
-            path.display()
-        ));
-    }
-    for directory in [parent, recovery_dir] {
-        fs::File::open(directory)
-            .and_then(|file| file.sync_all())
-            .map_err(|err| {
-                anyhow!(
-                    "sync ignore directory {}: {err}; recovery copy: {}",
-                    directory.display(),
-                    backup.display()
-                )
-            })?;
-    }
-    Ok(backup)
-}
-
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-fn exchange_ignore_paths(left: &Path, right: &Path) -> Result<()> {
-    use rustix::fs::{renameat_with, RenameFlags, CWD};
-    renameat_with(CWD, left, CWD, right, RenameFlags::EXCHANGE).map_err(anyhow::Error::from)
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-fn exchange_ignore_paths(_left: &Path, _right: &Path) -> Result<()> {
-    Err(anyhow!(
-        "atomic ignore-file exchange unsupported on this platform"
-    ))
-}
-
 fn ignore_block_specs(
     project_root: &Path,
     targets: &[String],
@@ -11006,38 +10935,6 @@ fn prepare_ignore_write(
         updated: updated.into_bytes(),
         permissions,
     })
-}
-
-fn rollback_ignore_writes(
-    prepared: &[PreparedIgnoreWrite],
-    written: &[(usize, PathBuf)],
-) -> Vec<String> {
-    let mut outcomes = Vec::new();
-    for (index, backup) in written.iter().rev() {
-        let item = &prepared[*index];
-        if item.original.is_none() {
-            outcomes.push(format!(
-                "created {} left in place; recovery copy: {}",
-                item.path.display(),
-                backup.display()
-            ));
-            continue;
-        }
-        if let Err(err) = exchange_ignore_paths(backup, &item.path) {
-            outcomes.push(format!(
-                "rollback exchange failed for {}: {err}; recovery copy: {}",
-                item.path.display(),
-                backup.display()
-            ));
-        } else {
-            outcomes.push(format!(
-                "rollback exchanged {}; displaced bytes retained at recovery copy: {}",
-                item.path.display(),
-                backup.display()
-            ));
-        }
-    }
-    outcomes
 }
 
 fn apply_prepared_ignore_writes(
