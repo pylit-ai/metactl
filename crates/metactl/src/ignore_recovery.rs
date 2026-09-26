@@ -1,8 +1,67 @@
 use super::*;
 
+fn git_worktree_present(project_root: &Path) -> Result<bool> {
+    let probe = Command::new("git")
+        .arg("-C")
+        .arg(project_root)
+        .args(["rev-parse", "--is-inside-work-tree"])
+        .output()?;
+    if probe.status.success() {
+        return match probe.stdout.as_slice() {
+            b"true\n" => Ok(true),
+            b"false\n" => Ok(false),
+            _ => Err(anyhow!("Git worktree probe returned an invalid response")),
+        };
+    }
+
+    // Git's non-repository diagnostic and exit code are not a stable API.
+    // A worktree (including linked worktrees and submodules) has a .git
+    // directory or indirection file in its ancestry. Some non-Git projects
+    // use an info-only .git stub for local exclude rules; it cannot stage
+    // files, so it is not evidence of a Git worktree.
+    let explicit_git_dir = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]
+        .iter()
+        .any(|key| std::env::var_os(key).is_some());
+    if explicit_git_dir {
+        return Err(anyhow!(
+            "Git worktree probe failed for an explicit Git repository"
+        ));
+    }
+    let resolved_root = fs::canonicalize(project_root)?;
+    for ancestor in resolved_root.ancestors() {
+        let marker = ancestor.join(".git");
+        match fs::symlink_metadata(&marker) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                let mut entries = fs::read_dir(&marker)?;
+                let info_only = entries.try_fold(true, |only_info, entry| {
+                    let entry = entry?;
+                    Ok::<_, io::Error>(only_info && entry.file_name() == "info")
+                })?;
+                if info_only {
+                    continue;
+                }
+                return Err(anyhow!(
+                    "Git worktree probe failed near {}",
+                    marker.display()
+                ));
+            }
+            Ok(_) => {
+                return Err(anyhow!(
+                    "Git worktree probe failed near {}",
+                    marker.display()
+                ))
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Err(err) => return Err(anyhow!("inspect {}: {err}", marker.display())),
+        }
+    }
+    Ok(false)
+}
+
 pub(super) fn ensure_ignore_recovery_dir(
     project_root: &Path,
 ) -> std::result::Result<PathBuf, CliError> {
+    let in_git_worktree = git_worktree_present(project_root).map_err(state_error)?;
     let state = project_root.join(".metactl");
     let recovery = state.join("ignore-recovery");
     for dir in [&state, &recovery] {
@@ -52,13 +111,7 @@ pub(super) fn ensure_ignore_recovery_dir(
     // ignore files being repaired, including on that rollback path.
     let guard = recovery.join(".gitignore");
     let probe = recovery.join(".metactl-recovery-probe");
-    let git_tree = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .output()
-        .map_err(internal_error)?;
-    if git_tree.status.success() && git_tree.stdout == b"true\n" {
+    if in_git_worktree {
         let probe_text = probe.to_str().ok_or_else(|| {
             state_error(anyhow!(
                 "non-UTF-8 ignore recovery path: {}",
@@ -127,7 +180,7 @@ pub(super) fn ensure_ignore_recovery_dir(
         }
         Err(err) => return Err(state_error(anyhow!("inspect {}: {err}", guard.display()))),
     }
-    if git_tree.status.success() && git_tree.stdout == b"true\n" {
+    if in_git_worktree {
         recovery_copies_ignored_by_git(project_root, &[(0, guard), (0, probe)])
             .map_err(state_error)?;
     }
@@ -141,12 +194,7 @@ pub(super) fn recovery_copies_ignored_by_git(
     if written.is_empty() {
         return Ok(());
     }
-    let probe = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .output()?;
-    if !probe.status.success() || probe.stdout != b"true\n" {
+    if !git_worktree_present(project_root)? {
         return Ok(());
     }
     for (_, backup) in written {

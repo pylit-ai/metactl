@@ -719,6 +719,63 @@ fn successful_repair_recovery_copies_are_not_eligible_for_git_add_all() {
 
 #[cfg(unix)]
 #[test]
+fn ignore_fix_refuses_failed_git_rev_parse_before_writing_ignore_files() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = TempDir::new().expect("project");
+    git_init_project(project.path());
+    let ignore = project.path().join(".gitignore");
+    let original = b"# authored rule\n";
+    fs::write(&ignore, original).expect("authored ignore");
+    let real_git = std::env::split_paths(&std::env::var_os("PATH").expect("PATH"))
+        .map(|dir| dir.join("git"))
+        .find(|path| path.is_file())
+        .expect("real git");
+    let fake_bin = project.path().join("fake-bin");
+    fs::create_dir(&fake_bin).expect("fake bin");
+    let fake_git = fake_bin.join("git");
+    fs::write(
+        &fake_git,
+        "#!/bin/sh\nif [ \"$3\" = rev-parse ]; then\n  echo 'injected rev-parse failure' >&2\n  exit 128\nfi\nexec \"$METACTL_TEST_REAL_GIT\" \"$@\"\n",
+    )
+    .expect("fake git");
+    fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).expect("executable git");
+    let path = std::env::join_paths(std::iter::once(fake_bin.clone()).chain(
+        std::env::split_paths(&std::env::var_os("PATH").expect("PATH")),
+    ))
+    .expect("test PATH");
+    let home = project.path().join(".test-home");
+    fs::create_dir(&home).expect("home");
+    let result = Command::new(cli_bin())
+        .env_remove("METACTL_PROFILE")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("HOME", &home)
+        .env("PATH", path)
+        .env("METACTL_TEST_REAL_GIT", real_git)
+        .arg("--project")
+        .arg(project.path())
+        .args([
+            "ignore",
+            "fix",
+            "--scope",
+            "repo",
+            "--target",
+            "codex-cli",
+            "--yes",
+        ])
+        .output()
+        .expect("repair with failing rev-parse");
+    assert!(!result.status.success(), "repair accepted failed Git probe");
+    assert_eq!(fs::read(&ignore).expect("ignore"), original);
+    let recovery = project.path().join(".metactl/ignore-recovery");
+    assert!(!recovery.exists(), "failed probe created recovery payloads");
+    let dry_run = run_git(project.path(), &["add", "--dry-run", "--all"]);
+    assert!(dry_run.status.success(), "{}", stderr(&dry_run));
+    assert!(!stdout(&dry_run).contains("ignore-recovery"));
+}
+
+#[cfg(unix)]
+#[test]
 fn symlinked_private_recovery_root_is_refused_before_ignore_write() {
     use std::os::unix::fs::symlink;
     let project = TempDir::new().expect("project");
