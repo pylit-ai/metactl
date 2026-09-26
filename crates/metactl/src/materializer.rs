@@ -1970,6 +1970,91 @@ fn load_state(path: &Path) -> Result<Option<ManagedState>> {
     Ok(Some(state))
 }
 
+/// Read persisted destinations across every target without staging or applying outputs.
+/// A malformed or symlinked inventory must never be treated as an empty inventory.
+pub fn installed_projection_destinations(
+    project_root: &Path,
+) -> Result<Vec<(String, Option<Ref>)>> {
+    let root = project_root.join(".metactl");
+    if !safe_inventory_directory(&root)? {
+        return Ok(Vec::new());
+    }
+    let mut records = Vec::new();
+    for directory in [root.join("state"), root.join("generated")] {
+        if !safe_inventory_directory(&directory)? {
+            continue;
+        }
+        let is_state = directory.ends_with("state");
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if is_state {
+                if path.extension().is_none_or(|ext| ext != "json")
+                    || path
+                        .file_name()
+                        .is_some_and(|name| name == "managed_files.json")
+                {
+                    continue;
+                }
+                safe_inventory_file(&path)?;
+                if let Some(state) = load_state(&path)? {
+                    records.extend(
+                        state
+                            .outputs
+                            .into_iter()
+                            .map(|output| (output.destination_path, output.pack_ref)),
+                    );
+                }
+            } else {
+                if !safe_inventory_directory(&path)? {
+                    return Err(anyhow!(
+                        "invalid generated target inventory: {}",
+                        path.display()
+                    ));
+                }
+                let manifest_path = path.join("compile.manifest.json");
+                match fs::symlink_metadata(&manifest_path) {
+                    Ok(_) => {
+                        safe_inventory_file(&manifest_path)?;
+                        let manifest = crate::project::load_compile_manifest(&manifest_path)?;
+                        for output in manifest.generated_outputs {
+                            records.push((
+                                output.destination_path.ok_or_else(|| {
+                                    anyhow!(
+                                        "missing generated destination in {}",
+                                        manifest_path.display()
+                                    )
+                                })?,
+                                output.pack_ref,
+                            ));
+                        }
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+    }
+    Ok(records)
+}
+
+fn safe_inventory_directory(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(anyhow!("unsafe inventory directory: {}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn safe_inventory_file(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(anyhow!("unsafe inventory file: {}", path.display()));
+    }
+    Ok(())
+}
+
 fn state_path(project_root: &Path, target: &Ref) -> PathBuf {
     project_root
         .join(".metactl")

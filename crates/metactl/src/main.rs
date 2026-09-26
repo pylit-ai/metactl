@@ -44,10 +44,15 @@ use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 mod git_plan;
+mod ignore_privacy;
 mod ignore_recovery;
 mod noise_report;
 mod project_import;
 mod setup;
+use ignore_privacy::{
+    ensure_private_projection_safe_for_ignore_change, managed_ignore_file_has_broad_roots,
+    managed_ignore_has_broad_roots, tracked_generated_roots_json,
+};
 use ignore_recovery::{ensure_ignore_recovery_dir, recovery_copies_ignored_by_git};
 use project_import::{
     cmd_project_import, cmd_project_import_apply, cmd_project_import_browse,
@@ -10632,6 +10637,7 @@ fn cmd_ignore_install(
     let resolution = resolve_ignore_targets(&project_root, &args.target).map_err(state_error)?;
     let targets = resolution.targets;
     let changes = apply_ignore_scope(
+        cli,
         &project_root,
         &targets,
         args.scope,
@@ -10700,6 +10706,7 @@ fn cmd_ignore_fix(cli: &Cli, args: &IgnoreFixArgs) -> std::result::Result<Comman
     let tracked_generated_roots =
         tracked_generated_roots_json(&project_root, &targets).map_err(state_error)?;
     let actions = planned_ignore_actions(
+        cli,
         &project_root,
         &targets,
         args.scope,
@@ -10742,6 +10749,7 @@ fn cmd_ignore_fix(cli: &Cli, args: &IgnoreFixArgs) -> std::result::Result<Comman
     }
 
     let changes = apply_ignore_scope(
+        cli,
         &project_root,
         &targets,
         args.scope,
@@ -11170,40 +11178,8 @@ fn git_local_exclude_path(project_root: &Path) -> std::result::Result<PathBuf, C
     Ok(path)
 }
 
-fn managed_ignore_file_has_broad_roots(path: &Path) -> std::result::Result<bool, CliError> {
-    let (bytes, _) = read_ignore_preimage(path)?;
-    let Some(bytes) = bytes else {
-        return Ok(false);
-    };
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|err| state_error(anyhow::anyhow!("{}: {err}", path.display())))?;
-    let Some((start, end)) =
-        marked_block_span(text, IGNORE_BLOCK_BEGIN, IGNORE_BLOCK_END).map_err(state_error)?
-    else {
-        return Ok(false);
-    };
-    Ok(text[start..end]
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.starts_with('#') && !line.starts_with('!'))
-        .any(|line| {
-            [".agents", ".codex", ".claude", ".cursor", ".gemini"]
-                .iter()
-                .any(|root| line.contains(root))
-        }))
-}
-
-fn managed_ignore_has_broad_roots(project_root: &Path) -> bool {
-    [
-        project_root.join(".gitignore"),
-        git_local_exclude_path(project_root)
-            .unwrap_or_else(|_| project_root.join(".git/info/exclude")),
-    ]
-    .iter()
-    .any(|path| managed_ignore_file_has_broad_roots(path).unwrap_or(true))
-}
-
 fn apply_ignore_scope(
+    cli: &Cli,
     project_root: &Path,
     targets: &[String],
     scope: IgnoreScopeArg,
@@ -11230,10 +11206,12 @@ fn apply_ignore_scope(
         .iter()
         .map(prepare_ignore_write)
         .collect::<std::result::Result<Vec<_>, _>>()?;
+    ensure_private_projection_safe_for_ignore_change(cli, project_root, &prepared)?;
     apply_prepared_ignore_writes(project_root, &prepared)
 }
 
 fn planned_ignore_actions(
+    cli: &Cli,
     project_root: &Path,
     targets: &[String],
     scope: IgnoreScopeArg,
@@ -11243,7 +11221,19 @@ fn planned_ignore_actions(
 ) -> std::result::Result<Vec<Value>, CliError> {
     let _ = root_paths;
     ensure_no_broad_untouched_scope(project_root, scope)?;
-    ignore_block_specs(project_root, targets, scope, include_lock, include_private_sources)
+    let specs = ignore_block_specs(
+        project_root,
+        targets,
+        scope,
+        include_lock,
+        include_private_sources,
+    );
+    let prepared = specs
+        .iter()
+        .map(prepare_ignore_write)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    ensure_private_projection_safe_for_ignore_change(cli, project_root, &prepared)?;
+    specs
         .iter()
         .map(|spec| {
             let prepared = prepare_ignore_write(spec)?;
@@ -11255,73 +11245,6 @@ fn planned_ignore_actions(
             }))
         })
         .collect()
-}
-
-fn tracked_generated_roots_json(project_root: &Path, targets: &[String]) -> Result<Vec<Value>> {
-    let roots = generated_roots_for_targets(targets);
-    if roots.is_empty() || !project_root.join(".git").exists() {
-        return Ok(Vec::new());
-    }
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .arg("ls-files")
-        .arg("-z")
-        .arg("--")
-        .args(&roots)
-        .output()
-        .with_context(|| format!("run git ls-files in {}", project_root.display()))?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let files = raw
-        .split('\0')
-        .filter(|item| !item.is_empty())
-        .map(|item| item.replace('\\', "/"))
-        .collect::<Vec<_>>();
-    let mut by_root = BTreeMap::<String, Vec<String>>::new();
-    for file in files {
-        for root in &roots {
-            if file == *root || file.starts_with(&format!("{root}/")) {
-                by_root.entry(root.clone()).or_default().push(file.clone());
-            }
-        }
-    }
-    Ok(by_root
-        .into_iter()
-        .map(|(root, files)| {
-            json!({
-                "root": root,
-                "classification": "tracked-agent-root-ownership-unverified",
-                "file_count": files.len(),
-                "tracked_files": files,
-            })
-        })
-        .collect())
-}
-
-fn generated_roots_for_targets(targets: &[String]) -> Vec<String> {
-    let mut roots = BTreeSet::new();
-    for target in targets {
-        match target.as_str() {
-            "codex-cli" => {
-                roots.insert(".codex".to_string());
-                roots.insert(".agents".to_string());
-            }
-            "claude-code" => {
-                roots.insert(".claude".to_string());
-            }
-            "cursor" => {
-                roots.insert(".cursor".to_string());
-            }
-            "gemini-cli" => {
-                roots.insert(".gemini".to_string());
-            }
-            _ => {}
-        }
-    }
-    roots.into_iter().collect()
 }
 
 fn ignore_next_commands(

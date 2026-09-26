@@ -31,6 +31,241 @@ fn assert_agent_file_preserved(project: &Path, path: &str) {
 }
 
 #[test]
+fn private_projection_in_stale_state_refuses_ignore_migration_before_writes() {
+    let project = TempDir::new().expect("tempdir");
+    git_init_project(project.path());
+    init_project(project.path());
+    let skill = ".agents/skills/local-only-example/local-only-example/SKILL.md";
+    let file = project.path().join(skill);
+    fs::create_dir_all(file.parent().expect("parent")).expect("skill dir");
+    fs::write(&file, "# Synthetic local-only example\n").expect("skill");
+    let state = project.path().join(".metactl/state/codex-cli.json");
+    fs::create_dir_all(state.parent().expect("parent")).expect("state dir");
+    fs::write(
+        &state,
+        serde_json::to_vec(&json!({
+            "api_version": "metactl/v1",
+            "target": {"kind":"target", "id":"codex-cli", "version":"1.0.0"},
+            "apply_mode": "copy",
+            "outputs": [{
+                "staged_path":".metactl/generated/codex-cli/skills/local-only-example/SKILL.md",
+                "destination_path":skill,
+                "applied_digest":"synthetic",
+                "backup_path":null,
+                "existed_before":false,
+                "patch_marker":null,
+                "pack_ref":{"kind":"pack", "id":"local-only-example", "version":"1.0.0"}
+            }]
+        }))
+        .expect("json"),
+    )
+    .expect("state");
+    let broad = b"# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n# metactl:end generated-agent-surfaces\n";
+    fs::write(project.path().join(".gitignore"), broad).expect("ignore");
+    fs::write(project.path().join(".git/info/exclude"), broad).expect("exclude");
+    let before_index = run_git(project.path(), &["ls-files", "--stage"]).stdout;
+    let before = run_git(project.path(), &["add", "--dry-run", "--all"]);
+    assert!(!String::from_utf8_lossy(&before.stdout).contains(skill));
+    for args in [
+        vec![
+            "ignore",
+            "fix",
+            "--plan",
+            "--scope",
+            "both",
+            "--target",
+            "codex-cli",
+        ],
+        vec![
+            "ignore",
+            "fix",
+            "--scope",
+            "both",
+            "--target",
+            "codex-cli",
+            "--yes",
+        ],
+        vec![
+            "ignore",
+            "install",
+            "--scope",
+            "both",
+            "--target",
+            "codex-cli",
+        ],
+    ] {
+        let result = run_cli(project.path(), &args);
+        assert!(!result.status.success(), "{:?}: {}", args, stdout(&result));
+        assert!(stderr(&result).contains("private") || stdout(&result).contains("private"));
+        assert_eq!(
+            fs::read(project.path().join(".gitignore")).expect("ignore"),
+            broad
+        );
+        assert_eq!(
+            fs::read(project.path().join(".git/info/exclude")).expect("exclude"),
+            broad
+        );
+        assert_eq!(
+            run_git(project.path(), &["ls-files", "--stage"]).stdout,
+            before_index
+        );
+        let after = run_git(project.path(), &["add", "--dry-run", "--all"]);
+        assert!(!String::from_utf8_lossy(&after.stdout).contains(skill));
+    }
+    git_add_forced(project.path(), &[skill]);
+    fs::remove_file(&file).expect("remove working file but retain staged bytes");
+    let indexed_before = run_git(project.path(), &["ls-files", "--stage"]).stdout;
+    let index_only = run_cli(
+        project.path(),
+        &[
+            "ignore",
+            "fix",
+            "--plan",
+            "--scope",
+            "both",
+            "--target",
+            "codex-cli",
+        ],
+    );
+    assert!(
+        !index_only.status.success(),
+        "staged private bytes were missed"
+    );
+    assert_eq!(
+        run_git(project.path(), &["ls-files", "--stage"]).stdout,
+        indexed_before
+    );
+    assert_eq!(
+        fs::read(project.path().join(".gitignore")).expect("ignore"),
+        broad
+    );
+}
+
+#[test]
+fn ignore_refuses_missing_or_malformed_inventory_with_surviving_output() {
+    for malformed in [false, true] {
+        let project = TempDir::new().expect("tempdir");
+        git_init_project(project.path());
+        let skill = project
+            .path()
+            .join(".agents/skills/private-example/SKILL.md");
+        fs::create_dir_all(skill.parent().expect("parent")).expect("skill dir");
+        fs::write(&skill, "synthetic private\n").expect("skill");
+        let broad = b"# metactl:begin generated-agent-surfaces\n.agents/\n# metactl:end generated-agent-surfaces\n";
+        fs::write(project.path().join(".gitignore"), broad).expect("ignore");
+        if malformed {
+            let state = project.path().join(".metactl/state/codex-cli.json");
+            fs::create_dir_all(state.parent().expect("parent")).expect("state dir");
+            fs::write(state, b"{malformed").expect("state");
+        }
+        let result = run_cli(
+            project.path(),
+            &[
+                "ignore",
+                "fix",
+                "--scope",
+                "repo",
+                "--target",
+                "codex-cli",
+                "--yes",
+            ],
+        );
+        assert!(
+            !result.status.success(),
+            "missing/malformed inventory escaped"
+        );
+        assert_eq!(
+            fs::read(project.path().join(".gitignore")).expect("ignore"),
+            broad
+        );
+    }
+}
+
+#[test]
+fn unknown_non_skill_projection_refuses_migration() {
+    let project = TempDir::new().expect("tempdir");
+    git_init_project(project.path());
+    let destination = ".codex/config.toml";
+    let file = project.path().join(destination);
+    fs::create_dir_all(file.parent().expect("parent")).expect("dir");
+    fs::write(&file, "synthetic = true\n").expect("resource");
+    let state = project.path().join(".metactl/state/codex-cli.json");
+    fs::create_dir_all(state.parent().expect("parent")).expect("state dir");
+    fs::write(
+        &state,
+        serde_json::to_vec(&json!({
+            "api_version":"metactl/v1",
+            "target":{"kind":"target","id":"codex-cli","version":"1.0.0"},
+            "apply_mode":"copy",
+            "outputs":[{"staged_path":".metactl/generated/codex-cli/config.toml",
+                "destination_path":destination,"applied_digest":"synthetic",
+                "backup_path":null,"existed_before":false,"patch_marker":null}]
+        }))
+        .expect("json"),
+    )
+    .expect("state");
+    let broad = b"# metactl:begin generated-agent-surfaces\n.codex/\n# metactl:end generated-agent-surfaces\n";
+    fs::write(project.path().join(".gitignore"), broad).expect("ignore");
+    let result = run_cli(
+        project.path(),
+        &[
+            "ignore",
+            "install",
+            "--scope",
+            "repo",
+            "--target",
+            "codex-cli",
+        ],
+    );
+    assert!(
+        !result.status.success(),
+        "missing pack reference was treated as shared"
+    );
+    assert_eq!(
+        fs::read(project.path().join(".gitignore")).expect("ignore"),
+        broad
+    );
+}
+
+#[test]
+fn configured_private_pack_cannot_synthesize_exposed_codex_skill() {
+    let project = TempDir::new().expect("tempdir");
+    git_init_project(project.path());
+    init_project(project.path());
+    let add = run_cli(project.path(), &["add", "local-only-example"]);
+    assert!(add.status.success(), "{}", stderr(&add));
+    let sync = run_cli(project.path(), &["--json", "sync", "--yes"]);
+    assert!(sync.status.success(), "{}", stderr(&sync));
+    assert!(stdout(&sync).contains("private_nonlocal_outputs_omitted"));
+    assert!(!project
+        .path()
+        .join(".agents/skills/local-only-example")
+        .exists());
+    let broad = b"# metactl:begin generated-agent-surfaces\n.agents/\n# metactl:end generated-agent-surfaces\n";
+    fs::write(project.path().join(".gitignore"), broad).expect("ignore");
+    let plan = run_cli(
+        project.path(),
+        &[
+            "ignore",
+            "fix",
+            "--plan",
+            "--scope",
+            "repo",
+            "--target",
+            "codex-cli",
+        ],
+    );
+    assert!(
+        !plan.status.success(),
+        "configured private pack escaped migration gate"
+    );
+    assert_eq!(
+        fs::read(project.path().join(".gitignore")).expect("ignore"),
+        broad
+    );
+}
+
+#[test]
 fn ignore_fix_preserves_custom_command_after_real_sync() {
     let project = TempDir::new().expect("tempdir");
     git_init_project(project.path());

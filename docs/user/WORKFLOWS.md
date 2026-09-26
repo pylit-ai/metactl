@@ -129,6 +129,15 @@ content. The ignore commands keep those roots visible and tracked; an old broad
 MetaCTL-managed ignore block is replaced by the safer policy. The
 `--untrack-generated` flag is currently refused. Root adapter docs such as
 `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` remain outside this repair.
+If an installed private projection, unknown provenance, or an active private
+pack would lose protection, plan/install/fix refuse before writing. Keep the
+old ignore rules while inspecting the exact managed destination and its Git
+index entry. A missing or malformed inventory is not evidence that a generated
+skill is public. Sync may still produce shared outputs and a protected native
+local instruction document; private skills, resources, and other nonlocal
+outputs are omitted with `private_nonlocal_outputs_omitted` degradation until
+an exact protected routing is available. This is a deliberate privacy limit,
+not a migration or automatic untracking step.
 Each changed ignore file leaves a reported copy under the private,
 Git-ignored `.metactl/ignore-recovery/` directory. Keep it until any
 concurrent edit has been reconciled; MetaCTL does not delete it.
