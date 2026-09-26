@@ -71,3 +71,10 @@ inline Git configuration overrides, including hook environments that supply
 these variables. These conservative refusals publish no private content; early
 bootstrap may create empty directories. Native Windows private copy workflows
 are covered separately from this unsupported symlink case.
+
+Shared diagnostic names come from known target capabilities and the enforced
+policy; arbitrary supplied graph strings remain local. MCP policy metadata names
+only the policy actually enforced by compilation. Registry-backed compilation
+requires a registered target, matching resolution. Compile privacy preflight uses
+the requested surface and apply modes; apply preflight validates the selected
+stored manifests and their effective modes before publishing any review plan.

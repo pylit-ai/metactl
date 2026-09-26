@@ -1667,7 +1667,7 @@ fn synthesize_outputs(
                 let destination = compile_target.path_template.clone();
                 let contents = serde_json::to_vec_pretty(&serde_json::json!({
                     "target": target.target_id,
-                    "policies": resolve_graph.applied_policies.iter().map(|item| &item.id).collect::<Vec<_>>(),
+                    "policies": [&policy.id],
                     "active_packs": packs.iter().map(|pack| &pack.manifest.id).collect::<Vec<_>>(),
                 }))?;
                 outputs.push(StagedOutputInput {

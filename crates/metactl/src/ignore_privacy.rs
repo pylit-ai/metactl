@@ -1,4 +1,5 @@
 use super::*;
+use metactl::SurfaceSelectionMode;
 use std::path::Component;
 
 pub(super) const PRIVATE_LOCAL_DESTINATIONS: &[&str] = &[
@@ -105,6 +106,8 @@ pub(super) fn planned_proofs(
     cli: &Cli,
     root: &Path,
     overrides: &ConfigOverrides,
+    surface_override: Option<SurfaceSelectionMode>,
+    apply_override: Option<ApplyMode>,
 ) -> std::result::Result<(Vec<metactl::library_registry::ProjectionProof>, bool), CliError> {
     if !project_config_path(root, cli.config.as_deref()).exists() {
         return Ok((vec![], false));
@@ -123,10 +126,12 @@ pub(super) fn planned_proofs(
                 ..overrides.clone()
             })
             .map_err(state_error)?;
-        let surface_selection_mode = config
-            .defaults
-            .as_ref()
-            .and_then(|d| d.surface_selection_mode.clone());
+        let surface_selection_mode = surface_override.clone().or_else(|| {
+            config
+                .defaults
+                .as_ref()
+                .and_then(|d| d.surface_selection_mode.clone())
+        });
         let graph = kernel
             .resolve(ResolveParams {
                 config,
@@ -140,7 +145,9 @@ pub(super) fn planned_proofs(
             registry
                 .projection_proofs(&CompileParams {
                     resolve_graph: graph,
-                    apply_mode: preferred_apply_mode_for_target(&target, None),
+                    apply_mode: apply_override
+                        .clone()
+                        .unwrap_or_else(|| preferred_apply_mode_for_target(&target, None)),
                     target_capability: target,
                     surface_selection_mode,
                     emit_policy_report: false,
@@ -160,7 +167,7 @@ pub(super) fn add_private_patterns(
     root: &Path,
     specs: &mut [IgnoreBlockSpec],
 ) -> std::result::Result<(), CliError> {
-    let paths: BTreeSet<_> = planned_proofs(cli, root, &ConfigOverrides::default())?
+    let paths: BTreeSet<_> = planned_proofs(cli, root, &ConfigOverrides::default(), None, None)?
         .0
         .into_iter()
         .filter(|p| p.private)
@@ -198,7 +205,8 @@ pub(super) fn ensure_private_projection_safe_for_ignore_change(
         metactl::materializer::installed_projection_destinations(root).map_err(state_error)?;
     let configured = project_config_path(root, cli.config.as_deref()).exists();
     let strict = configured || !records.is_empty();
-    let (proofs, private_state) = planned_proofs(cli, root, &ConfigOverrides::default())?;
+    let (proofs, private_state) =
+        planned_proofs(cli, root, &ConfigOverrides::default(), None, None)?;
     let mut private: BTreeSet<String> = PRIVATE_LOCAL_DESTINATIONS
         .iter()
         .map(|s| (*s).into())
@@ -352,8 +360,11 @@ pub(super) fn ensure_private_sync_safe(
     cli: &Cli,
     root: &Path,
     overrides: &ConfigOverrides,
+    surface_override: Option<SurfaceSelectionMode>,
+    apply_override: Option<ApplyMode>,
 ) -> std::result::Result<(), CliError> {
-    let (proofs, private_state) = planned_proofs(cli, root, overrides)?;
+    let (proofs, private_state) =
+        planned_proofs(cli, root, overrides, surface_override, apply_override)?;
     let mut paths: Vec<_> = proofs
         .into_iter()
         .filter(|p| p.private)

@@ -7169,7 +7169,17 @@ fn cmd_compile_with_durable_writes(
         return Err(discoverability_error(&discoverability));
     }
 
-    ignore_privacy::ensure_private_sync_safe(cli, &project_root, &preflight_overrides)?;
+    ignore_privacy::ensure_private_sync_safe(
+        cli,
+        &project_root,
+        &preflight_overrides,
+        args.surface_mode.map(Into::into),
+        if args.apply {
+            args.apply_mode.map(Into::into)
+        } else {
+            None
+        },
+    )?;
 
     let shared_surface_rules = shared_surface_rules(context.registry.as_ref(), &target_overrides);
 
@@ -7419,7 +7429,6 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
     if lock_is_stale_checked(&context)? {
         return Err(stale_lock_error());
     }
-    ignore_privacy::ensure_private_sync_safe(cli, &project_root, &ConfigOverrides::default())?;
     let kernel = kernel_from_context(&context).map_err(internal_error)?;
     let targets = select_locked_targets(&context.lock, args.target.clone())?;
     if args.plan_digest.is_some() && targets.len() != 1 {
@@ -7444,6 +7453,11 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             &manifest,
             target_capability.as_ref(),
         )?;
+        if let Some(registry) = context.registry.as_ref() {
+            registry
+                .protect_private_manifest(&project_root, &manifest, &apply_mode)
+                .map_err(state_error)?;
+        }
         prepared_targets.push((target, manifest, apply_mode, note));
     }
     // Single-target apply already checks access after conflict/stale-plan checks.

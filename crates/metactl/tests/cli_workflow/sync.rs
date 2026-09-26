@@ -1719,3 +1719,79 @@ fn cli_private_role_default_override_is_checked_before_writes() {
     assert!(!output.status.success());
     assert_eq!(privacy_snapshot(project.path()), before);
 }
+
+#[test]
+fn cli_minimal_surface_override_does_not_require_unrequested_private_surfaces() {
+    let project = TempDir::new().unwrap();
+    let library = TempDir::new().unwrap();
+    copy_directory(Path::new(&starter_library_root()), library.path());
+    let pack_path = library.path().join("packs/python-refactor.json");
+    let mut pack: Value = serde_json::from_slice(&fs::read(&pack_path).unwrap()).unwrap();
+    pack["visibility_scope"] = json!("private");
+    fs::write(pack_path, serde_json::to_vec(&pack).unwrap()).unwrap();
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["init", "-q"])
+        .status()
+        .unwrap()
+        .success());
+    init_project(project.path());
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["packs"] = serde_yaml::to_value(vec!["python-refactor"]).unwrap();
+    config["starter_library"] =
+        serde_yaml::to_value(vec![library.path().display().to_string()]).unwrap();
+    config["defaults"]["surface_selection_mode"] = serde_yaml::to_value("full").unwrap();
+    fs::write(config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+    fs::write(
+        project.path().join(".gitignore"),
+        "/.metactl/\n/metactl.local.yaml\n/.test-home/\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".git/info/exclude"),
+        "/.agents/skills/python-refactor/python-refactor/\n",
+    )
+    .unwrap();
+    let minimal = run_cli(
+        project.path(),
+        &[
+            "compile",
+            "--surface-mode",
+            "minimal",
+            "--apply",
+            "--apply-mode",
+            "copy",
+            "--no-input",
+        ],
+    );
+    assert!(minimal.status.success(), "{}", stderr(&minimal));
+    let applied = run_cli(project.path(), &["apply", "--mode", "copy", "--no-input"]);
+    assert!(applied.status.success(), "{}", stderr(&applied));
+    assert!(project
+        .path()
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
+        .exists());
+    let manifest_path = project
+        .path()
+        .join(".metactl/generated/codex-cli/compile.manifest.json");
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["surface_selection_mode"], "minimal");
+    assert!(!manifest["generated_outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|o| o["destination_path"]
+            .as_str()
+            .unwrap_or("")
+            .contains("/contracts/")));
+    let before = privacy_snapshot(project.path());
+    let full = run_cli(
+        project.path(),
+        &["compile", "--surface-mode", "full", "--no-input"],
+    );
+    assert!(!full.status.success());
+    assert_eq!(privacy_snapshot(project.path()), before);
+}

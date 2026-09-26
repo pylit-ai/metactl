@@ -159,6 +159,7 @@ pub(super) fn instruction_document(
             ));
         }
     }
+    let known_capabilities = serde_json::to_value(&target.capabilities)?;
     let mut rendered_gaps = BTreeSet::new();
     for gap in &resolve_graph.capability_gaps {
         // Saved local selections can refer to private, suppressed, deselected,
@@ -167,7 +168,9 @@ pub(super) fn instruction_document(
             "auto_surface_selection"
         } else if gap.feature == "pack_selection" && gap.reason_code == ReasonCode::ZeroMatch {
             "pack_selection"
-        } else if !gap.affected_refs.is_empty()
+        } else if (known_capabilities.get(&gap.feature).is_some()
+            || policy.rules.iter().any(|rule| rule.id == gap.feature))
+            && !gap.affected_refs.is_empty()
             && gap.affected_refs.iter().all(|reference| {
                 reference.kind == RefKind::Pack
                     && packs_in_plan(plan).contains(&reference.id.as_str())

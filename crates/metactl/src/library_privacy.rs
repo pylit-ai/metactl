@@ -165,6 +165,16 @@ impl LibraryRegistry {
     }
 
     pub(super) fn validate_privacy_graph(&self, graph: &ResolveGraph) -> Result<()> {
+        if graph.selected_target.kind != RefKind::Target
+            || self
+                .targets
+                .get(&graph.selected_target.id)
+                .is_none_or(|target| !ref_matches_version(&graph.selected_target, &target.version))
+        {
+            anyhow::bail!(
+                "compile target is not registry-proven; resolve with a registered target"
+            );
+        }
         for pack_ref in &graph.activated_pack_refs {
             let pack = self
                 .find_pack(pack_ref)

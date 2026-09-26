@@ -410,3 +410,114 @@ fn graph_privacy_audits_all_reference_and_opaque_metadata_fields() {
     params.resolve_graph.requested_pack_refs.push(unknown_ref);
     assert!(registry.compile(params).is_err());
 }
+
+#[test]
+fn supplied_graph_cannot_copy_opaque_fields_into_shared_outputs() {
+    let (_library, project, registry, mut params) = fixture(true);
+    let shared = registry
+        .packs
+        .get("python-refactor")
+        .unwrap()
+        .manifest
+        .pack_ref();
+    let graph = &mut params.resolve_graph;
+    graph.requested_pack_refs = vec![shared.clone()];
+    graph.activated_pack_refs = vec![shared.clone()];
+    graph.pack_visibility.clear();
+    graph
+        .pack_visibility
+        .insert(shared.id.clone(), VisibilityScope::Shared);
+    graph.provenance_refs.clear();
+    graph.capability_gaps = vec![
+        CapabilityGap {
+            feature: "OPAQUE_PRIVATE_GAP_CANARY".into(),
+            reason_code: ReasonCode::UnsupportedTarget,
+            affected_refs: vec![shared.clone()],
+        },
+        CapabilityGap {
+            feature: "local_scripts".into(),
+            reason_code: ReasonCode::UnsupportedTarget,
+            affected_refs: vec![shared],
+        },
+    ];
+    graph.applied_policies.push(Ref {
+        kind: RefKind::Policy,
+        id: "OPAQUE_PRIVATE_POLICY_CANARY".into(),
+        version: None,
+    });
+    fs::write(project.path().join(".git/info/exclude"), ".metactl/\n").unwrap();
+    let manifest = registry.compile(params).unwrap().compile_manifest;
+    let mut leaks = Vec::new();
+    for output in &manifest.generated_outputs {
+        let text = fs::read_to_string(project.path().join(&output.path)).unwrap();
+        if text.contains("OPAQUE_PRIVATE_GAP_CANARY")
+            || text.contains("OPAQUE_PRIVATE_POLICY_CANARY")
+        {
+            leaks.push(output.destination_path.clone());
+        }
+    }
+    assert!(
+        leaks.is_empty(),
+        "opaque graph fields entered shared outputs: {leaks:?}"
+    );
+    let doc = fs::read_to_string(
+        project
+            .path()
+            .join(".metactl/generated/private-custom/CLAUDE.md"),
+    )
+    .unwrap();
+    assert!(doc.contains("|gap:local_scripts=UnsupportedTarget"));
+}
+
+#[test]
+fn suppressed_private_candidate_metadata_remains_protected() {
+    let (_library, project, mut registry, mut params) = fixture(false);
+    registry
+        .packs
+        .get_mut("private-runtime")
+        .unwrap()
+        .promotion_status = PromotionStatus::Candidate;
+    registry
+        .packs
+        .get_mut("private-runtime")
+        .unwrap()
+        .manifest
+        .trust_tier = crate::types::TrustTier::CandidateQuarantined;
+    let graph = &params.resolve_graph;
+    let config: Config = serde_json::from_value(serde_json::json!({"api_version":crate::types::API_VERSION,"role":graph.role,"policy":graph.applied_policies[0],"targets":[graph.selected_target],"packs":graph.requested_pack_refs})).unwrap();
+    params.resolve_graph = registry
+        .resolve(ResolveParams {
+            config,
+            overlay: None,
+            available_targets: vec![params.target_capability.clone()],
+            provenance: None,
+        })
+        .unwrap();
+    assert!(params.resolve_graph.activated_pack_refs.is_empty());
+    assert_eq!(
+        params.resolve_graph.suppressed_packs[0].reason_code,
+        ReasonCode::UntrustedPack
+    );
+    assert!(registry.compile(params.clone()).is_err());
+    assert!(!project.path().join(".metactl/generated").exists());
+    fs::write(project.path().join(".git/info/exclude"), ".metactl/\n").unwrap();
+    let manifest = registry.compile(params).unwrap().compile_manifest;
+    assert!(registry.graph_requires_private_state(manifest.resolve_graph.as_ref().unwrap()));
+}
+
+#[test]
+fn supplied_graph_unknown_target_cannot_publish_a_shared_header() {
+    let (_library, project, registry, mut params) = fixture(false);
+    params.target_capability.target_id = "UNREGISTERED_PRIVATE_TARGET".into();
+    params.resolve_graph.selected_target = params.target_capability.target_ref();
+    fs::write(
+        project.path().join(".git/info/exclude"),
+        ".metactl/\n.claude/\nCLAUDE.local.md\n",
+    )
+    .unwrap();
+    assert!(registry.compile(params).is_err());
+    assert!(!project
+        .path()
+        .join(".metactl/generated/UNREGISTERED_PRIVATE_TARGET")
+        .exists());
+}
