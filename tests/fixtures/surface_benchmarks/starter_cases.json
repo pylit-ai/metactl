@@ -15,7 +15,7 @@
     "auto_generated_surface_reduction_min": 0.05,
     "auto_skill_body_reduction_min": 0.05,
     "expected_pack_recall_at_3_min": 1.0,
-    "expected_command_availability_min": 1.0,
+    "expected_skill_availability_min": 1.0,
     "false_negative_count_max": 0
   },
   "task_cases": [
@@ -33,19 +33,19 @@
       "id": "test-verification-command-route",
       "query": "run targeted tests verification loop",
       "expected_pack": "unit-test-loop",
-      "expected_command": ".codex/commands/run-targeted-tests.md"
+      "expected_skill": ".agents/skills/unit-test-loop/unit-test-loop/SKILL.md"
     },
     {
       "id": "skill-improvement-command-route",
       "query": "improve metactl skill command feedback",
       "expected_pack": "metactl-skill-improvement",
-      "expected_command": ".codex/commands/metactl-improve-skill.md"
+      "expected_skill": ".agents/skills/metactl-skill-improvement/metactl-skill-improvement/SKILL.md"
     },
     {
       "id": "artifact-forge-command-route",
       "query": "turn prompts commands rules into artifacts",
       "expected_pack": "agentic-artifact-forge",
-      "expected_command": ".codex/commands/agentic-artifact-forge.md"
+      "expected_skill": ".agents/skills/agentic-artifact-forge/agentic-artifact-forge/SKILL.md"
     }
   ]
 }

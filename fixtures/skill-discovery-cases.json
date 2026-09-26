@@ -1,0 +1,28 @@
+{
+  "schema": "metactl.discovery_benchmark.v1",
+  "purpose": "Authored development cases frozen before benchmark; not held-out or agent task-success evidence",
+  "skills": [
+    {"name":"fault-isolation","description":"Investigate failures, reconnect problems, stale revisions, crashes and regression causes before changing code."},
+    {"name":"interface-review","description":"Review contrast, keyboard navigation, screen reader labels and accessible focus behavior."},
+    {"name":"release-check","description":"Verify version, changelog, packaging, release checklist and rollback readiness."},
+    {"name":"data-change","description":"Plan database schema migration, backfill, rollback and compatibility tests."},
+    {"name":"test-design","description":"Design regression tests, fixtures, edge cases and repeatable verification."},
+    {"name":"code-inspection","description":"Review patches for correctness, security, maintainability and missing tests."},
+    {"name":"documentation","description":"Write user guides, installation instructions, examples and reference documentation."},
+    {"name":"dependency-map","description":"Identify module dependencies, ownership, boundaries and affected consumers."}
+  ],
+  "cases": [
+    {"id":"reconnect","query":"Investigate stale revisions after reconnect","relevant":["fault-isolation"]},
+    {"id":"accessibility","query":"Check keyboard navigation and screen reader labels","relevant":["interface-review"]},
+    {"id":"release","query":"Check changelog and packaging before release","relevant":["release-check"]},
+    {"id":"migration","query":"Plan a database backfill and rollback","relevant":["data-change"]},
+    {"id":"tests","query":"Design edge cases and regression fixtures","relevant":["test-design"]},
+    {"id":"review","query":"Review patches for correctness and security","relevant":["code-inspection"]},
+    {"id":"docs","query":"Write installation instructions and user guides","relevant":["documentation"]},
+    {"id":"dependencies","query":"Find affected consumers across module boundaries","relevant":["dependency-map"]},
+    {"id":"multi","query":"Investigate reconnect failures and design regression tests","relevant":["fault-isolation","test-design"]},
+    {"id":"exact","query":"interface-review","relevant":["interface-review"]},
+    {"id":"none-arithmetic","query":"2 plus 2","relevant":[]},
+    {"id":"none-greeting","query":"hello","relevant":[]}
+  ]
+}

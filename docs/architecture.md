@@ -21,3 +21,27 @@ Library-stack nouns:
 - `Projection`: generated target-native files in a project, never the canonical source.
 - `Public example`: generic OSS material authored or generated from safe fixtures.
 - `Sanitized export`: an explicit reviewed export from private source material with dropped fields and provenance recorded.
+
+## Internal ownership and checks
+
+The CLI entry point owns argument parsing and dispatch. Focused command modules
+own workflows: `cli_fleet.rs` contains fleet selection, controller resolution,
+execution, and reporting, alongside the existing source/profile/pack modules.
+Shared CLI helpers remain with their existing consumers; module interfaces are
+internal to the binary.
+
+`library_registry.rs` owns library loading and resolution/compile orchestration.
+`library_discovery.rs` owns candidate normalization and search evidence;
+`library_instruction_format.rs` owns instruction formatting and byte-budget
+rules. Filesystem application and recovery remain in the materializer.
+
+`scripts/check_architecture_metrics.sh` enforces explicit file/function budgets
+for the orchestration files and these extracted helpers. CI runs it on pull
+requests through the existing `verify-v1-release-gate` Make target, so local
+release checks enforce the same rule. Limits are guardrails, not proof of sound design: changes must also
+preserve observable contracts and have tests for user-facing failure paths.
+See the [fleet extraction contract](design/fleet-module/spec.md) and
+[registry boundaries](design/registry-boundary.md).
+
+The next maintenance priorities are described in the
+[release and failure-behavior audit](design/release-reproducibility.md).

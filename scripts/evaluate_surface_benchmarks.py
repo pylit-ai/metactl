@@ -84,7 +84,15 @@ def metactl_version(bin_path: Path) -> str:
 
 def output_size(project_root: Path, output: dict[str, Any]) -> int:
     path = project_root / output["path"]
-    return path.stat().st_size
+    contents = path.read_bytes()
+    destination = output.get("destination_path") or output["path"]
+    if (
+        output.get("kind") == "skill_folder"
+        and Path(destination).name == "SKILL.md"
+        and not contents.strip()
+    ):
+        raise ValueError(f"empty skill body: {path}")
+    return len(contents)
 
 
 def compile_mode(bin_path: Path, fixture: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -172,15 +180,17 @@ def evaluate_task_cases(
         recall_at_1 = rank == 1
         recall_at_3 = rank is not None and rank <= METRIC_K
         mrr = round(1 / rank, 4) if rank else 0.0
-        expected_command = case.get("expected_command")
-        expected_command_available = (
-            True if not expected_command else expected_command in auto_paths
+        expected_skill = case.get("expected_skill")
+        expected_skill_available = (
+            True if not expected_skill else expected_skill in auto_paths
         )
         body_read_route_available = any(
-            path.startswith(f".codex/skills/{expected_pack}/") for path in auto_paths
+            path.startswith(f".agents/skills/{expected_pack}/")
+            and path.endswith("/SKILL.md")
+            for path in auto_paths
         )
         false_negative = (
-            not recall_at_3 or not expected_command_available or not body_read_route_available
+            not recall_at_3 or not expected_skill_available or not body_read_route_available
         )
         result = {
             "id": case["id"],
@@ -190,13 +200,13 @@ def evaluate_task_cases(
             "recall_at_1": recall_at_1,
             "recall_at_3": recall_at_3,
             "mrr": mrr,
-            "expected_command_available": expected_command_available,
+            "expected_skill_available": expected_skill_available,
             "body_read_route_available": body_read_route_available,
             "false_negative": false_negative,
             "top_matches": matches[:METRIC_K],
         }
-        if expected_command:
-            result["expected_command"] = expected_command
+        if expected_skill:
+            result["expected_skill"] = expected_skill
         results.append(result)
     return results
 
@@ -212,7 +222,7 @@ def summarize(
 ) -> dict[str, Any]:
     full = modes["full"]
     auto = modes["auto"]
-    command_cases = [case for case in task_cases if "expected_command" in case]
+    skill_cases = [case for case in task_cases if "expected_skill" in case]
     return {
         "auto_generated_surface_reduction": ratio(
             full["generated_surface_bytes"] - auto["generated_surface_bytes"],
@@ -229,11 +239,11 @@ def summarize(
             sum(1 for case in task_cases if case["recall_at_3"]), len(task_cases)
         ),
         "mrr": round(sum(case["mrr"] for case in task_cases) / len(task_cases), 4),
-        "expected_command_availability": ratio(
-            sum(1 for case in command_cases if case["expected_command_available"]),
-            len(command_cases),
+        "expected_skill_availability": ratio(
+            sum(1 for case in skill_cases if case["expected_skill_available"]),
+            len(skill_cases),
         )
-        if command_cases
+        if skill_cases
         else 1.0,
         "body_read_route_availability": ratio(
             sum(1 for case in task_cases if case["body_read_route_available"]),
@@ -251,8 +261,8 @@ def verdict(metrics: dict[str, Any], thresholds: dict[str, Any]) -> dict[str, An
         reasons.append("auto skill body reduction below threshold")
     if metrics["expected_pack_recall_at_3"] < thresholds["expected_pack_recall_at_3_min"]:
         reasons.append("expected pack recall@3 below threshold")
-    if metrics["expected_command_availability"] < thresholds["expected_command_availability_min"]:
-        reasons.append("expected slash command availability below threshold")
+    if metrics["expected_skill_availability"] < thresholds["expected_skill_availability_min"]:
+        reasons.append("expected Codex skill availability below threshold")
     if metrics["false_negative_count"] > thresholds["false_negative_count_max"]:
         reasons.append("false negative count above threshold")
     return {"status": "fail" if reasons else "pass", "reasons": reasons}

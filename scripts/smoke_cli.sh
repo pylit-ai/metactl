@@ -10,7 +10,7 @@ trap 'rm -rf "$INSTALL_ROOT" "$PROJECT_ROOT" "$USE_ROOT" "$BAD_TARGET_ROOT"' EXI
 
 cd "$ROOT"
 
-cargo install --path crates/metactl --root "$INSTALL_ROOT" --force >/dev/null
+cargo install --locked --path crates/metactl --root "$INSTALL_ROOT" --force >/dev/null
 
 METACTL_BIN="$INSTALL_ROOT/bin/metactl"
 TEST_HOME="$PROJECT_ROOT/.test-home"

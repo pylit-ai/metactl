@@ -1,8 +1,103 @@
 # Changelog
 
-## 0.1.21 - 2026-07-03
+## 0.1.23 - 2026-09-25
 
 ### Added
+
+- Gateway-backed, opt-in skill discovery trials with baseline, shadow, and
+  advisory modes. Scoped calls have bounded budgets and deterministic fallback;
+  private event logs and routing receipts distinguish a registered adapter from
+  an invoked provider. Trial reports expose usage, latency, fallback, outcome,
+  and measurement coverage without recording queries or skill bodies.
+- Discovery adapter guidance for supported agent targets, including direct MCP
+  registration where available and explicit manual bridges where it is not.
+  First-run documentation starts with offline deterministic discovery and shows
+  how to inspect registration, invocation, and event logs.
+- Library source-drift status and a read-only JSON Git plan for reviewing
+  incoming library changes before applying them.
+
+### Changed
+
+- Codex now projects canonical Agent Skills to `.agents/skills` and avoids
+  generating unsupported `.codex/commands` for new projects. Existing command
+  files remain protected during migration.
+- The optional discovery starter instruction explains routing receipts and
+  skipped discovery without imposing an unconditional agent rule.
+
+### Evidence limits
+
+- Provider connectivity, valid ordering, and fallback have been exercised on
+  bounded fixtures. No productivity, context saving, or cost benefit is claimed
+  for real coding tasks. Trial registration alone does not prove agent use.
+- The Codex registration recipe follows current client documentation and a
+  packaged host smoke; a fresh native Codex discovery/load session remains to
+  be acceptance-tested.
+- The npm installer remains an unpublished scaffold; the release covers GitHub
+  archives and the two existing crates.
+
+## 0.1.22 - 2026-09-20
+
+### Added
+
+- Opt-in plain-instruction skill discovery with policy-aware catalog, search and
+  original-body loading. Native skills and default compilation remain unchanged.
+- Packaged `skills host` MCP entrypoint (Python 3.10+), offline `--status`, explicit
+  synthetic `--check` and no-secret `--client-config` activation guidance.
+- Optional, explicitly consented and request-bounded Jev reranking with deterministic
+  fallback; unavailable providers never become required for discovery.
+- Reproducible offline development benchmark and release-gated discovery tests.
+  Relevant-skill recall at five rose from 35% to 75% on 12 authored cases, while
+  median lookup increased from 59.4 to 126.2 ms. These are deterministic results,
+  not Jev performance or native token/session-cost savings.
+
+### Changed
+
+- Release archive metadata is normalized for reproducible packaging.
+
+### Fixed
+
+- Avoid a broken-pipe false failure when dogfood checks inspect large source
+  inventories under shell pipefail.
+
+- Preserve UTF-8 character boundaries when shortening inline instruction snippets,
+  preventing compilation panics for long multilingual text while retaining the
+  200-byte summary limit.
+
+## 0.1.21 - 2026-09-16
+
+### Fixed
+
+- Require a patched `anyhow` release and update the lockfile to `1.0.104`,
+  addressing RUSTSEC-2026-0190 (`Error::downcast_mut` memory-safety warning).
+- Correct the Codex surface benchmark to inspect canonical `.agents/skills`
+  bodies; keep missing, blank and legacy-only routes failing the existing gate.
+- Run that benchmark and its regression tests through the release gate already
+  used by CI, so stale routing checks cannot remain hidden behind passing Rust tests.
+
+- Make fleet preview resolve and compile real member inputs in temporary storage,
+  report expected files and skills, and detect destination conflicts without
+  changing controller/member files. Preserve lock exclusion for controller
+  self-members and preserve applied outcomes when fleet logging fails. See
+  [fleet preview behavior](docs/user/fleet-preview-safety.md).
+- Distinguish operation-lock contention from permission and other filesystem
+  failures, preserving the OS cause in text and machine output without unrelated
+  lock-deletion advice. Existing contention codes and exit status 10 remain stable.
+- Release newly created operation locks when initial payload writing or flushing
+  fails. Clarify that lock age alone does not prove abandonment. See
+  [operation-lock recovery](docs/user/operation-locks.md).
+
+- Preflight destination, backup, state and journal access across selected targets before managed writes. Preserve root symlink aliases, conflict precedence, preview behavior and rollback protections.
+
+### Added
+
+- Project declared Agent Skill companion resources from `references/`, `scripts/`, `templates/`, and `assets/` beside each generated `SKILL.md`, with package-relative paths and per-resource source and ownership receipts.
+- Record stale generated paths removed during recompilation in `compile.manifest.json` and CLI compile output.
+- Add multi-target package-closure, missing-resource, managed-only pruning, and path-confinement regression coverage.
+- Added immutable, digest-bound apply review plans, private receipts, and append-only
+  action journals with safe compensation for partial failures.
+- Added a versioned skill-card consumer and shared v1/v2 conformance corpus.
+- Added deterministic offline human simulation for canonical Codex skill writes,
+  no-op repetition, stale-plan refusal, and legacy conflicts.
 
 - Added a working `metactl help --all` command that lists hidden advanced commands.
 - Added `verify` as an alias for `validate`.
@@ -24,6 +119,21 @@
 
 ### Changed
 
+- Separate fleet command ownership, library discovery, and instruction formatting
+  into focused internal modules without changing command behavior. Enforce the
+  existing architecture limits in CI and budget the extracted modules.
+
+- Fail skill compilation when a declared package companion is missing instead of synthesizing placeholder content.
+- Prune only outputs owned by the previous target compile manifest, retaining unmanaged neighboring files and removing empty managed directories.
+- Aligned the target capability schema with the existing `import_stub` mode and
+  `import_stub_path` compile-target field.
+- Codex repo-local skills now write canonically to `.agents/skills`; legacy
+  `.codex/skills` remains read-only reconciliation input and user-global Personal
+  skills remain under `~/.codex/skills`.
+- Hardened generated, destination, backup, restore, and symlink path containment.
+- Scoped duplicate-trigger diagnostics to one consuming runtime so intentional
+  cross-target skill projections are not reported as conflicts.
+
 - Reduced the default top-level CLI help to the daily porcelain commands while preserving existing advanced commands for scripts and expert workflows.
 - Rewrote the README onboarding path around the individual developer workflow: define agent instructions once, review generated files, and work across supported coding agents.
 - Promoted Cursor and Gemini CLI support-matrix entries from Tier 2 preview to Tier 1 conformance-covered.
@@ -32,11 +142,9 @@
 
 ### Documented
 
-- Added a private spec slice for per-pack managed blocks in brownfield documents.
 - Documented the CLI porcelain consolidation proposal and measured warm-checkout time-to-value evidence.
 
 ### Not Included
 
 - No runtime implementation of per-pack managed blocks.
 - No proprietary-runtime end-to-end execution inside Cursor, Gemini CLI, or OpenCode.
-- No publishing, Git tag, or GitHub release action.
