@@ -78,7 +78,26 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
                 command.arg(flag).arg(value);
             }
         }
-        if let Some(value) = &args.event_log {
+        let event_log = if args.use_preferences && args.event_log.is_none() {
+            let root = project_root(cli)?.canonicalize()?;
+            let ledger = cli_skill_discovery_connection::ledger_path(&root)
+                .map_err(|_| anyhow::anyhow!("Cannot resolve private discovery log"))?;
+            if !args.status && !args.client_config && !args.check {
+                let parent = ledger.parent().unwrap();
+                if !parent.exists() {
+                    fs::create_dir_all(parent)?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+                    }
+                }
+            }
+            Some(ledger)
+        } else {
+            args.event_log.clone()
+        };
+        if let Some(value) = &event_log {
             command.arg("--event-log").arg(value);
         }
         for (enabled, flag) in [

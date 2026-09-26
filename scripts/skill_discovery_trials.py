@@ -30,7 +30,8 @@ MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:/[A-Za-z0-9][A-Za-z0-9._-
 REASONS = frozenset({"baseline", "disabled", "data_not_authorized", "missing_credential",
                      "budget_exhausted", "unambiguous", "payload_budget",
                      "abstained", "reordered", "unchanged", "deadline",
-                     "provider_or_schema_failure"})
+                     "provider_or_schema_failure", "preferences_unavailable", "session_disabled",
+                     "user_disabled", "project_not_enrolled", "project_disabled"})
 RUNTIMES = frozenset({"claude-code", "codex-cli", "cursor", "filesystem-agent",
                       "gemini-cli", "openclaw", "opencode",
                       "codex", "omnigent", "pi", "other", "contract"})

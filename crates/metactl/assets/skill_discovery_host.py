@@ -509,7 +509,8 @@ def main():
                 report["preferences"] = ranker.preference
             eligible = [s for s in catalog["skills"] if s["id"] not in host.excluded and s["name"] not in host.excluded]
             report.update(project=host.project, eligible_skills=len(eligible),
-                          catalog_digest=catalog["catalog_digest"], project_ready=True)
+                          catalog_digest=catalog["catalog_digest"], project_ready=True,
+                          event_log=args.event_log)
         except Exception:
             print(compact({"project_ready": False, "provider_verified": False,
                            "reason": "project_discovery_failed", "next": "Run skills catalog locally."}))

@@ -119,11 +119,13 @@ print(json.dumps({{"available": True, "response": {{"model": "jev-1.13.0", "answ
         third = discover(3)
         self.assertEqual(third["metrics"]["provider_calls"], 0)
         self.assertEqual(third["metrics"]["reason"], "project_disabled")
+        self.assertEqual(third["metrics"]["telemetry_status"], "recorded")
         requests = [json.loads(line) for line in self.marker.read_text().splitlines()]
         self.assertEqual(len(requests), 3)
         self.assertEqual(requests[0]["dataClass"], "private-owned")
         self.assertNotIn("Original instructions", self.marker.read_text())
         log = Path(connected["event_log"]).read_text()
+        self.assertEqual(len(log.splitlines()), 4)
         self.assertNotIn("Review tests for a repair", log)
         self.assertNotIn("Original instructions", log)
         doctor = self.cli("doctor", "--target", "codex-cli", "--use-preferences")
@@ -161,6 +163,19 @@ print(json.dumps({{"available": True, "response": {{"model": "jev-1.13.0", "answ
     def test_preferences_packaged_mirror(self):
         self.assertEqual((ROOT / "scripts/skill_discovery_preferences.py").read_bytes(),
                          (ROOT / "crates/metactl/assets/skill_discovery_preferences.py").read_bytes())
+
+    def test_direct_preference_host_logs_without_connecting(self):
+        self.enable()
+        status = self.cli("host", "--use-preferences", "--status")
+        self.assertFalse(Path(status["event_log"]).exists())
+        result = subprocess.run([str(BINARY), "--project", str(self.fixture.project), "--no-profile",
+                                 "skills", "host", "--use-preferences", "--call-tool", "discover_skills"],
+                                env=self.env, input=json.dumps({"query": "Review tests for a repair"}),
+                                capture_output=True, text=True, timeout=25)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt["metrics"]["telemetry_status"], "recorded")
+        self.assertTrue(Path(status["event_log"]).exists())
 
 
 if __name__ == "__main__":

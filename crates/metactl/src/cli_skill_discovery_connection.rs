@@ -36,7 +36,7 @@ fn target_path(root: &Path, target: &str, scope: DiscoveryScopeArg) -> Result<Pa
     Ok(root.join(relative))
 }
 
-fn ledger_path(root: &Path) -> Result<PathBuf, CliError> {
+pub(super) fn ledger_path(root: &Path) -> Result<PathBuf, CliError> {
     let home = home_dir().ok_or_else(|| {
         CliError::new(
             EXIT_STATE,
