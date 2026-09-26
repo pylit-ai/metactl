@@ -227,7 +227,12 @@ fn cli_non_utf8_ignored_file_refuses_without_file_mutation() {
         "--yes",
     ]);
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("non-UTF8 Git path"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("non-UTF8 Git path"),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert_eq!(before, payloads(&repo.root));
 }
 

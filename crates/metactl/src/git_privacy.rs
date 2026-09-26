@@ -127,7 +127,9 @@ fn names(bytes: &[u8]) -> Result<BTreeSet<String>> {
         .split(|b| *b == 0)
         .filter(|p| !p.is_empty())
         .map(|p| {
-            let name = std::str::from_utf8(p)?.to_string();
+            let name = std::str::from_utf8(p)
+                .context("non-UTF8 Git path")?
+                .to_string();
             relative(&name)?;
             Ok(name)
         })
@@ -498,6 +500,17 @@ pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_name_decoder_rejects_non_utf8_with_path_diagnostic() {
+        let error = names(b"valid.private\0bad-\xff.private\0").unwrap_err();
+        assert_eq!(error.to_string(), "non-UTF8 Git path");
+        assert!(format!("{error:#}").contains("invalid utf-8"));
+        assert_eq!(
+            names("caf\u{e9}.private\0".as_bytes()).unwrap(),
+            BTreeSet::from(["caf\u{e9}.private".to_string()])
+        );
+    }
 
     #[test]
     fn proposed_state_matches_native_git_with_nested_rules_and_global_excludes() {
