@@ -260,11 +260,12 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertNotEqual(removal.returncode, 0)
         self.assertIn("unmanaged", removal.stderr)
         self.assertEqual(path.read_text(), original)
-        path.write_text("model = [\n")
+        path.write_text("model = [private-token-canary\n")
         invalid = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
         self.assertNotEqual(invalid.returncode, 0)
         self.assertIn("invalid TOML", invalid.stderr)
-        self.assertEqual(path.read_text(), "model = [\n")
+        self.assertNotIn("private-token-canary", invalid.stderr)
+        self.assertEqual(path.read_text(), "model = [private-token-canary\n")
 
     def test_codex_remove_refuses_reparenting_unrelated_settings(self):
         path = self.project / ".codex/config.toml"

@@ -203,10 +203,10 @@ fn shell_quote(value: &str) -> String {
 
 fn parse_codex_toml(body: &str) -> Result<toml::Value, CliError> {
     let source = if body.trim().is_empty() { "\n" } else { body };
-    toml::from_str(source).map_err(|error| {
+    toml::from_str(source).map_err(|_| {
         CliError::new(
             EXIT_STATE,
-            format!("Codex configuration is invalid TOML; no change was made: {error}"),
+            "Codex configuration is invalid TOML; no change was made. Review the file before reconnecting.",
         )
     })
 }
@@ -1315,7 +1315,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     };
     let drift_hint = match drift {
         Some("options_differ" | "event_log_differs") => {
-            "preview with --replace, then run --apply --replace"
+            "rerun doctor with the registration's profile/config and state-home settings; if changing policy intentionally, preview with --replace before --apply --replace"
         }
         Some(_) => "rerun skills connect --apply after an upgrade",
         None => "",
