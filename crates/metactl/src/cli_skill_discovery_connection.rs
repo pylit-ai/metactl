@@ -531,6 +531,60 @@ fn managed_codex_block<'a>(
     Ok(None)
 }
 
+fn recover_rewritten_codex_block(
+    old: &str,
+    parsed: &toml::Value,
+    root: &Path,
+) -> Option<(String, ManagedEntry)> {
+    if old.matches(BEGIN).count() != 1 || old.matches(END).count() != 1 {
+        return None;
+    }
+    let server = codex_server(parsed)?.as_table()?;
+    if server.len() != 2 {
+        return None;
+    }
+    let command = server.get("command")?.as_str()?.to_owned();
+    let args = server
+        .get("args")?
+        .as_array()?
+        .iter()
+        .map(|value| value.as_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()?;
+    let entry = managed_entry(command, args, root, "codex-cli")?;
+    let header = format!("[mcp_servers.{SERVER}]");
+    let quoted_header = format!("[mcp_servers.\"{SERVER}\"]");
+    let mut found = false;
+    let mut in_server = false;
+    let mut cleaned = String::new();
+    for line in old.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed == BEGIN || trimmed == END {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_server = trimmed == header || trimmed == quoted_header;
+            if in_server {
+                found = true;
+                continue;
+            }
+        }
+        if in_server && (trimmed.starts_with("command =") || trimmed.starts_with("args =")) {
+            continue;
+        }
+        cleaned.push_str(line);
+    }
+    if !found {
+        return None;
+    }
+    let parsed_cleaned = parse_codex_toml(&cleaned).ok()?;
+    if codex_has_server(&parsed_cleaned)
+        || !codex_only_server_changed(parsed, &parsed_cleaned, None)
+    {
+        return None;
+    }
+    Some((cleaned, entry))
+}
+
 fn edit_codex(
     old: &str,
     block: &str,
@@ -541,7 +595,8 @@ fn edit_codex(
 ) -> Result<(String, &'static str), CliError> {
     let header = format!("[mcp_servers.{SERVER}]");
     let parsed = parse_codex_toml(old)?;
-    if let Some((begin, end, existing, entry)) = managed_codex_block(old, root)? {
+    let strict_block = managed_codex_block(old, root);
+    if let Ok(Some((begin, end, existing, entry))) = &strict_block {
         let existing_semantic = parse_codex_toml(existing)?;
         if codex_server(&parsed) != codex_server(&existing_semantic) {
             return Err(CliError::new(
@@ -550,12 +605,12 @@ fn edit_codex(
             ));
         }
         if remove {
-            let suffix = if old[end..].starts_with('\n') {
-                end + 1
+            let suffix = if old[*end..].starts_with('\n') {
+                *end + 1
             } else {
-                end
+                *end
             };
-            let updated = format!("{}{}", &old[..begin], &old[suffix..]);
+            let updated = format!("{}{}", &old[..*begin], &old[suffix..]);
             let parsed_updated = parse_codex_toml(&updated)?;
             if codex_has_server(&parsed_updated) {
                 return Err(CliError::new(EXIT_STATE,
@@ -567,11 +622,11 @@ fn edit_codex(
             }
             return Ok((updated, "removed"));
         }
-        if existing == block.trim_end() {
+        if *existing == block.trim_end() {
             return Ok((old.to_owned(), "already_connected"));
         }
-        require_policy_match(&entry, desired, replace)?;
-        let updated = format!("{}{}{}", &old[..begin], block.trim_end(), &old[end..]);
+        require_policy_match(entry, desired, replace)?;
+        let updated = format!("{}{}{}", &old[..*begin], block.trim_end(), &old[*end..]);
         let parsed_updated = parse_codex_toml(&updated)?;
         let block_semantic = parse_codex_toml(block)?;
         if !codex_only_server_changed(&parsed, &parsed_updated, codex_server(&block_semantic)) {
@@ -582,6 +637,15 @@ fn edit_codex(
         }
         return Ok((updated, "updated"));
     }
+    if let Some((cleaned, entry)) = recover_rewritten_codex_block(old, &parsed, root) {
+        if remove {
+            return Ok((cleaned, "removed"));
+        }
+        require_policy_match(&entry, desired, replace)?;
+        let (updated, _) = edit_codex(&cleaned, block, root, desired, false, replace)?;
+        return Ok((updated, "updated"));
+    }
+    strict_block?;
     if old.contains(&header) || codex_has_server(&parsed) {
         return Err(CliError::new(EXIT_STATE, "An unmanaged metactl-skills server already exists in Codex config; review it manually."));
     }
@@ -674,6 +738,7 @@ fn connection(
     scope: DiscoveryScopeArg,
     python: &Path,
     removing: bool,
+    allow_unavailable_python: bool,
 ) -> Result<(PathBuf, PathBuf, PathBuf, String, Vec<String>), CliError> {
     let supplied = project_root(cli).map_err(internal_error)?;
     let root = match supplied.canonicalize() {
@@ -687,6 +752,8 @@ fn connection(
     let ledger = ledger_path(&root)?;
     let python = if removing {
         python.to_path_buf()
+    } else if allow_unavailable_python {
+        resolved_python(python).unwrap_or_else(|_| python.to_path_buf())
     } else {
         resolved_python(python)?
     };
@@ -751,6 +818,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         options.scope,
         &options.python,
         options.remove,
+        false,
     )?;
     if !options.remove {
         let (host, count) = offline_status(&command, &args);
@@ -866,23 +934,58 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
 }
 
 pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOutput, CliError> {
-    let (root, path, ledger, command, args) =
-        connection(cli, &options.target, options.scope, &options.python, false)?;
-    let config = read_config(&path)?.unwrap_or_default();
-    let (registration, registered) = if options.target == "codex-cli" {
+    let (root, path, ledger, command, args) = connection(
+        cli,
+        &options.target,
+        options.scope,
+        &options.python,
+        false,
+        true,
+    )?;
+    let python_unavailable = resolved_python(&options.python)
+        .map(|path| !path.is_file())
+        .unwrap_or(true);
+    let config_issue = if path
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        Some("symlink_refused")
+    } else {
+        None
+    };
+    let (config, config_issue) = if let Some(issue) = config_issue {
+        (String::new(), Some(issue))
+    } else {
+        match read_config(&path) {
+            Ok(value) => (value.unwrap_or_default(), None),
+            Err(_) => (String::new(), Some("unreadable_config")),
+        }
+    };
+    let (registration, registered) = if let Some(issue) = config_issue {
+        (issue, None)
+    } else if options.target == "codex-cli" {
         match parse_codex_toml(&config) {
             Err(_) => ("invalid_config", None),
-            Ok(document) => match managed_codex_block(&config, &root) {
-                Ok(Some((_, _, block, entry)))
-                    if parse_codex_toml(block).ok().is_some_and(|managed| {
-                        codex_server(&document) == codex_server(&managed)
-                    }) =>
-                {
-                    ("configured", Some(entry))
+            Ok(document) => {
+                let recovered = recover_rewritten_codex_block(&config, &document, &root);
+                match managed_codex_block(&config, &root) {
+                    Ok(Some((_, _, block, entry)))
+                        if parse_codex_toml(block).ok().is_some_and(|managed| {
+                            codex_server(&document) == codex_server(&managed)
+                        }) =>
+                    {
+                        ("configured", Some(entry))
+                    }
+                    _ if recovered.is_some() => {
+                        let (_, entry) = recovered.unwrap();
+                        ("configured", Some(entry))
+                    }
+                    _ if codex_has_server(&document) || config.contains(BEGIN) => {
+                        ("conflict", None)
+                    }
+                    _ => ("missing", None),
                 }
-                _ if codex_has_server(&document) || config.contains(BEGIN) => ("conflict", None),
-                _ => ("missing", None),
-            },
+            }
         }
     } else if config.trim().is_empty() {
         ("missing", None)
@@ -931,7 +1034,9 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         }
     });
     // A project-controlled client config is data for doctor, never a command to execute.
-    let (host, host_catalog) = if registered.is_some() && !matches_requested {
+    let (host, host_catalog) = if python_unavailable {
+        ("unavailable_python".into(), Value::Null)
+    } else if registered.is_some() && !matches_requested {
         ("unknown_registration_drift".into(), Value::Null)
     } else {
         offline_status(&command, &args)

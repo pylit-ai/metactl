@@ -934,10 +934,10 @@ struct SkillsConnectArgs {
     /// Python 3.10+ executable used by the packaged discovery host
     #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
     python: PathBuf,
-    /// Write the previewed registration; without this flag no files are changed
+    /// Write the previewed registration; ordinary connect previews without writing
     #[arg(long, conflicts_with = "remove")]
     apply: bool,
-    /// Remove only a MetaCTL-managed registration
+    /// Immediately remove only a MetaCTL-managed registration (no --apply needed)
     #[arg(long)]
     remove: bool,
     /// Explicitly replace a managed registration with different profile or log options

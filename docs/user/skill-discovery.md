@@ -47,14 +47,18 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    current invocation. It checks host readiness only when they match, using
    the current shell environment; otherwise readiness is unknown. The local
    catalog count is checked separately, so it can remain known when host
-   readiness is unknown.
+   readiness is unknown. If Python is missing or the client config is a
+   symlink, `doctor` still reports the other states.
    A user-wide Codex registration shares this one project's skill catalog and
    event metadata across Codex sessions in other repositories; choose project
    scope when catalogs or visibility should remain separate. The baseline
    ledger does not store query text or skill bodies.
    Existing JSON client files are parsed and re-serialized, so formatting may
    change; existing file permissions are preserved. Removing the managed entry
-   leaves the private event log and may leave an empty client config object.
+   is immediate with `--remove` (no `--apply` needed). It leaves the private
+   event log and may leave an empty client config object. The printed rollback
+   uses the installed binary's absolute path; if that binary is later removed,
+   run the same command with a currently installed `metactl` binary.
    Reapplying with a different profile, config, overlay or log destination
    requires an explicit preview with `--replace`, followed by `--apply --replace`.
    Changing only the installed binary or Python path updates the managed entry.

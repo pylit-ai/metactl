@@ -3,6 +3,7 @@
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import stat
@@ -89,6 +90,33 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertNotEqual(manual.returncode, 0)
         self.assertIn("manual adapter", manual.stderr)
 
+    def test_json_conflict_and_foreign_project_entry_are_refused(self):
+        path = self.project / ".cursor/mcp.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        foreign = '{"mcpServers":{"metactl-skills":{"command":"other","args":[]}}}\n'
+        path.write_text(foreign)
+        refused = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(path.read_text(), foreign)
+        path.unlink()
+        applied = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        other = self.base / "other-project"
+        other.mkdir()
+        initialized = subprocess.run([str(BINARY), "--project", str(other), "init", "-t",
+                                      "codex-cli", "--no-input"], env=self.env, text=True,
+                                     capture_output=True, timeout=25)
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        other_config = other / ".cursor/mcp.json"
+        other_config.parent.mkdir(parents=True, exist_ok=True)
+        other_config.write_text(path.read_text())
+        before = other_config.read_text()
+        wrong_project = subprocess.run([str(BINARY), "--project", str(other), "skills", "connect",
+                                        "--target", "cursor", "--apply"], env=self.env, text=True,
+                                       capture_output=True, timeout=25)
+        self.assertNotEqual(wrong_project.returncode, 0)
+        self.assertEqual(other_config.read_text(), before)
+
     def test_wrong_project_cannot_be_connected(self):
         uninitialized = self.base / "uninitialized"
         uninitialized.mkdir()
@@ -101,11 +129,12 @@ class ConnectionFirstRun(unittest.TestCase):
     def test_real_baseline_receipt_is_visible_in_doctor(self):
         applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply", "--json")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-        settings = json.loads(applied.stdout)
-        call = self.run_cli("skills", "host", "--ranker", "deterministic", "--runtime", "codex-cli",
-                            "--trial-mode", "baseline", "--event-log", settings["event_log"],
-                            "--call-tool", "discover_skills",
-                            input_text=json.dumps({"query": "Review a small CLI user workflow"}))
+        config = (self.project / ".codex/config.toml").read_text()
+        command = json.loads(re.search(r'^command = (.+)$', config, re.MULTILINE).group(1))
+        args = json.loads(re.search(r'^args = (.+)$', config, re.MULTILINE).group(1))
+        call = subprocess.run([command, *args, "--call-tool", "discover_skills"],
+                              env=self.env, text=True, capture_output=True, timeout=25,
+                              input=json.dumps({"query": "Review a small CLI user workflow"}))
         self.assertEqual(call.returncode, 0, call.stdout + call.stderr)
         result = json.loads(call.stdout)
         self.assertIn("mode=baseline", result["routing_receipt"])
@@ -234,6 +263,27 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertIn('command = "other"', path.read_text())
 
+    def test_codex_client_rewrite_keeps_managed_rollback_usable(self):
+        path = self.project / ".codex/config.toml"
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        original = path.read_text()
+        client_table = '[projects."/tmp/codex-trust"]\ntrust_level = "trusted"\n'
+        rewritten = original.replace("# metactl-discovery:end", client_table + "# metactl-discovery:end")
+        path.write_text(rewritten)
+        doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertEqual(json.loads(doctor.stdout)["registration"], "configured")
+        removed = self.run_cli("skills", "connect", "--target", "codex-cli", "--remove")
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertNotIn("metactl-skills", path.read_text())
+        self.assertIn(client_table, path.read_text())
+        path.write_text(rewritten)
+        updated = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
+        self.assertIn(client_table, path.read_text())
+        self.assertIn("metactl-skills", path.read_text())
+
     def test_profile_change_requires_explicit_replace(self):
         path = self.project / ".cursor/mcp.json"
         applied = self.run_cli("--no-profile", "skills", "connect", "--target", "cursor", "--apply")
@@ -286,6 +336,24 @@ class ConnectionFirstRun(unittest.TestCase):
         applied = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+
+    def test_doctor_reports_states_when_python_or_config_is_unavailable(self):
+        path = self.project / ".codex/config.toml"
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        no_python = self.run_cli("skills", "doctor", "--target", "codex-cli",
+                                 "--python", "missing-python-for-test", "--json")
+        self.assertEqual(no_python.returncode, 0, no_python.stdout + no_python.stderr)
+        state = json.loads(no_python.stdout)
+        self.assertEqual(state["registration"], "configured")
+        self.assertEqual(state["host"], "unavailable_python")
+        self.assertGreater(state["catalog_eligible_skills"], 0)
+        target = self.base / "external-config.toml"
+        path.rename(target)
+        path.symlink_to(target)
+        linked = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        self.assertEqual(linked.returncode, 0, linked.stdout + linked.stderr)
+        self.assertEqual(json.loads(linked.stdout)["registration"], "symlink_refused")
 
     def test_preview_does_not_create_client_or_state_files(self):
         preview = self.run_cli("skills", "connect", "--target", "codex-cli")
