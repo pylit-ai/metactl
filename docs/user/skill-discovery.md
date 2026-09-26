@@ -89,22 +89,38 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    ```sh
    metactl --project /absolute/path/to/public-project skills connect \
      --target codex-cli --trial-mode advisory --allow-provider-data \
-     --gateway-project APPROVED_PROJECT_ID \
+     --gateway-project approved-project-id \
      --gateway-data-class public-nonsensitive \
      --gateway-command /absolute/path/to/jev \
      --max-provider-calls 2 --provider-deadline 1
    # Review the preview, then repeat with --apply.
    ```
 
-   `shadow` records Jev's proposed order without changing the returned order;
+   **Data sent to the gateway:** each discovery request can send the task query,
+   candidate skill names and descriptions, the gateway project ID, and the data
+   class. The query may contain text the agent copied from your project. Do not
+   enable this option for private projects, secrets, or restricted customer and
+   third-party work under the current public-data authorization. This PR does
+   not authorize private-project traffic or a fleet-wide, default-on rollout.
+
+   `--max-provider-calls` permits 1-10 attempts per host process, not per
+   discovery request; `--provider-deadline` must be positive and no more than
+   5 seconds per attempt. The example uses 2 attempts and 1 second. `shadow`
+   records Jev's proposed order without changing the returned order;
    `advisory` may apply a validated proposal. Connect and doctor call only the
    local host's offline status path, never the provider. A later discovery call
    may contact the gateway. On unavailable, rejected, timed-out or over-budget
    responses, the host returns deterministic ordering and records whether the
    provider attempt or billing state is unknown. Run doctor with the same
    routing flags to compare the requested registration. Policy changes require
-   `--replace`. Synthetic classification is reserved for `skills host --check`,
-   and private project content is not authorized by this public-data option.
+   `--replace`. Synthetic classification is reserved for `skills host --check`.
+   To check actual use, run `skills doctor` with the same routing flags and
+   inspect `registered_mode` and `routing`. For a specific discovery request,
+   inspect its `routing_receipt` for `reason` and `provider_calls`, then match
+   its session/run ID in the private event log. A configured registration or
+   healthy host alone does not prove that the agent called Jev. Use `--json
+   --full` when copying the complete generated argument array; ordinary JSON
+   output marks long arrays as truncated.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
    `load_skill` are available, then request one harmless ambiguous discovery
    and load a returned ID with its digest. The `routing_receipt` should say

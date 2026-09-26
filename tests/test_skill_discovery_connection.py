@@ -207,17 +207,51 @@ class ConnectionFirstRun(unittest.TestCase):
         ledger = pathlib.Path(receipt["event_log"]).read_text()
         self.assertNotIn("Review a public CLI workflow", ledger)
         self.assertEqual(json.loads(ledger.splitlines()[-1])["provider_attempts"], 1)
+        self.assertEqual(marker.read_text(), "called")
         doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", *routing, "--json")
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertEqual(marker.read_text(), "called", "doctor must not call the gateway")
         state = json.loads(doctor.stdout)
         self.assertEqual(state["registered_mode"], "advisory")
         self.assertEqual(state["routing"], "observed")
         self.assertEqual(state["gateway_response"], "unknown_not_called")
 
+    def test_public_advisory_registration_all_supported_targets(self):
+        gateway = self.base / "jev-fixture"
+        marker = self.base / "gateway-called"
+        gateway.write_text(f"#!/bin/sh\nprintf called >> {shlex.quote(str(marker))}\nexit 1\n")
+        gateway.chmod(0o755)
+        routing = ("--trial-mode", "advisory", "--allow-provider-data",
+                   "--gateway-project", "public-fixture",
+                   "--gateway-data-class", "public-nonsensitive",
+                   "--gateway-command", str(gateway))
+        for target, relative in PATHS.items():
+            with self.subTest(target=target):
+                connected = self.run_cli("skills", "connect", "--target", target,
+                                         *routing, "--apply", "--json", "--full")
+                self.assertEqual(connected.returncode, 0, connected.stdout + connected.stderr)
+                receipt = json.loads(connected.stdout)
+                self.assertIn(str(gateway), receipt["args"])
+                self.assertIn("advisory", (self.project / relative).read_text())
+                state = self.run_cli("skills", "doctor", "--target", target, *routing, "--json")
+                self.assertEqual(state.returncode, 0, state.stdout + state.stderr)
+                self.assertEqual(json.loads(state.stdout)["registered_mode"], "advisory")
+                self.assertFalse(marker.exists(), "connect and doctor must stay offline")
+                removed = self.run_cli("skills", "connect", "--target", target, "--remove")
+                self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+
     def test_provider_connection_requires_explicit_public_authorization(self):
         gateway = self.base / "jev-fixture"
         gateway.write_text("#!/bin/sh\nexit 1\n")
         gateway.chmod(0o755)
+        relative = self.run_cli("skills", "connect", "--target", "codex-cli",
+                                "--trial-mode", "advisory", "--allow-provider-data",
+                                "--gateway-project", "public-fixture",
+                                "--gateway-data-class", "public-nonsensitive",
+                                "--gateway-command", "./bin/jev", "--apply")
+        self.assertNotEqual(relative.returncode, 0)
+        self.assertIn("absolute --gateway-command", relative.stderr)
+        self.assertFalse((self.project / ".codex/config.toml").exists())
         missing = self.run_cli("skills", "connect", "--target", "codex-cli",
                                "--trial-mode", "shadow", "--gateway-project", "public-fixture",
                                "--gateway-data-class", "public-nonsensitive",
@@ -237,9 +271,11 @@ class ConnectionFirstRun(unittest.TestCase):
         gateway = self.base / "jev-fixture"
         gateway.write_text("#!/bin/sh\nexit 1\n")
         gateway.chmod(0o755)
+        path = self.project / ".cursor/mcp.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"other":{"kept":true}}\n')
         baseline = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
         self.assertEqual(baseline.returncode, 0, baseline.stdout + baseline.stderr)
-        path = self.project / ".cursor/mcp.json"
         original = path.read_text()
         routing = ("--trial-mode", "advisory", "--allow-provider-data",
                    "--gateway-project", "public-fixture",
@@ -257,9 +293,16 @@ class ConnectionFirstRun(unittest.TestCase):
                                 "--replace", "--apply")
         self.assertEqual(replaced.returncode, 0, replaced.stdout + replaced.stderr)
         self.assertIn("advisory", path.read_text())
+        self.assertEqual(json.loads(path.read_text())["other"], {"kept": True})
+        back = self.run_cli("skills", "connect", "--target", "cursor", "--replace", "--apply")
+        self.assertEqual(back.returncode, 0, back.stdout + back.stderr)
+        self.assertIn("baseline", path.read_text())
+        self.assertNotIn("advisory", path.read_text())
+        self.assertEqual(json.loads(path.read_text())["other"], {"kept": True})
         removed = self.run_cli("skills", "connect", "--target", "cursor", "--remove")
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertNotIn("metactl-skills", path.read_text())
+        self.assertEqual(json.loads(path.read_text())["other"], {"kept": True})
 
     def test_no_profile_printed_rollback_and_doctor(self):
         apply = self.run_cli("--no-profile", "skills", "connect", "--target", "claude-code",

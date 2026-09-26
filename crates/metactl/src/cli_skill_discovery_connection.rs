@@ -223,6 +223,14 @@ fn host_command(
         routing.trial_mode.clone(),
     ]);
     if provider {
+        if routing.gateway_command.components().count() > 1
+            && !routing.gateway_command.is_absolute()
+        {
+            return Err(CliError::new(
+                EXIT_VALIDATION,
+                "Use an absolute --gateway-command path or an executable name on PATH.",
+            ));
+        }
         let gateway = if allow_unavailable_command {
             resolved_python(&routing.gateway_command)
                 .unwrap_or_else(|_| routing.gateway_command.clone())
@@ -230,6 +238,10 @@ fn host_command(
             resolved_python(&routing.gateway_command).map_err(|_| CliError::new(EXIT_STATE,
                 "Gateway client was not found as an executable. Pass --gateway-command /absolute/path/to/jev."))?
         };
+        if !allow_unavailable_command && !gateway.is_absolute() {
+            return Err(CliError::new(EXIT_STATE,
+                "Gateway client did not resolve to an absolute executable path. Pass --gateway-command /absolute/path/to/jev."));
+        }
         if !allow_unavailable_command && !executable_file(&gateway) {
             return Err(CliError::new(EXIT_STATE,
                 "Gateway client is not an executable file. Pass --gateway-command /absolute/path/to/jev."));
