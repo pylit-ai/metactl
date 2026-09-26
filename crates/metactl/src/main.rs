@@ -888,6 +888,9 @@ struct SkillsPreferencesArgs {
     /// Explicitly enroll this canonical project path in the saved default
     #[arg(long, requires_all = ["gateway_project", "data_class"])]
     enroll: bool,
+    /// Explicitly replace a saved gateway identity or data classification
+    #[arg(long, requires = "enroll")]
+    replace_enrollment: bool,
     #[arg(long, requires = "enroll")]
     gateway_project: Option<String>,
     #[arg(long, value_parser = ["public-nonsensitive", "private-owned"], requires = "enroll")]

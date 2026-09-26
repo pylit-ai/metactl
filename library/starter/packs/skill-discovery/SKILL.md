@@ -11,6 +11,9 @@ Otherwise run `metactl skills host --use-preferences --call-tool discover_skills
 sending a JSON object with a minimal `query` on stdin. Saved project preferences
 control Jev; absent permission uses local discovery. Never put credentials or
 private task details in argv. Exclude secrets and unnecessary task context.
+If Python or the optional host is unavailable, use the provider-free
+`metactl --json skills discover --query-stdin` with the query on stdin. This
+fallback has no routing receipt or discovery ledger; report that limitation.
 
 Use returned names/descriptions to choose relevant IDs. Load original instructions
 with `load_skill(id, digest)` or `metactl --json skills load ID --digest DIGEST`.

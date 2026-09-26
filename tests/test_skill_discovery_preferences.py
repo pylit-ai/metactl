@@ -27,6 +27,10 @@ class PersistentPreferences(unittest.TestCase):
         self.gateway.write_text(f'''#!{sys.executable}
 import json, sys
 from pathlib import Path
+if sys.argv[1] == 'check-project':
+    matches = Path.cwd().resolve() == Path({str(self.fixture.project)!r}).resolve() and sys.argv[-1] == 'owned-project'
+    print(json.dumps({{'project_match': matches, 'project_id': sys.argv[-1], 'provider_calls': 0}}))
+    sys.exit(0 if matches else 1)
 p = json.load(sys.stdin)
 with Path({str(self.marker)!r}).open('a') as log: log.write(json.dumps(p) + '\\n')
 criteria = p['questions']['first']['criteria']
@@ -176,6 +180,37 @@ print(json.dumps({{"available": True, "response": {{"model": "jev-1.13.0", "answ
         receipt = json.loads(result.stdout)
         self.assertEqual(receipt["metrics"]["telemetry_status"], "recorded")
         self.assertTrue(Path(status["event_log"]).exists())
+
+    def test_enrollment_rejects_cross_project_identity_and_class_change(self):
+        self.enable()
+        wrong = self.fixture.root / "restricted-project"
+        wrong.mkdir()
+        r = subprocess.run([str(BINARY), "--project", str(wrong), "skills", "preferences", "--enroll",
+                            "--gateway-project", "owned-project", "--data-class", "private-owned"],
+                           env=self.env, capture_output=True, text=True, timeout=15)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("did not verify", r.stderr)
+        downgrade = self.cli("preferences", "--enroll", "--gateway-project", "owned-project",
+                             "--data-class", "public-nonsensitive", ok=False)
+        self.assertNotEqual(downgrade.returncode, 0)
+        self.assertFalse(self.marker.exists())
+
+    def test_preference_mode_roundtrip_preserves_all_native_targets(self):
+        self.enable()
+        formats = {"codex-cli": ".codex/config.toml", "claude-code": ".mcp.json",
+                   "cursor": ".cursor/mcp.json", "gemini-cli": ".gemini/settings.json", "opencode": "opencode.json"}
+        for target, relative in formats.items():
+            file = self.fixture.project / relative
+            file.parent.mkdir(parents=True, exist_ok=True)
+            file.write_text('model = "kept"\n' if target == 'codex-cli' else '{"other":{"kept":true}}\n')
+            self.cli("connect", "--target", target, "--use-preferences", "--apply")
+            doctor = self.cli("doctor", "--target", target, "--use-preferences")
+            self.assertEqual(doctor["registration"], "configured")
+            self.assertTrue(doctor["preferences"]["enabled"])
+            self.assertIn('kept', file.read_text())
+            self.cli("connect", "--target", target, "--remove")
+            self.assertIn('kept', file.read_text())
+        self.assertFalse(self.marker.exists())
 
 
 if __name__ == "__main__":

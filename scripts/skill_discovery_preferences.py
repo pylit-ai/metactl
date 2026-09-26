@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import subprocess
 import tempfile
 
 
@@ -144,6 +145,7 @@ def main():
     parser.add_argument("--max-provider-calls", type=int)
     parser.add_argument("--provider-deadline", type=float)
     parser.add_argument("--enroll", action="store_true")
+    parser.add_argument("--replace-enrollment", action="store_true")
     parser.add_argument("--gateway-project")
     parser.add_argument("--data-class", choices=("public-nonsensitive", "private-owned"))
     parser.add_argument("--project-mode", choices=("inherit", "disabled"))
@@ -178,6 +180,20 @@ def main():
                     if not args.gateway_project or not args.data_class:
                         raise ValueError("Enrollment requires --gateway-project and --data-class")
                     previous = doc["projects"].get(root, {})
+                    if previous and not args.replace_enrollment and any(
+                            previous.get(key) != value for key, value in
+                            (("gateway_project", args.gateway_project), ("data_class", args.data_class))):
+                        raise ValueError("Enrollment identity or data class differs; review then use --replace-enrollment")
+                    try:
+                        check = subprocess.run([doc["gateway_command"], "check-project", "--project", args.gateway_project],
+                                               cwd=root, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                               text=True, timeout=5,
+                                               env={k: v for k, v in os.environ.items() if k != "TYPESAFE_API_KEY"})
+                        match = json.loads(check.stdout)
+                        if check.returncode or match.get("project_match") is not True or match.get("project_id") != args.gateway_project:
+                            raise ValueError("mismatch")
+                    except (OSError, ValueError, subprocess.TimeoutExpired):
+                        raise ValueError("Gateway client did not verify this project path and ID; update the client or correct enrollment") from None
                     doc["projects"][root] = {"gateway_project": args.gateway_project,
                                              "data_class": args.data_class,
                                              "mode": previous.get("mode", "inherit")}
@@ -194,7 +210,7 @@ def main():
               "Jev: {reason}\nPreferences: {config_path}\nChanges apply to the next discovery request; "
               "connect each agent with --use-preferences. Provider calls: 0".format(**result))
     except (OSError, ValueError, TypeError) as error:
-        parser.exit(2, "Discovery preferences could not be saved: " + str(error) + "\n")
+        parser.exit(2, "Discovery preferences unavailable: " + str(error) + "\n")
 
 
 if __name__ == "__main__":

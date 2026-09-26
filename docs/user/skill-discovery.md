@@ -30,6 +30,10 @@ Enroll another project with `skills preferences --enroll --gateway-project ID
 permission prompt. Enrollment matches the canonical project path exactly:
 unrelated repositories, nested projects and new worktrees are not silently
 enrolled. Existing explicit project opt-outs survive re-enrollment.
+Enrollment checks the path/ID binding through the gateway client's free
+`check-project` command before saving. Changing an existing data classification
+or gateway ID requires `--replace-enrollment`; the gateway still rechecks scope
+when evaluating each request.
 Use the same `--use-preferences` registration for each supported target.
 An existing managed registration requires preview/apply with `--replace`.
 
@@ -51,6 +55,8 @@ override them. A provider error or denial preserves local ordering.
 The default four-call ceiling lasts for the entire host process; after four
 attempts, further discoveries use local ordering. Restarting the agent starts
 a fresh host allowance, but does not reset the gateway's shared limits.
+The one-shot `--call-tool` adapter starts a new host each time; its calls are
+bounded by the shared gateway limits rather than a persistent local counter.
 
 Doctor reports effective preferences separately from registration and observed
 use, without calling the provider. Each discovery returns a `routing_receipt`

@@ -173,6 +173,9 @@ pub(super) fn run_discovery_preferences(cli: &Cli, args: &SkillsPreferencesArgs)
         if args.enroll {
             command.arg("--enroll");
         }
+        if args.replace_enrollment {
+            command.arg("--replace-enrollment");
+        }
         if args.revoke_provider_data {
             command.arg("--revoke-provider-data");
         }
@@ -190,7 +193,7 @@ pub(super) fn run_discovery_preferences(cli: &Cli, args: &SkillsPreferencesArgs)
     match launch() {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
         Err(_) => {
-            eprintln!("Discovery preferences require Python 3.10+.");
+            eprintln!("Discovery preferences could not start. Check Python 3.10+, the project path and temporary-directory access.");
             ExitCode::FAILURE
         }
     }

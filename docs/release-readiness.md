@@ -1,6 +1,6 @@
 # Release Readiness
 
-Release candidate: **0.1.24**, prepared September 25, 2026. Distribution unit:
+Release candidate: **0.1.24**, prepared September 26, 2026. Distribution unit:
 GitHub native binary archives and existing metactl/metactld crates, in dependency
 order. npm remains an unpublished scaffold; no new registry distribution.
 
