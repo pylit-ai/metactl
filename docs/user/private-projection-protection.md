@@ -65,12 +65,31 @@ untracked. Free-text diagnostics and provenance are accepted as shared only when
 rederived from known shared library metadata; opaque values require protection.
 CLI preflight uses the command's actual role, policy, and target overrides.
 
-The native ignore probe refuses symlink-containing repositories on Windows and
-non-UTF-8 filenames on Linux. It also refuses `GIT_DIR`, `GIT_INDEX_FILE`, and
-inline Git configuration overrides, including hook environments that supply
-these variables. These conservative refusals publish no private content; early
-bootstrap may create empty directories. Native Windows private copy workflows
-are covered separately from this unsupported symlink case.
+The native ignore probe supports ordinary symlink leaves on Windows using empty
+probe files and native Git parity checks. Windows junction directories that Git
+actually enumerates are modeled as directories without copying payloads. Their
+link and resolved target are rechecked before accepting the proof. A requested
+private destination at or beneath a junction, or any proposed ignore write
+through one, still refuses, including when the junction is empty. Other symlink
+parents remain unsupported. Native Windows tests cover private compile, apply,
+repeated sync, ignore install/fix, and Git staging with these supported links.
+
+Worktree `.gitignore` symlinks, including nested ones, are skipped as native Git
+skips them; their target contents are not read. A configured global exclude
+symlink is followed only to a regular file. Its link selection, resolved target,
+and bytes are captured and rechecked. Publication destinations themselves still
+must be ordinary files; source-link support does not authorize writing through
+them.
+
+The source index is the index Git actually selects, including the normal index,
+the temporary index used by `git commit -a`, and an alternate `GIT_INDEX_FILE`.
+Both source enumerations use that selection; probe commands use an isolated
+context. The selected path, resolved context, file type, and contents are
+rechecked after enumeration and before accepting the proof. Symlink, reparse, or
+nonregular index files refuse, as do foreign repository-context overrides such
+as `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, and inline Git configuration
+overrides. Linux filenames that are not valid UTF-8 still refuse. These refusals
+publish no private content; early bootstrap may create empty directories.
 
 Shared diagnostic names come from known target capabilities and the enforced
 policy; arbitrary supplied graph strings remain local. MCP policy metadata names
