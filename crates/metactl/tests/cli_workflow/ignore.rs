@@ -3,6 +3,64 @@ use super::*;
 // Ignore and repository hygiene workflow tests.
 
 #[test]
+fn ignore_non_git_migration_preserves_private_output_through_later_git_init() {
+    for configured in [false, true] {
+        let project = TempDir::new().expect("project");
+        if configured {
+            init_project(project.path());
+            let sync = run_cli(project.path(), &["sync", "--yes"]);
+            assert!(sync.status.success(), "{}", stderr(&sync));
+        }
+        let destination = ".agents/skills/leftover/SKILL.md";
+        let file = project.path().join(destination);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "SYNTHETIC_PRIVATE_CANARY\n").unwrap();
+        let broad = "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n.codex/\n# metactl:end generated-agent-surfaces\n";
+        fs::write(project.path().join(".gitignore"), broad).unwrap();
+        assert!(!project.path().join(".git").exists());
+        for action in ["plan", "fix", "install"] {
+            let mut args = vec![
+                "ignore",
+                if action == "plan" { "fix" } else { action },
+                "--scope",
+                "repo",
+                "--target",
+                "codex-cli",
+            ];
+            if action == "plan" {
+                args.push("--plan");
+            }
+            if action == "fix" {
+                args.push("--yes");
+            }
+            let result = run_cli(project.path(), &args);
+            assert!(
+                !result.status.success(),
+                "configured={configured}: {}",
+                stdout(&result)
+            );
+            assert_eq!(
+                fs::read_to_string(project.path().join(".gitignore")).unwrap(),
+                broad
+            );
+            assert!(!project.path().join(".git").exists());
+            assert!(!project.path().join(".metactl/ignore-recovery").exists());
+        }
+        git_init_project(project.path());
+        assert!(run_git(project.path(), &["add", "--all"]).status.success());
+        assert!(
+            !run_git(project.path(), &["show", &format!(":{destination}")])
+                .status
+                .success()
+        );
+        assert_eq!(
+            fs::read_to_string(file).unwrap(),
+            "SYNTHETIC_PRIVATE_CANARY\n"
+        );
+    }
+}
+
+#[test]
 fn ignore_partial_inventory_covers_omitted_custom_and_index_only_paths() {
     for destination in [
         ".agents/skills/leftover/SKILL.md",

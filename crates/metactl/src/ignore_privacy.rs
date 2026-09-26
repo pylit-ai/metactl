@@ -298,7 +298,31 @@ fn refuse_uninventoried_generated_paths(
     verified: &BTreeSet<String>,
     strict_inventory: bool,
 ) -> std::result::Result<(), CliError> {
-    if !project_root.join(".git").exists() {
+    if !ignore_recovery::git_worktree_present(project_root).map_err(state_error)? {
+        if strict_inventory {
+            return Err(privacy_refusal(
+                "a configured project needs a Git worktree to verify every affected path before weakening existing protection; initialize Git and retry".into(),
+            ));
+        }
+        for relative in [
+            ".agents/skills",
+            ".codex/skills",
+            ".codex/commands",
+            ".claude/skills",
+            ".claude/commands",
+            ".cursor/skills",
+            ".gemini/skills",
+            ".gemini/commands",
+        ] {
+            let path = checked_destination(project_root, relative).map_err(state_error)?;
+            match fs::symlink_metadata(path) {
+                Ok(_) => return Err(privacy_refusal(format!(
+                    "generated-looking content under {relative} has no trustworthy projection inventory or Git worktree evidence"
+                ))),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(state_error(anyhow!("inspect {relative}: {err}"))),
+            }
+        }
         return Ok(());
     }
     let files = Command::new("git")
@@ -435,7 +459,7 @@ fn indexed_destination(
     project_root: &Path,
     destination: &str,
 ) -> std::result::Result<bool, CliError> {
-    if !project_root.join(".git").exists() {
+    if !ignore_recovery::git_worktree_present(project_root).map_err(state_error)? {
         return Ok(false);
     }
     let output = Command::new("git")

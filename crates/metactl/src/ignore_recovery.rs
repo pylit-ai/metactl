@@ -1,6 +1,6 @@
 use super::*;
 
-fn git_worktree_present(project_root: &Path) -> Result<bool> {
+pub(super) fn git_worktree_present(project_root: &Path) -> Result<bool> {
     let probe = Command::new("git")
         .arg("-C")
         .arg(project_root)

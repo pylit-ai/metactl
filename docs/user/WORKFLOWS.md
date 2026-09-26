@@ -138,6 +138,9 @@ local instruction document; private skills, resources, and other nonlocal
 outputs are omitted with `private_nonlocal_outputs_omitted` degradation until
 an exact protected routing is available. This is a deliberate privacy limit,
 not a migration or automatic untracking step.
+For configured folders that are not yet Git worktrees, weakening an existing
+managed block is refused: initialize Git and retry so affected working and
+indexed paths can be checked. MetaCTL does not initialize Git on your behalf.
 Each changed ignore file leaves a reported copy under the private,
 Git-ignored `.metactl/ignore-recovery/` directory. Keep it until any
 concurrent edit has been reconciled; MetaCTL does not delete it.
