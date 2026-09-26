@@ -100,6 +100,9 @@
           "path_template": {
             "$ref": "common.schema.json#/$defs/path"
           },
+          "import_stub_path": {
+            "$ref": "common.schema.json#/$defs/path"
+          },
           "resource_kinds": {
             "type": "array",
             "items": {
@@ -126,6 +129,9 @@
               "inline",
               "reference_index"
             ]
+          },
+          "import_stub_path": {
+            "$ref": "common.schema.json#/$defs/path"
           },
           "surface_selection_mode": {
             "type": "string",
@@ -283,6 +289,7 @@
         "type": "string",
         "enum": [
           "copy",
+          "import_stub",
           "patch",
           "symlink",
           "takeover"

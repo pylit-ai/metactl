@@ -280,6 +280,8 @@ def starter_schema_for(path: Path) -> Path | None:
         return SCHEMA_ROOT / "target_capability_matrix.schema.json"
     if len(parts) == 2 and parts[0] == "packs":
         return SCHEMA_ROOT / "pack_manifest.schema.json"
+    if len(parts) >= 3 and parts[0] == "packs" and parts[-1] == "skill-card.json":
+        return SCHEMA_ROOT / "skill_card.schema.json"
     if len(parts) == 2 and parts[0] == "knowledge_sources":
         return KNOWLEDGE_SOURCE_SCHEMA
     if len(parts) == 2 and parts[0] == "provenance":

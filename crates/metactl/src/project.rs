@@ -3,6 +3,7 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -10,16 +11,21 @@ use include_dir::{include_dir, Dir, DirEntry};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod operation_lock_error;
+pub use operation_lock_error::OperationLockError;
+
 use crate::library_registry::LibraryRegistry;
 use crate::types::{
-    ApplyMode, BrownfieldMode, CompileManifest, Config, ConfigDefaults, DiscoveryMode,
-    InvocationOverlay, PolicyEnforcementReport, PromotionStatus, Ref, SurfaceSelectionMode,
+    ApplyMode, AutoSurfaceSelection, BrownfieldMode, CompileManifest, Config, ConfigDefaults,
+    DiscoveryMode, InvocationOverlay, PolicyEnforcementReport, PromotionStatus, Ref,
+    SurfaceSelectionMode,
 };
 
 pub const METACTL_DIRS: &[&str] = &["generated", "state", "history", "private", "cache"];
 pub const METACTL_GITIGNORE_ENTRY: &str = "/.metactl/";
 pub const LOCAL_CONFIG_GITIGNORE_ENTRY: &str = "/metactl.local.yaml";
 const DEFAULT_OPERATION_LOCK_STALE_SECS: u64 = 6 * 60 * 60;
+static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static BUNDLED_STARTER_LIBRARY: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/starter");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -36,6 +42,8 @@ pub struct ProjectConfigDefaults {
         skip_serializing_if = "Option::is_none"
     )]
     pub surface_selection_mode: Option<SurfaceSelectionMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_surface_selection: Option<AutoSurfaceSelection>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,43 +101,28 @@ pub struct PartialProjectConfig {
     pub metadata: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceType {
+    #[default]
     Local,
     Git,
 }
 
-impl Default for SourceType {
-    fn default() -> Self {
-        Self::Local
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceVisibility {
+    #[default]
     Public,
     Private,
 }
 
-impl Default for SourceVisibility {
-    fn default() -> Self {
-        Self::Public
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceLockPublicity {
+    #[default]
     Public,
     Private,
-}
-
-impl Default for SourceLockPublicity {
-    fn default() -> Self {
-        Self::Public
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -200,6 +193,8 @@ pub struct LockedTarget {
 pub struct ProjectLock {
     pub api_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_content_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_digest: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay_path: Option<String>,
@@ -227,6 +222,7 @@ impl Default for ProjectLock {
     fn default() -> Self {
         Self {
             api_version: crate::types::API_VERSION.to_string(),
+            library_content_digest: None,
             config_digest: None,
             overlay_path: None,
             overlay_digest: None,
@@ -461,6 +457,7 @@ pub fn default_project_config() -> ProjectConfigFile {
             fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
             discovery_mode: Some(DiscoveryMode::CandidateSearch),
             surface_selection_mode: None,
+            auto_surface_selection: None,
         }),
         metadata: BTreeMap::new(),
     }
@@ -685,6 +682,9 @@ fn merge_config_defaults(
     }
     if overlay.surface_selection_mode.is_some() {
         merged.surface_selection_mode = overlay.surface_selection_mode;
+    }
+    if overlay.auto_surface_selection.is_some() {
+        merged.auto_surface_selection = overlay.auto_surface_selection;
     }
     merged
 }
@@ -986,7 +986,7 @@ pub fn load_project_context_with_profile_preferences(
     let raw_config_file = load_partial_project_config(&config_path)?;
     let resolution = resolve_profile_cli_chain(profile, &raw_config_file, ignore_user_default);
     let active_profile = build_active_profile_from_resolution(&resolution)?;
-    let config_file = merge_project_config(
+    let shared_config_file = merge_project_config(
         default_project_config(),
         active_profile
             .as_ref()
@@ -996,11 +996,13 @@ pub fn load_project_context_with_profile_preferences(
     );
     let overlay = load_overlay(overlay_path)?;
     let local_cfg_path = local_config_path(project_root);
-    let local_config_path_opt = if local_cfg_path.exists() {
-        Some(local_cfg_path)
-    } else {
-        None
-    };
+    let local_config = load_local_config(project_root)?.unwrap_or_default();
+    let local_config_path_opt = local_cfg_path.exists().then_some(local_cfg_path);
+    let config_file = merge_project_config(
+        shared_config_file,
+        PartialProjectConfig::default(),
+        local_config,
+    );
     let library_roots = resolve_library_roots(project_root, &config_file)?;
     let registry = load_registry(&library_roots)?;
     let lock_path = project_lock_path(project_root);
@@ -1287,6 +1289,7 @@ impl ProjectContext {
                     brownfield_mode: defaults.brownfield_mode.clone(),
                     discovery_mode: defaults.discovery_mode.clone(),
                     surface_selection_mode: defaults.surface_selection_mode.clone(),
+                    auto_surface_selection: defaults.auto_surface_selection.clone(),
                 }),
             metadata: self.config_file.metadata.clone(),
         })
@@ -1390,6 +1393,150 @@ pub fn digest_bytes(bytes: &[u8]) -> String {
 pub fn digest_path(path: &Path) -> Result<String> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     Ok(digest_bytes(&bytes))
+}
+
+/// Fingerprint library inputs used by compilation, independent of Git metadata.
+/// This is intentionally broader than selected packs: a false positive requests
+/// a new sync, while omitting a selected resource would incorrectly claim freshness.
+pub fn library_content_digest(roots: &[PathBuf]) -> Result<String> {
+    let mut hasher = Sha256::new();
+    for (index, root) in roots.iter().enumerate() {
+        hasher.update(index.to_le_bytes());
+        let mut files = Vec::new();
+        collect_library_content_files(root, root, &mut files)?;
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        for (relative, bytes) in files {
+            hasher.update(relative.as_bytes());
+            hasher.update([0]);
+            hasher.update(bytes);
+            hasher.update([0]);
+        }
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+pub fn library_content_comparison(context: &ProjectContext) -> &'static str {
+    match library_content_digest(&context.library_roots) {
+        Ok(current) => match context.lock.library_content_digest.as_deref() {
+            Some(recorded) if recorded == current => "current",
+            Some(_) => "drifted",
+            None => "unverifiable",
+        },
+        Err(_) => "unverifiable",
+    }
+}
+
+fn collect_library_content_files(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> Result<()> {
+    collect_library_content_files_inner(root, dir, files, &mut Vec::new())
+}
+
+fn collect_library_content_files_inner(
+    root: &Path,
+    dir: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+    active_dirs: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let physical = dir
+        .canonicalize()
+        .with_context(|| format!("resolve {}", dir.display()))?;
+    if active_dirs.contains(&physical) {
+        return Err(anyhow!(
+            "library resource directory cycle at {}",
+            dir.display()
+        ));
+    }
+    active_dirs.push(physical);
+    for entry in fs::read_dir(dir).with_context(|| format!("read {}", dir.display()))? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        // Fleet controllers and Git checkouts contain runtime state that is
+        // never a library input. Other source folders may have arbitrary
+        // names, so keep them in the fingerprint.
+        if dir == root
+            && matches!(
+                name.to_str(),
+                Some(
+                    ".agents"
+                        | ".claude"
+                        | ".codex"
+                        | ".cursor"
+                        | ".gemini"
+                        | ".github"
+                        | ".omc"
+                        | ".opendream"
+                        | "fleet"
+                        | "notepads"
+                        | "quarantine"
+                        | "reports"
+                        | "evals"
+                        | "tests"
+                        | "metactl.yaml"
+                        | "metactl.lock.json"
+                        | "AGENTS.md"
+                        | "CLAUDE.md"
+                        | "CLAUDE.local.md"
+                        | "README.md"
+                        | ".gitignore"
+                        | ".gitmodules"
+                )
+            )
+        {
+            continue;
+        }
+        if matches!(
+            name.to_str(),
+            Some(
+                ".git"
+                    | ".metactl"
+                    | "target"
+                    | "tmp"
+                    | ".DS_Store"
+                    | ".metactl-bundled-starter.complete"
+            )
+        ) {
+            continue;
+        }
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            collect_library_content_files_inner(root, &path, files, active_dirs)?;
+        } else if kind.is_file() {
+            let relative = path
+                .strip_prefix(root)?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push((
+                relative,
+                fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+            ));
+        } else if kind.is_symlink() {
+            let target = fs::metadata(&path)
+                .with_context(|| format!("follow library resource {}", path.display()))?;
+            if target.is_dir() {
+                collect_library_content_files_inner(root, &path, files, active_dirs)?;
+            } else if target.is_file() {
+                let relative = path
+                    .strip_prefix(root)?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                files.push((
+                    relative,
+                    fs::read(&path).with_context(|| format!("read {}", path.display()))?,
+                ));
+            } else {
+                return Err(anyhow!(
+                    "library resource symlink has unsupported target: {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    active_dirs.pop();
+    Ok(())
 }
 
 pub fn digest_json<T: Serialize>(value: &T) -> Result<String> {
@@ -1576,7 +1723,11 @@ fn atomic_write_with_durability(path: &Path, bytes: &[u8], durable: bool) -> Res
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let tmp_path = parent.join(format!(".{filename}.tmp-{}-{stamp}", std::process::id()));
+    let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp_path = parent.join(format!(
+        ".{filename}.tmp-{}-{stamp}-{sequence}",
+        std::process::id()
+    ));
     {
         let mut file = File::create(&tmp_path)
             .with_context(|| format!("create temp {}", tmp_path.display()))?;
@@ -1606,9 +1757,23 @@ pub struct OperationLock {
 
 impl OperationLock {
     pub fn acquire(project_root: &Path, command: &str) -> Result<Self> {
+        Self::acquire_with_initializer(project_root, command, |file, payload| {
+            file.write_all(payload)?;
+            file.sync_all()
+        })
+    }
+
+    fn acquire_with_initializer(
+        project_root: &Path,
+        command: &str,
+        initialize: impl FnOnce(&mut File, &[u8]) -> std::io::Result<()>,
+    ) -> Result<Self> {
         let state_dir = project_root.join(".metactl").join("state");
-        fs::create_dir_all(&state_dir)
-            .with_context(|| format!("create {}", state_dir.display()))?;
+        fs::create_dir_all(&state_dir).map_err(|source| OperationLockError::Io {
+            operation: "create_state_directory",
+            path: state_dir.clone(),
+            source,
+        })?;
         let path = state_dir.join("operation.lock");
         let payload = format!(
             "pid={}\ncommand={}\nstarted_at={}\n",
@@ -1618,28 +1783,34 @@ impl OperationLock {
         );
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut file) => {
-                file.write_all(payload.as_bytes())
-                    .with_context(|| format!("write {}", path.display()))?;
-                let _ = file.sync_all();
-                Ok(Self { path })
+                // Establish ownership before fallible initialization. Close the file
+                // before dropping the guard so cleanup also works on Windows.
+                let lock = Self { path };
+                let result = initialize(&mut file, payload.as_bytes());
+                drop(file);
+                result.map_err(|source| OperationLockError::Io {
+                    operation: "initialize_lock",
+                    path: lock.path.clone(),
+                    source,
+                })?;
+                Ok(lock)
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
                 let existing = fs::read_to_string(&path).unwrap_or_default();
                 let age_secs = operation_lock_age_secs(&path, &existing).unwrap_or_default();
                 let stale_after = operation_lock_stale_after_secs();
                 if age_secs >= stale_after {
-                    Err(anyhow!(
-                        "stale metactl operation lock at {}. Another metactl write may have been interrupted.\nNext: inspect the repo, then remove .metactl/state/operation.lock and retry.",
-                        path.display()
-                    ))
+                    Err(OperationLockError::Stale { path }.into())
                 } else {
-                    Err(anyhow!(
-                        "another metactl write operation is already active for this project (lock: {}).\nNext: wait for the active command to finish, then retry. If no metactl process is running, inspect the repo before removing .metactl/state/operation.lock.",
-                        path.display()
-                    ))
+                    Err(OperationLockError::Active { path }.into())
                 }
             }
-            Err(error) => Err(error).with_context(|| format!("create {}", path.display())),
+            Err(source) => Err(OperationLockError::Io {
+                operation: "create_lock",
+                path,
+                source,
+            }
+            .into()),
         }
     }
 }
@@ -1701,7 +1872,7 @@ pub fn preferred_apply_mode_for_target(
     target: &crate::TargetCapabilityMatrix,
     requested: Option<ApplyMode>,
 ) -> ApplyMode {
-    requested.unwrap_or_else(|| {
+    requested.unwrap_or({
         if target.capabilities.local_scripts {
             ApplyMode::Symlink
         } else {
@@ -1902,6 +2073,35 @@ mod tests {
     }
 
     #[test]
+    fn local_config_overlays_shared_defaults_in_effective_context() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        fs::write(
+            temp.path().join("metactl.yaml"),
+            "api_version: metactl/v2alpha1\nrole: builder\npolicy: brownfield-safe-builder\ntargets:\n- codex-cli\ndefaults:\n  surface_selection_mode: minimal\n",
+        )
+        .expect("shared config");
+        fs::write(
+            temp.path().join("metactl.local.yaml"),
+            "defaults:\n  surface_selection_mode: auto\n  auto_surface_selection:\n    selected_surface_ids:\n    - python-refactor:contracts\n",
+        )
+        .expect("local config");
+
+        let context = load_project_context(temp.path(), None, None, None).expect("context");
+        let defaults = context.config_file.defaults.expect("defaults");
+        assert_eq!(
+            defaults.surface_selection_mode,
+            Some(SurfaceSelectionMode::Auto)
+        );
+        assert_eq!(
+            defaults
+                .auto_surface_selection
+                .expect("selection")
+                .selected_surface_ids,
+            BTreeSet::from(["python-refactor:contracts".to_string()])
+        );
+    }
+
+    #[test]
     fn linked_projects_merge_profile_and_project_by_id() {
         let mut profile = PartialProjectConfig::default();
         profile.linked_projects = vec![
@@ -1918,21 +2118,23 @@ mod tests {
                 disabled: false,
             },
         ];
-        let mut project = PartialProjectConfig::default();
-        project.linked_projects = vec![
-            LinkedProjectRecord {
-                id: "beta".to_string(),
-                path: "../beta-local".to_string(),
-                profile: Some("local".to_string()),
-                disabled: true,
-            },
-            LinkedProjectRecord {
-                id: "gamma".to_string(),
-                path: "../gamma".to_string(),
-                profile: None,
-                disabled: false,
-            },
-        ];
+        let project = PartialProjectConfig {
+            linked_projects: vec![
+                LinkedProjectRecord {
+                    id: "beta".to_string(),
+                    path: "../beta-local".to_string(),
+                    profile: Some("local".to_string()),
+                    disabled: true,
+                },
+                LinkedProjectRecord {
+                    id: "gamma".to_string(),
+                    path: "../gamma".to_string(),
+                    profile: None,
+                    disabled: false,
+                },
+            ],
+            ..Default::default()
+        };
 
         let merged = merge_project_config(default_project_config(), profile, project);
 
@@ -2030,5 +2232,37 @@ mod tests {
                     .into_owned();
                 !name.contains(".tmp-")
             }));
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_use_distinct_temporary_paths() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let path = temp.path().join("cache").join("shared.json");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(32));
+
+        std::thread::scope(|scope| {
+            for index in 0..32 {
+                let path = path.clone();
+                let barrier = barrier.clone();
+                scope.spawn(move || {
+                    barrier.wait();
+                    atomic_write_relaxed(&path, format!("value-{index}").as_bytes())
+                        .expect("concurrent atomic write");
+                });
+            }
+        });
+
+        let contents = fs::read_to_string(&path).expect("read final value");
+        assert!(contents.starts_with("value-"));
+        assert!(path
+            .parent()
+            .expect("parent")
+            .read_dir()
+            .expect("read cache dir")
+            .all(|entry| !entry
+                .expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .contains(".tmp-")));
     }
 }

@@ -1,0 +1,30 @@
+{
+  "kind": "pack",
+  "id": "incomplete-package",
+  "version": "1.0.0",
+  "title": "Incomplete Package",
+  "description": "Regression fixture proving a declared but missing package resource fails closed.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "org_validated",
+  "requires_confirmation": false,
+  "task_tags": ["package", "closure"],
+  "compatible_roles": ["builder"],
+  "compatible_targets": ["codex-cli"],
+  "resources": [
+    {
+      "path": "packs/incomplete-package/SKILL.md",
+      "kind": "instruction",
+      "required": true,
+      "surface_relevance": "always_on"
+    },
+    {
+      "path": "packs/incomplete-package/references/missing.md",
+      "kind": "example",
+      "required": true
+    }
+  ],
+  "metadata": {
+    "fixture": "skill-package-closure-negative"
+  }
+}
