@@ -6,6 +6,66 @@ compilation, native skill menus and installed skill folders are unchanged.
 The optional packaged host needs Python 3.10 or newer on the client machine.
 
 <a id="quick-start"></a>
+## Enable Jev once for managed projects
+
+Persistent preferences send a task description and candidate skill metadata
+through your scoped gateway to TypeSafe. Provider processing and retention
+apply. Exclude secrets and projects whose customer or organization policy
+prohibits that transfer. Private repositories you control can use
+`private-owned` when the gateway grant permits it; do not relabel them public.
+
+```sh
+metactl --project /absolute/path/to/project skills preferences --mode enabled \
+  --allow-provider-data --gateway-command /absolute/path/to/jev \
+  --enroll --gateway-project approved-project-id --data-class private-owned
+metactl --project /absolute/path/to/project skills connect --target codex-cli --use-preferences
+metactl --project /absolute/path/to/project skills connect --target codex-cli --use-preferences --apply
+metactl --project /absolute/path/to/project skills doctor --target codex-cli --use-preferences --json
+```
+
+The enablement choice is saved in `$XDG_CONFIG_HOME/metactl/discovery.json`
+(default `~/.config/metactl/discovery.json`), owned by the user with mode 0600.
+Enroll another project with `skills preferences --enroll --gateway-project ID
+--data-class private-owned`; it inherits the saved default without another
+permission prompt. Enrollment matches the canonical project path exactly:
+unrelated repositories, nested projects and new worktrees are not silently
+enrolled. Existing explicit project opt-outs survive re-enrollment.
+Enrollment checks the path/ID binding through the gateway client's free
+`check-project` command before saving. Changing an existing data classification
+or gateway ID requires `--replace-enrollment`; the gateway still rechecks scope
+when evaluating each request.
+Use the same `--use-preferences` registration for each supported target.
+An existing managed registration requires preview/apply with `--replace`.
+
+`skills preferences --project-mode disabled` disables the current project;
+`--project-mode inherit` restores its inherited setting. `--mode disabled`
+disables all enrolled projects. `METACTL_JEV_DISABLE=1` disables a launched
+host for one session. Preferences are read before each discovery request;
+changes affect existing preference-aware hosts without restart. Initial MCP
+registration still requires the native agent to reload its tools. A request
+already in flight may finish. Legacy registrations using explicit trial flags
+must be reconnected with `--use-preferences` to inherit these controls.
+Use `skills preferences --revoke-provider-data` to withdraw permission itself;
+enabling again then requires the explicit data-transfer choice.
+
+Call/deadline settings are advanced options (`--max-provider-calls 1..10`,
+`--provider-deadline` at most 5 seconds). Gateway scope, data restrictions,
+shared budgets and expiry remain authoritative; local preferences cannot
+override them. A provider error or denial preserves local ordering.
+The default four-call ceiling lasts for the entire host process; after four
+attempts, further discoveries use local ordering. Restarting the agent starts
+a fresh host allowance, but does not reset the gateway's shared limits.
+The one-shot `--call-tool` adapter starts a new host each time; its calls are
+bounded by the shared gateway limits rather than a persistent local counter.
+
+Doctor reports effective preferences separately from registration and observed
+use, without calling the provider. Each discovery returns a `routing_receipt`
+with provider calls, fallback reason, order change and log status. Inspect the
+private `event_log` path printed by connect/doctor; logs contain metadata, not
+task text or skill bodies. Local logging is separate from provider retention.
+Enabled does not prove a coding agent invoked discovery: ask it to show its
+receipt. Default-on uses Jev when useful; unambiguous requests remain local.
+
 ## First-run workflow
 
 There are three separate steps: make a project catalog available, register the

@@ -238,6 +238,41 @@ class Ranker:
         return original, metadata
 
 
+class PreferenceRanker(Ranker):
+    """Re-evaluate user policy per call without replenishing this host's budget."""
+    def __init__(self, project):
+        super().__init__(mode="baseline", transport_kind="gateway")
+        module_dir = os.path.dirname(os.path.realpath(__file__))
+        if module_dir not in sys.path:
+            sys.path.insert(0, module_dir)
+        from skill_discovery_preferences import resolve
+        self.resolve = resolve
+        self.project, self.attempted = project, 0
+        self.refresh()
+
+    def refresh(self):
+        self.preference = self.resolve(self.project)
+        self.enabled = self.allow_data = self.preference["enabled"]
+        self.mode = "advisory" if self.enabled else "baseline"
+        self.remaining = max(0, self.preference.get("max_provider_calls", 0) - self.attempted)
+        self.deadline = self.preference.get("provider_deadline", 5.0)
+        command = self.preference.get("gateway_command", "")
+        self.key = "scoped-client" if command and os.access(command, os.X_OK) else None
+        project = self.preference.get("gateway_project")
+        data_class = self.preference.get("data_class")
+        self.sender = lambda payload, _key, deadline: gateway_transport(
+            payload, deadline, command, project, self.project, data_class)
+
+    def rank(self, query, baseline):
+        self.refresh()
+        result, metric = super().rank(query, baseline)
+        self.attempted += metric["provider_attempts"]
+        if not self.enabled:
+            metric["reason"] = self.preference["reason"]
+        metric["preference_source"] = "user"
+        return result, metric
+
+
 class Host:
     def __init__(self, binary, project, ranker=None, excluded=(), runner=None, cli_args=(),
                  event_log=None, session_id=None, runtime="other"):
@@ -397,6 +432,7 @@ def main():
                       help="One tool call with JSON arguments on stdin; gateway shared limits still apply")
     parser.add_argument("--ranker", choices=("deterministic", "jev"), default="deterministic")
     parser.add_argument("--allow-provider-data", action="store_true")
+    parser.add_argument("--use-preferences", action="store_true")
     parser.add_argument("--max-provider-calls", type=int, default=0)
     parser.add_argument("--provider-deadline", type=float, default=1.5)
     parser.add_argument("--exclude-skill", action="append", default=[])
@@ -433,6 +469,8 @@ def main():
     ranker = Ranker(args.ranker == "jev", args.allow_provider_data,
                     args.max_provider_calls, args.provider_deadline, key, sender,
                     mode=args.trial_mode, transport_kind=args.jev_transport)
+    if args.use_preferences:
+        ranker = PreferenceRanker(os.path.realpath(args.project))
     cli_args = ["--no-profile"] if args.no_profile else []
     for key in ("profile", "config", "overlay"):
         if getattr(args, key):
@@ -457,6 +495,8 @@ def main():
                 command_args.extend(["--" + key.replace("_", "-"), value])
         if args.allow_provider_data:
             command_args.append("--allow-provider-data")
+        if args.use_preferences:
+            command_args.append("--use-preferences")
         for excluded in args.exclude_skill:
             command_args.extend(["--exclude-skill", excluded])
         print(compact({"mcpServers": {"metactl-skills": {"command": args.metactl, "args": command_args}}}))
@@ -465,9 +505,12 @@ def main():
         try:
             catalog = host.runner(["catalog"])
             report = readiness(ranker)
+            if args.use_preferences:
+                report["preferences"] = ranker.preference
             eligible = [s for s in catalog["skills"] if s["id"] not in host.excluded and s["name"] not in host.excluded]
             report.update(project=host.project, eligible_skills=len(eligible),
-                          catalog_digest=catalog["catalog_digest"], project_ready=True)
+                          catalog_digest=catalog["catalog_digest"], project_ready=True,
+                          event_log=args.event_log)
         except Exception:
             print(compact({"project_ready": False, "provider_verified": False,
                            "reason": "project_discovery_failed", "next": "Run skills catalog locally."}))

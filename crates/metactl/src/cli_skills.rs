@@ -22,6 +22,7 @@ pub(super) fn cmd_skills(
         }
         SkillsCommand::Host(_) => unreachable!("host has a dedicated stdio entrypoint"),
         SkillsCommand::Trials(_) => unreachable!("trials has a dedicated entrypoint"),
+        SkillsCommand::Preferences(_) => unreachable!("preferences has a dedicated entrypoint"),
     }
 }
 
@@ -40,6 +41,10 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
         fs::write(
             directory.path().join("skill_discovery_trials.py"),
             include_bytes!("../assets/skill_discovery_trials.py"),
+        )?;
+        fs::write(
+            directory.path().join("skill_discovery_preferences.py"),
+            include_bytes!("../assets/skill_discovery_preferences.py"),
         )?;
         let mut command = std::process::Command::new(&args.python);
         command
@@ -73,7 +78,26 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
                 command.arg(flag).arg(value);
             }
         }
-        if let Some(value) = &args.event_log {
+        let event_log = if args.use_preferences && args.event_log.is_none() {
+            let root = project_root(cli)?.canonicalize()?;
+            let ledger = cli_skill_discovery_connection::ledger_path(&root)
+                .map_err(|_| anyhow::anyhow!("Cannot resolve private discovery log"))?;
+            if !args.status && !args.client_config && !args.check {
+                let parent = ledger.parent().unwrap();
+                if !parent.exists() {
+                    fs::create_dir_all(parent)?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+                    }
+                }
+            }
+            Some(ledger)
+        } else {
+            args.event_log.clone()
+        };
+        if let Some(value) = &event_log {
             command.arg("--event-log").arg(value);
         }
         for (enabled, flag) in [
@@ -81,6 +105,7 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             (args.check, "--check"),
             (args.client_config, "--client-config"),
             (args.allow_provider_data, "--allow-provider-data"),
+            (args.use_preferences, "--use-preferences"),
         ] {
             if enabled {
                 command.arg(flag);
@@ -110,6 +135,65 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
         Err(_) => {
             eprintln!("Discovery host could not start. Install Python 3.10+ on PATH and check the project path. No provider request was confirmed.");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+pub(super) fn run_discovery_preferences(cli: &Cli, args: &SkillsPreferencesArgs) -> ExitCode {
+    let launch = || -> anyhow::Result<std::process::ExitStatus> {
+        let directory = tempfile::tempdir()?;
+        let script = directory.path().join("skill_discovery_preferences.py");
+        fs::write(
+            &script,
+            include_bytes!("../assets/skill_discovery_preferences.py"),
+        )?;
+        let mut command = std::process::Command::new(&args.python);
+        command
+            .arg("-I")
+            .arg(script)
+            .arg("--project")
+            .arg(project_root(cli)?);
+        if cli.machine_output() {
+            command.arg("--json");
+        }
+        for (flag, value) in [
+            ("--mode", &args.mode),
+            ("--gateway-project", &args.gateway_project),
+            ("--data-class", &args.data_class),
+            ("--project-mode", &args.project_mode),
+        ] {
+            if let Some(value) = value {
+                command.arg(flag).arg(value);
+            }
+        }
+        if args.allow_provider_data {
+            command.arg("--allow-provider-data");
+        }
+        if args.enroll {
+            command.arg("--enroll");
+        }
+        if args.replace_enrollment {
+            command.arg("--replace-enrollment");
+        }
+        if args.revoke_provider_data {
+            command.arg("--revoke-provider-data");
+        }
+        if let Some(value) = &args.gateway_command {
+            command.arg("--gateway-command").arg(value);
+        }
+        if let Some(value) = args.max_provider_calls {
+            command.arg("--max-provider-calls").arg(value.to_string());
+        }
+        if let Some(value) = args.provider_deadline {
+            command.arg("--provider-deadline").arg(value.to_string());
+        }
+        command.status().map_err(Into::into)
+    };
+    match launch() {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(_) => {
+            eprintln!("Discovery preferences could not start. Check Python 3.10+, the project path and temporary-directory access.");
             ExitCode::FAILURE
         }
     }
