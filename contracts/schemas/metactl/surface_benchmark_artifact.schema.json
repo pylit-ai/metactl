@@ -53,12 +53,12 @@
         "id": { "$ref": "common.schema.json#/$defs/slug" },
         "query": { "type": "string", "minLength": 1 },
         "expected_pack": { "$ref": "common.schema.json#/$defs/slug" },
-        "expected_command": { "$ref": "common.schema.json#/$defs/path" },
+        "expected_skill": { "$ref": "common.schema.json#/$defs/path" },
         "rank": { "type": ["integer", "null"], "minimum": 1 },
         "recall_at_1": { "type": "boolean" },
         "recall_at_3": { "type": "boolean" },
         "mrr": { "type": "number", "minimum": 0, "maximum": 1 },
-        "expected_command_available": { "type": "boolean" },
+        "expected_skill_available": { "type": "boolean" },
         "body_read_route_available": { "type": "boolean" },
         "false_negative": { "type": "boolean" },
         "top_matches": {
@@ -82,7 +82,7 @@
         "recall_at_1",
         "recall_at_3",
         "mrr",
-        "expected_command_available",
+        "expected_skill_available",
         "body_read_route_available",
         "false_negative",
         "top_matches"
@@ -139,7 +139,7 @@
         "expected_pack_recall_at_1": { "type": "number", "minimum": 0, "maximum": 1 },
         "expected_pack_recall_at_3": { "type": "number", "minimum": 0, "maximum": 1 },
         "mrr": { "type": "number", "minimum": 0, "maximum": 1 },
-        "expected_command_availability": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_skill_availability": { "type": "number", "minimum": 0, "maximum": 1 },
         "body_read_route_availability": { "type": "number", "minimum": 0, "maximum": 1 },
         "false_negative_count": { "type": "integer", "minimum": 0 }
       },
@@ -149,7 +149,7 @@
         "expected_pack_recall_at_1",
         "expected_pack_recall_at_3",
         "mrr",
-        "expected_command_availability",
+        "expected_skill_availability",
         "body_read_route_availability",
         "false_negative_count"
       ],
@@ -161,14 +161,14 @@
         "auto_generated_surface_reduction_min": { "type": "number", "minimum": 0, "maximum": 1 },
         "auto_skill_body_reduction_min": { "type": "number", "minimum": 0, "maximum": 1 },
         "expected_pack_recall_at_3_min": { "type": "number", "minimum": 0, "maximum": 1 },
-        "expected_command_availability_min": { "type": "number", "minimum": 0, "maximum": 1 },
+        "expected_skill_availability_min": { "type": "number", "minimum": 0, "maximum": 1 },
         "false_negative_count_max": { "type": "integer", "minimum": 0 }
       },
       "required": [
         "auto_generated_surface_reduction_min",
         "auto_skill_body_reduction_min",
         "expected_pack_recall_at_3_min",
-        "expected_command_availability_min",
+        "expected_skill_availability_min",
         "false_negative_count_max"
       ],
       "additionalProperties": false

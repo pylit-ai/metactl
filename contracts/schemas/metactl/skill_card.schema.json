@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://metactl.dev/schemas/skill_card.schema.json",
+  "title": "MetaCTL skill card",
+  "description": "Portable discovery metadata declared by a starter-library pack resource.",
+  "oneOf": [
+    {
+      "title": "legacy 0.1 card",
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": "0.1"},
+        "name": {"$ref": "#/$defs/nonEmptyString"}
+      },
+      "required": ["schema_version", "name"],
+      "additionalProperties": true
+    },
+    {
+      "title": "2alpha1 card",
+      "type": "object",
+      "properties": {
+        "schema_version": {"const": "2alpha1"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "version": {"$ref": "#/$defs/nonEmptyString"},
+        "summary": {"$ref": "#/$defs/nonEmptyString"},
+        "aliases": {"$ref": "#/$defs/stringArray"},
+        "intents": {
+          "type": "object",
+          "properties": {
+            "positive": {"$ref": "#/$defs/nonEmptyStringArray"},
+            "negative": {"$ref": "#/$defs/stringArray"}
+          },
+          "required": ["positive", "negative"],
+          "additionalProperties": true
+        },
+        "facets": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/$defs/stringArray"}
+        },
+        "reviewed_relations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {"enum": ["alias_of", "complements", "requires", "see_also", "supersedes"]},
+              "target": {"$ref": "#/$defs/nonEmptyString"},
+              "reviewed_by": {"$ref": "#/$defs/nonEmptyString"},
+              "reviewed_at": {"$ref": "#/$defs/nonEmptyString"}
+            },
+            "required": ["type", "target", "reviewed_by", "reviewed_at"],
+            "additionalProperties": false
+          }
+        },
+        "host_compatibility": {
+          "type": "object",
+          "properties": {
+            "targets": {"$ref": "#/$defs/nonEmptyStringArray"},
+            "minimum_metactl": {"$ref": "#/$defs/nonEmptyString"},
+            "notes": {"$ref": "#/$defs/stringArray"}
+          },
+          "required": ["targets"],
+          "additionalProperties": true
+        },
+        "provenance": {
+          "type": "object",
+          "properties": {
+            "source_kind": {"enum": ["first_party", "vendored", "imported", "local"]},
+            "reviewed_by": {"$ref": "#/$defs/nonEmptyString"},
+            "reviewed_at": {"$ref": "#/$defs/nonEmptyString"}
+          },
+          "required": ["source_kind", "reviewed_by", "reviewed_at"],
+          "additionalProperties": true
+        }
+      },
+      "required": ["schema_version", "name", "version", "summary", "aliases", "intents", "facets", "reviewed_relations", "host_compatibility", "provenance"],
+      "additionalProperties": true
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "stringArray": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/nonEmptyString"},
+      "uniqueItems": true
+    },
+    "nonEmptyStringArray": {
+      "allOf": [
+        {"$ref": "#/$defs/stringArray"},
+        {"minItems": 1}
+      ]
+    }
+  }
+}

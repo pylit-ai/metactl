@@ -396,7 +396,7 @@ fn trust_active_operation_lock_blocks_second_mutating_command() {
     );
     let text = format!("{}{}", stdout(&second), stderr(&second));
     assert!(
-        text.contains("another metactl write operation is already active")
+        text.contains("another metactl write operation may own the existing lock")
             && text.contains(".metactl/state/operation.lock")
             && text.contains("Next: wait for the active command to finish"),
         "active operation error should be actionable: {text}"
