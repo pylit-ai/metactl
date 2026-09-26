@@ -1527,3 +1527,195 @@ fn cli_zero_match_shared_document_retains_safe_diagnostic() {
     assert!(body.contains("|packs:none"), "{body}");
     assert!(body.contains("|gap:pack_selection=ZeroMatch"), "{body}");
 }
+
+fn privacy_snapshot(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Path, path: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if [".git", ".test-home"].contains(&entry.file_name().to_string_lossy().as_ref()) {
+                continue;
+            }
+            let path = entry.path();
+            let key = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if path.is_symlink() {
+                out.insert(
+                    key,
+                    fs::read_link(path)
+                        .unwrap()
+                        .to_string_lossy()
+                        .as_bytes()
+                        .to_vec(),
+                );
+            } else if path.is_dir() {
+                out.insert(format!("{key}/"), vec![]);
+                walk(root, &path, out);
+            } else {
+                out.insert(key, fs::read(path).unwrap());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+#[test]
+fn cli_suppressed_private_graph_requires_protection_before_writes() {
+    for reason in ["target", "role", "policy", "missing"] {
+        let project = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        copy_directory(Path::new(&starter_library_root()), library.path());
+        let pack_path = library.path().join("packs/local-only-example.json");
+        let mut pack: Value = serde_json::from_slice(&fs::read(&pack_path).unwrap()).unwrap();
+        match reason {
+            "target" => pack["compatible_targets"] = json!(["claude-code"]),
+            "role" => pack["compatible_roles"] = json!(["release-manager"]),
+            "policy" => pack["trust_tier"] = json!("candidate_quarantined"),
+            _ => {}
+        }
+        fs::write(pack_path, serde_json::to_vec(&pack).unwrap()).unwrap();
+        if reason == "policy" {
+            let policy_path = library.path().join("policies/brownfield-safe-builder.json");
+            let mut policy: Value =
+                serde_json::from_slice(&fs::read(&policy_path).unwrap()).unwrap();
+            policy["rules"].as_array_mut().unwrap().push(json!({"id":"deny-private", "title":"Deny private fixture", "subject":"pack", "operator":"deny", "requested_enforcement_class":"enforceable_local", "selectors":{"ids":["local-only-example"]}}));
+            fs::write(policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
+        }
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        init_project(project.path());
+        let config_path = project.path().join("metactl.yaml");
+        let config = fs::read_to_string(&config_path).unwrap();
+        fs::write(
+            config_path,
+            format!(
+                "{config}\nstarter_library:\n  - {}\n",
+                library.path().display()
+            ),
+        )
+        .unwrap();
+        let private_id = if reason == "missing" {
+            "missing-private-example"
+        } else {
+            "local-only-example"
+        };
+        fs::write(
+            project.path().join("metactl.local.yaml"),
+            format!("packs:\n  - {private_id}\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.path().join(".gitignore"),
+            "/metactl.local.yaml\n/.test-home/\n!/.metactl/\n",
+        )
+        .unwrap();
+        for command in ["compile", "sync"] {
+            let before = privacy_snapshot(project.path());
+            let result = run_cli(project.path(), &[command, "--no-input"]);
+            assert!(
+                !result.status.success(),
+                "{reason}/{command}: {}",
+                stdout(&result)
+            );
+            assert_eq!(
+                privacy_snapshot(project.path()),
+                before,
+                "{reason}/{command} mutated project"
+            );
+        }
+        // Protected machine state retains the suppressed reference, without staging it.
+        fs::write(
+            project.path().join(".gitignore"),
+            "/metactl.local.yaml\n/.test-home/\n/.metactl/\n",
+        )
+        .unwrap();
+        let result = run_cli(project.path(), &["sync", "--no-input"]);
+        if reason == "missing" {
+            assert!(!result.status.success());
+            continue;
+        }
+        assert!(result.status.success(), "{reason}: {}", stderr(&result));
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(
+                project
+                    .path()
+                    .join(".metactl/generated/codex-cli/compile.manifest.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(manifest["resolve_graph"]["suppressed_packs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["pack_ref"]["id"] == private_id));
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["add", "--all"])
+            .status()
+            .unwrap()
+            .success());
+        let staged = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["diff", "--cached"])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&staged.stdout).contains(private_id));
+    }
+}
+
+#[test]
+fn cli_private_role_default_override_is_checked_before_writes() {
+    let project = TempDir::new().unwrap();
+    let library = TempDir::new().unwrap();
+    copy_directory(Path::new(&starter_library_root()), library.path());
+    let mut role: Value =
+        serde_json::from_slice(&fs::read(library.path().join("roles/builder.json")).unwrap())
+            .unwrap();
+    role["id"] = json!("private-default-role");
+    role["default_pack_refs"] =
+        json!([{"kind":"pack", "id":"local-only-example", "version":"1.0.0"}]);
+    fs::write(
+        library.path().join("roles/private-default-role.json"),
+        serde_json::to_vec(&role).unwrap(),
+    )
+    .unwrap();
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["init", "-q"])
+        .status()
+        .unwrap()
+        .success());
+    init_project(project.path());
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["packs"] = serde_yaml::to_value(Vec::<String>::new()).unwrap();
+    config["starter_library"] =
+        serde_yaml::to_value(vec![library.path().display().to_string()]).unwrap();
+    fs::write(config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+    fs::write(
+        project.path().join(".gitignore"),
+        "/metactl.local.yaml\n/.test-home/\n!/.metactl/\n",
+    )
+    .unwrap();
+    let before = privacy_snapshot(project.path());
+    let output = run_cli(
+        project.path(),
+        &["compile", "--role", "private-default-role", "--no-input"],
+    );
+    assert!(!output.status.success());
+    assert_eq!(privacy_snapshot(project.path()), before);
+}

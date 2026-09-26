@@ -104,24 +104,23 @@ pub(super) fn tracked_generated_roots_json(root: &Path, targets: &[String]) -> R
 pub(super) fn planned_proofs(
     cli: &Cli,
     root: &Path,
-) -> std::result::Result<Vec<metactl::library_registry::ProjectionProof>, CliError> {
+    overrides: &ConfigOverrides,
+) -> std::result::Result<(Vec<metactl::library_registry::ProjectionProof>, bool), CliError> {
     if !project_config_path(root, cli.config.as_deref()).exists() {
-        return Ok(vec![]);
+        return Ok((vec![], false));
     }
     let context = load_required_context(cli, root)?;
     let Some(registry) = context.registry.as_ref() else {
-        return Ok(vec![]);
+        return Ok((vec![], false));
     };
     let kernel = kernel_from_context(&context).map_err(state_error)?;
     let mut proofs = Vec::new();
-    for target in context
-        .selected_targets(&ConfigOverrides::default())
-        .map_err(state_error)?
-    {
+    let mut private_state = false;
+    for target in context.selected_targets(overrides).map_err(state_error)? {
         let config = context
             .effective_config(&ConfigOverrides {
                 targets: vec![target.target_id.clone()],
-                ..Default::default()
+                ..overrides.clone()
             })
             .map_err(state_error)?;
         let surface_selection_mode = config
@@ -136,6 +135,7 @@ pub(super) fn planned_proofs(
                 provenance: None,
             })
             .map_err(state_error)?;
+        private_state |= registry.graph_requires_private_state(&graph);
         proofs.extend(
             registry
                 .projection_proofs(&CompileParams {
@@ -150,7 +150,7 @@ pub(super) fn planned_proofs(
                 .map_err(state_error)?,
         );
     }
-    Ok(proofs)
+    Ok((proofs, private_state))
 }
 
 /// Exact private paths supplement the managed rules. Authored negations remain
@@ -160,7 +160,8 @@ pub(super) fn add_private_patterns(
     root: &Path,
     specs: &mut [IgnoreBlockSpec],
 ) -> std::result::Result<(), CliError> {
-    let paths: BTreeSet<_> = planned_proofs(cli, root)?
+    let paths: BTreeSet<_> = planned_proofs(cli, root, &ConfigOverrides::default())?
+        .0
         .into_iter()
         .filter(|p| p.private)
         .map(|p| p.destination)
@@ -197,7 +198,7 @@ pub(super) fn ensure_private_projection_safe_for_ignore_change(
         metactl::materializer::installed_projection_destinations(root).map_err(state_error)?;
     let configured = project_config_path(root, cli.config.as_deref()).exists();
     let strict = configured || !records.is_empty();
-    let proofs = planned_proofs(cli, root)?;
+    let (proofs, private_state) = planned_proofs(cli, root, &ConfigOverrides::default())?;
     let mut private: BTreeSet<String> = PRIVATE_LOCAL_DESTINATIONS
         .iter()
         .map(|s| (*s).into())
@@ -264,7 +265,7 @@ pub(super) fn ensure_private_projection_safe_for_ignore_change(
                 "a configured project needs a Git worktree before weakening protection".into(),
             ));
         }
-        if proofs.iter().any(|p| p.private) {
+        if private_state || proofs.iter().any(|p| p.private) {
             return Err(privacy_refusal(
                 "private projections require a Git worktree".into(),
             ));
@@ -350,13 +351,15 @@ pub(super) fn ensure_private_projection_safe_for_ignore_change(
 pub(super) fn ensure_private_sync_safe(
     cli: &Cli,
     root: &Path,
+    overrides: &ConfigOverrides,
 ) -> std::result::Result<(), CliError> {
-    let mut paths: Vec<_> = planned_proofs(cli, root)?
+    let (proofs, private_state) = planned_proofs(cli, root, overrides)?;
+    let mut paths: Vec<_> = proofs
         .into_iter()
         .filter(|p| p.private)
         .map(|p| p.destination)
         .collect();
-    if !paths.is_empty() {
+    if private_state || !paths.is_empty() {
         paths.push(".metactl/".into());
     }
     metactl::git_privacy::require_private(root, &paths).map_err(state_error)

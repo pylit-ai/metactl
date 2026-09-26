@@ -872,6 +872,7 @@ impl LibraryRegistry {
         crate::git_privacy::require_private(
             &project_root,
             &library_privacy::private_paths(
+                self,
                 &outputs,
                 &params.resolve_graph,
                 &params.target_capability,

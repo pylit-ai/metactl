@@ -83,7 +83,183 @@ fn payloads(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
             out.push((path.clone(), fs::read(path).unwrap()));
         }
     }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
     out
+}
+
+const PRIVATE_ID: &str = "platform-private-fixture";
+const PRIVATE_PAYLOAD: &str = "PLATFORM_PRIVATE_PAYLOAD_48";
+
+fn copy_tree(from: &Path, to: &Path) {
+    fs::create_dir_all(to).unwrap();
+    for entry in fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let dest = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &dest);
+        } else {
+            fs::copy(entry.path(), dest).unwrap();
+        }
+    }
+}
+
+fn private_project() -> Repo {
+    let repo = Repo::new();
+    let library = repo._temp.path().join("synthetic-library");
+    copy_tree(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../library/starter"),
+        &library,
+    );
+    let mut pack: serde_json::Value =
+        serde_json::from_slice(&fs::read(library.join("packs/local-only-example.json")).unwrap())
+            .unwrap();
+    pack["id"] = PRIVATE_ID.into();
+    pack["resources"][0]["path"] = format!("packs/{PRIVATE_ID}/SKILL.md").into();
+    fs::create_dir_all(library.join("packs").join(PRIVATE_ID)).unwrap();
+    fs::write(library.join("packs").join(PRIVATE_ID).join("SKILL.md"),
+        format!("---\nname: {PRIVATE_ID}\ndescription: Synthetic platform fixture.\n---\n\n{PRIVATE_PAYLOAD}\n")).unwrap();
+    fs::write(
+        library.join("packs").join(format!("{PRIVATE_ID}.json")),
+        serde_json::to_vec_pretty(&pack).unwrap(),
+    )
+    .unwrap();
+    assert_ok(&repo.cli(&["init", "--target", "claude-code"]));
+    fs::write(
+        repo.root.join("metactl.local.yaml"),
+        format!(
+            "starter_library:\n  - {}\npacks:\n  - {PRIVATE_ID}\n",
+            serde_json::to_string(&library.to_string_lossy()).unwrap()
+        ),
+    )
+    .unwrap();
+    assert_ok(&repo.cli(&["ignore", "install", "--scope", "both", "--yes"]));
+    repo
+}
+
+fn assert_index_is_public(repo: &Repo) {
+    assert_ok(&repo.git(&["add", "-A"]));
+    let indexed = repo.git(&["ls-files", "-z"]);
+    assert_ok(&indexed);
+    for path in indexed.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+        let path = std::str::from_utf8(path).unwrap();
+        assert!(!path.contains(PRIVATE_ID), "private path staged: {path}");
+        let blob = repo.git(&["show", &format!(":{path}")]);
+        assert_ok(&blob);
+        let text = String::from_utf8_lossy(&blob.stdout);
+        assert!(
+            !text.contains(PRIVATE_ID),
+            "private identifier staged in {path}"
+        );
+        assert!(
+            !text.contains(PRIVATE_PAYLOAD),
+            "private payload staged in {path}"
+        );
+    }
+}
+
+#[test]
+fn cli_private_compile_apply_sync_repeat_keeps_git_index_public() {
+    let repo = private_project();
+    for args in [&["compile"][..], &["apply"], &["sync"], &["sync"]] {
+        assert_ok(&repo.cli(args));
+        let local = fs::read_to_string(
+            repo.root
+                .join(".metactl/generated/claude-code/CLAUDE.local.md"),
+        )
+        .unwrap();
+        assert!(local.contains(PRIVATE_ID));
+        assert!(payloads(&repo.root.join(".metactl/generated"))
+            .iter()
+            .any(|(_, bytes)| String::from_utf8_lossy(bytes).contains(PRIVATE_PAYLOAD)));
+        assert_index_is_public(&repo);
+    }
+}
+
+#[test]
+fn cli_symlink_repository_probe_has_explicit_platform_contract() {
+    let repo = Repo::new();
+    fs::write(repo.root.join("payload.private"), "synthetic private bytes").unwrap();
+    let link = repo.root.join("linked.private");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("payload.private", &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file("payload.private", &link)
+        .expect("Windows runner must permit symlink fixture creation; test cannot silently skip");
+    let before = payloads(&repo.root);
+    let output = repo.cli(&[
+        "ignore",
+        "install",
+        "--scope",
+        "both",
+        "--target",
+        "claude-code",
+        "--yes",
+    ]);
+    #[cfg(unix)]
+    assert_ok(&output);
+    #[cfg(windows)]
+    {
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("symlink privacy probe unsupported")
+        );
+        assert_eq!(before, payloads(&repo.root));
+    }
+    #[cfg(unix)]
+    let _ = before;
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cli_non_utf8_ignored_file_refuses_without_file_mutation() {
+    use std::os::unix::ffi::OsStringExt;
+    let repo = Repo::new();
+    let name = std::ffi::OsString::from_vec(b"bad-\xff.private".to_vec());
+    fs::write(repo.root.join(name), "synthetic private bytes").unwrap();
+    let before = payloads(&repo.root);
+    let output = repo.cli(&[
+        "ignore",
+        "install",
+        "--scope",
+        "both",
+        "--target",
+        "claude-code",
+        "--yes",
+    ]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("non-UTF8 Git path"));
+    assert_eq!(before, payloads(&repo.root));
+}
+
+#[test]
+fn cli_scoped_git_context_refuses_without_file_mutation() {
+    for key in ["GIT_DIR", "GIT_INDEX_FILE"] {
+        let repo = Repo::new();
+        let value = if key == "GIT_DIR" {
+            repo.root.join(".git")
+        } else {
+            repo.root.join(".git/index")
+        };
+        let before = payloads(&repo.root);
+        let output = repo
+            .command(env!("CARGO_BIN_EXE_metactl"))
+            .env(key, value)
+            .args([
+                "ignore",
+                "install",
+                "--scope",
+                "both",
+                "--target",
+                "claude-code",
+                "--yes",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr)
+            .contains(&format!("unsupported Git environment override {key}")));
+        assert_eq!(before, payloads(&repo.root));
+    }
 }
 
 #[test]

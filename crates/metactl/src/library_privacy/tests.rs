@@ -212,6 +212,12 @@ fn private_runtime_preserves_hooks_commands_graph_and_custom_local_surface() {
             fs::read_to_string(project.path().join(native)).unwrap(),
             body
         );
+        assert!(registry
+            .apply_review_plan(project.path(), &manifest, &ApplyMode::Copy)
+            .is_ok());
+        assert!(registry
+            .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+            .is_err());
         altered.resolve_graph = None;
         assert!(registry
             .apply_manifest(project.path(), &altered, &ApplyMode::Copy)
@@ -294,4 +300,113 @@ fn replay_rejects_unknown_output_even_when_kind_and_attribution_are_forged() {
         .apply_manifest(project.path(), &manifest, &ApplyMode::Copy)
         .is_err());
     assert!(!project.path().join("ordinary-document.txt").exists());
+}
+
+#[test]
+fn graph_privacy_audits_all_reference_and_opaque_metadata_fields() {
+    let (_library, _project, registry, mut params) = fixture(false);
+    let graph = &mut params.resolve_graph;
+    graph.requested_pack_refs.clear();
+    graph.activated_pack_refs.clear();
+    graph.suppressed_packs.clear();
+    graph.capability_gaps.clear();
+    graph.pack_visibility.clear();
+    graph.provenance_refs.clear();
+    assert!(!registry.graph_requires_private_state(graph));
+    let shared_graph = graph.clone();
+    let private_ref = Ref {
+        kind: RefKind::Pack,
+        id: "private-runtime".into(),
+        version: Some("1.0.0".into()),
+    };
+    let unknown_ref = Ref {
+        kind: RefKind::Pack,
+        id: "unavailable-private".into(),
+        version: None,
+    };
+    let mut variants = Vec::new();
+    for reference in [
+        private_ref.clone(),
+        unknown_ref.clone(),
+        Ref {
+            kind: RefKind::Pack,
+            id: "python-refactor".into(),
+            version: Some("unknown-version".into()),
+        },
+    ] {
+        let mut g = shared_graph.clone();
+        g.requested_pack_refs.push(reference.clone());
+        variants.push(g);
+        let mut g = shared_graph.clone();
+        g.activated_pack_refs.push(reference.clone());
+        variants.push(g);
+        let mut g = shared_graph.clone();
+        g.suppressed_packs.push(crate::types::SuppressedRef {
+            pack_ref: reference.clone(),
+            reason_code: ReasonCode::NotFound,
+            detail: None,
+        });
+        variants.push(g);
+        let mut g = shared_graph.clone();
+        g.capability_gaps.push(CapabilityGap {
+            feature: "pack_selection".into(),
+            reason_code: ReasonCode::ZeroMatch,
+            affected_refs: vec![reference],
+        });
+        variants.push(g);
+    }
+    let mut g = shared_graph.clone();
+    g.pack_visibility
+        .insert("private-runtime".into(), VisibilityScope::Shared);
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.provenance_refs.push("artifact:private-source".into());
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.capability_gaps.push(CapabilityGap {
+        feature: "opaque-private-feature".into(),
+        reason_code: ReasonCode::NotFound,
+        affected_refs: vec![g.role.clone()],
+    });
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.role.id = "unknown-private-role".into();
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.selected_target.id = "unknown-private-target".into();
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.applied_policies[0].id = "unknown-private-policy".into();
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.source_config_digest = Some("private-id-not-a-digest".into());
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.role.kind = RefKind::Pack;
+    variants.push(g);
+    let mut g = shared_graph.clone();
+    g.suppressed_packs.push(crate::types::SuppressedRef {
+        pack_ref: Ref {
+            kind: RefKind::Pack,
+            id: "python-refactor".into(),
+            version: None,
+        },
+        reason_code: ReasonCode::UnsupportedTarget,
+        detail: Some("private-free-text".into()),
+    });
+    variants.push(g);
+    for (index, graph) in variants.iter().enumerate() {
+        assert!(
+            registry.graph_requires_private_state(graph),
+            "unclassified graph variant {index}"
+        );
+    }
+    // An ordinary registry-proven shared graph still compiles without Git.
+    let plain = TempDir::new().unwrap();
+    params.resolve_graph = shared_graph.clone();
+    params.project_root = Some(plain.path().display().to_string());
+    registry.compile(params.clone()).unwrap();
+    // Missing requested refs must refuse even though no output is private.
+    params.resolve_graph.requested_pack_refs.push(unknown_ref);
+    assert!(registry.compile(params).is_err());
 }

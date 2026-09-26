@@ -55,3 +55,19 @@ unavailable on another target. Shared instruction diagnostics report a generic
 `auto_surface_selection` warning without surface identifiers. Detailed selection
 IDs remain in protected local state, whose `.metactl/` directory must remain
 ignored and untracked. This applies to selected, pinned, and blocked surfaces.
+
+Requested and suppressed packs remain privacy-relevant even when no private
+projection is emitted. Before compilation, apply, or publication of an apply
+review plan, every persisted graph reference must be known to the current
+registry as shared. Unknown packs, incompatible private packs, and private packs
+withheld by role or policy therefore still require `.metactl/` to be ignored and
+untracked. Free-text diagnostics and provenance are accepted as shared only when
+rederived from known shared library metadata; opaque values require protection.
+CLI preflight uses the command's actual role, policy, and target overrides.
+
+The native ignore probe refuses symlink-containing repositories on Windows and
+non-UTF-8 filenames on Linux. It also refuses `GIT_DIR`, `GIT_INDEX_FILE`, and
+inline Git configuration overrides, including hook environments that supply
+these variables. These conservative refusals publish no private content; early
+bootstrap may create empty directories. Native Windows private copy workflows
+are covered separately from this unsupported symlink case.
