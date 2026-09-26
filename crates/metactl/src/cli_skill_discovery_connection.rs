@@ -397,7 +397,7 @@ fn read_config(path: &Path) -> Result<Option<String>, CliError> {
     if metadata.file_type().is_symlink() {
         return Err(CliError::new(
             EXIT_STATE,
-            "Configuration is a symlink; refusing to edit it.",
+            "Configuration is a symlink; edit its link target manually or use the manual adapter.",
         ));
     }
     fs::read_to_string(path).map(Some).map_err(internal_error)
@@ -405,29 +405,40 @@ fn read_config(path: &Path) -> Result<Option<String>, CliError> {
 
 fn ensure_safe_destination(path: &Path) -> Result<(), CliError> {
     if let Some(parent) = path.parent() {
-        if parent.exists()
-            && parent
-                .symlink_metadata()
-                .map_err(internal_error)?
-                .file_type()
-                .is_symlink()
-        {
-            return Err(CliError::new(
-                EXIT_STATE,
-                "Configuration directory is a symlink; refusing to edit it.",
-            ));
+        match parent.symlink_metadata() {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(CliError::new(EXIT_STATE,
+                    "Configuration directory is a symlink; edit its link target manually or use the manual adapter."));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(internal_error(error)),
         }
     }
     Ok(())
 }
 
 fn tracked(root: &Path, path: &Path) -> Result<bool, CliError> {
-    let Ok(relative) = path.strip_prefix(root) else {
-        return Ok(false);
+    let (base, relative) = if let Ok(relative) = path.strip_prefix(root) {
+        (root, relative)
+    } else {
+        let parent = path.parent().ok_or_else(|| {
+            CliError::new(
+                EXIT_STATE,
+                "Cannot resolve the target config directory for Git visibility.",
+            )
+        })?;
+        let name = path.file_name().ok_or_else(|| {
+            CliError::new(
+                EXIT_STATE,
+                "Cannot resolve the target config name for Git visibility.",
+            )
+        })?;
+        (parent, Path::new(name))
     };
     let status = Command::new("git")
         .arg("-C")
-        .arg(root)
+        .arg(base)
         .args(["ls-files", "--error-unmatch", "--"])
         .arg(relative)
         .stdout(std::process::Stdio::null())
@@ -436,7 +447,7 @@ fn tracked(root: &Path, path: &Path) -> Result<bool, CliError> {
     match status {
         Ok(status) if status.success() => Ok(true),
         Ok(status) if status.code() == Some(1) => Ok(false),
-        _ if !root.ancestors().any(|parent| parent.join(".git").exists()) => Ok(false),
+        _ if !base.ancestors().any(|parent| parent.join(".git").exists()) => Ok(false),
         _ => Err(CliError::new(EXIT_STATE,
             "Cannot verify whether the target config is tracked by Git; no change was made. Restore Git or review the config manually.")),
     }
@@ -444,7 +455,11 @@ fn tracked(root: &Path, path: &Path) -> Result<bool, CliError> {
 
 fn git_visibility(root: &Path, path: &Path, scope: DiscoveryScopeArg) -> &'static str {
     if scope == DiscoveryScopeArg::User {
-        return "user_config";
+        return match tracked(root, path) {
+            Ok(true) => "tracked",
+            Err(_) => "unknown",
+            Ok(false) => "user_config",
+        };
     }
     match tracked(root, path) {
         Ok(true) => return "tracked",
@@ -493,7 +508,7 @@ fn acceptance_note(target: &str, scope: DiscoveryScopeArg) -> &'static str {
     }
 }
 
-fn write_private(path: &Path, body: &str) -> Result<(), CliError> {
+fn write_private(path: &Path, old: &str, body: &str) -> Result<(), CliError> {
     let parent = path
         .parent()
         .ok_or_else(|| CliError::new(EXIT_STATE, "Invalid configuration path."))?;
@@ -520,6 +535,11 @@ fn write_private(path: &Path, body: &str) -> Result<(), CliError> {
         temp.as_file()
             .set_permissions(fs::Permissions::from_mode(mode))
             .map_err(internal_error)?;
+    }
+    temp.as_file().sync_all().map_err(internal_error)?;
+    if read_config(path)?.unwrap_or_default() != old {
+        return Err(CliError::new(EXIT_STATE,
+            "Target config changed since it was read; no change was made. Preview again before applying."));
     }
     temp.persist(path).map_err(internal_error)?;
     Ok(())
@@ -735,6 +755,47 @@ fn edit_codex(
     Ok((updated, "connected"))
 }
 
+fn has_integer_outside_64_bits(input: &str) -> bool {
+    let bytes = input.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            index += 1;
+            while index < bytes.len() {
+                if bytes[index] == b'\\' {
+                    index += 2;
+                } else if bytes[index] == b'"' {
+                    index += 1;
+                    break;
+                } else {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'-' || bytes[index].is_ascii_digit() {
+            let start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_digit()
+                    || matches!(bytes[index], b'.' | b'e' | b'E' | b'+' | b'-'))
+            {
+                index += 1;
+            }
+            let token = &input[start..index];
+            if !token.bytes().any(|byte| matches!(byte, b'.' | b'e' | b'E'))
+                && token.parse::<i64>().is_err()
+                && token.parse::<u64>().is_err()
+            {
+                return true;
+            }
+            continue;
+        }
+        index += 1;
+    }
+    false
+}
+
 fn edit_json(
     old: &str,
     target: &str,
@@ -753,6 +814,10 @@ fn edit_json(
             )
         })?
     };
+    if has_integer_outside_64_bits(old) {
+        return Err(CliError::new(EXIT_STATE,
+            "Target JSON contains an integer outside the exact 64-bit range; MetaCTL will not reformat this file. Add or remove the server entry manually."));
+    }
     let map = document
         .as_object_mut()
         .ok_or_else(|| CliError::new(EXIT_STATE, "Target configuration must be a JSON object."))?;
@@ -849,7 +914,7 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
         match child.try_wait() {
             Ok(Some(status)) => {
                 if !status.success() {
-                    return ("project_not_ready".into(), Value::Null);
+                    return ("host_failed".into(), Value::Null);
                 }
                 let mut output = Vec::new();
                 if output_file.seek(SeekFrom::Start(0)).is_err()
@@ -972,7 +1037,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
                         .map_err(internal_error)?;
                 }
             }
-            write_private(&path, &new)?;
+            write_private(&path, &old, &new)?;
         }
     }
     let phase = if options.apply || options.remove {
@@ -1123,11 +1188,41 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         })
         .unwrap_or(Value::Null);
     let registered_command = registered.as_ref().map(|entry| entry.command.as_str());
+    let registered_python = registered.as_ref().and_then(|entry| {
+        entry
+            .args
+            .iter()
+            .position(|arg| arg == "--python")
+            .and_then(|index| entry.args.get(index + 1))
+            .map(String::as_str)
+    });
+    let registered_command_state = registered_command
+        .map(|path| {
+            if executable_file(Path::new(path)) {
+                "present"
+            } else {
+                "missing"
+            }
+        })
+        .unwrap_or("unknown");
+    let registered_python_state = registered_python
+        .map(|path| {
+            if executable_file(Path::new(path)) {
+                "present"
+            } else {
+                "missing"
+            }
+        })
+        .unwrap_or("unknown");
     let registered_log = registered
         .as_ref()
         .and_then(|entry| entry.args.last().map(String::as_str));
     let drift = registered.as_ref().and_then(|entry| {
-        if entry.command != command {
+        if registered_command_state == "missing" {
+            Some("registered_command_missing")
+        } else if registered_python_state == "missing" {
+            Some("registered_python_missing")
+        } else if entry.command != command {
             Some("command_differs")
         } else if entry.args.last() != args.last() {
             Some("event_log_differs")
@@ -1195,8 +1290,8 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     } else {
         "unknown_log_error"
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason})")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
+    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; rerun skills connect --apply after an upgrade)")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -1205,10 +1300,13 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
             json!({
                 "target": options.target, "config_path": path, "catalog_eligible_skills": catalog,
                 "registration": registration, "registration_matches_requested_options": matches_requested,
-                "registered_command": registered_command, "registered_event_log": registered_log,
+                "registered_command": registered_command, "registered_command_state": registered_command_state,
+                "registered_python": registered_python, "registered_python_state": registered_python_state,
+                "registered_event_log": registered_log,
                 "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_catalog,
                 "agent_tools": "unknown",
-                "routing": routing, "matching_discoveries": observed, "latest_discovery": latest,
+                "routing": routing, "routing_source": "any_process_including_manual",
+                "matching_discoveries": observed, "latest_discovery": latest,
                 "event_log": ledger, "log_status": log_status, "invalid_log_lines": invalid_lines,
                 "log_window_truncated": log_window_truncated,
                 "benefit": "unknown", "check_provider_calls": 0

@@ -48,14 +48,18 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    the current shell environment; otherwise readiness is unknown. The local
    catalog count is checked separately, so it can remain known when host
    readiness is unknown. If Python is missing or the client config is a
-   symlink, `doctor` still reports the other states.
+   symlink, `doctor` still reports the other states. A failed host check is
+   labeled `host_failed` because the cause can be Python, profile or project
+   setup. Doctor flags missing registered executable and Python paths without
+   running the client-configured command; rerun `connect --apply` after an
+   upgrade to repair those paths.
    A user-wide Codex registration shares this one project's skill catalog and
    event metadata across Codex sessions in other repositories; choose project
    scope when catalogs or visibility should remain separate. The baseline
    ledger does not store query text or skill bodies.
-   Existing JSON client files are parsed and re-serialized, so formatting may
-   and key order may change; integers larger than unsigned 64-bit may
-   be normalized, so review a preview before applying to such a file. JSONC
+   Existing JSON client files are parsed and re-serialized, so formatting
+   and key order may change. Integers outside the exact signed/unsigned 64-bit
+   range are refused to prevent a lossy rewrite; edit such a file manually. JSONC
    comments are not edited automatically. OpenCode's `opencode.jsonc` is
    detected to avoid creating a second config file. Existing file permissions
    are preserved. Removing the managed entry

@@ -196,7 +196,7 @@ class ConnectionFirstRun(unittest.TestCase):
                 self.assertEqual(state["registration"], "configured")
                 self.assertEqual(state["host"], "unknown_registration_drift")
                 self.assertGreater(state["catalog_eligible_skills"], 0)
-                self.assertEqual(state["registration_drift"], "command_differs")
+                self.assertEqual(state["registration_drift"], "registered_command_missing")
                 updated = self.run_cli("skills", "connect", "--target", target, "--apply", "--json")
                 self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
                 self.assertEqual(json.loads(updated.stdout)["action"], "updated")
@@ -375,6 +375,50 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertIn(str(self.project.resolve()), wrong.stderr)
         self.assertIn("metactl-skills", (codex_home / "config.toml").read_text())
 
+    def test_user_scope_refuses_tracked_dotfile_config(self):
+        dotfiles = self.base / "dotfiles"
+        codex_home = dotfiles / ".codex"
+        codex_home.mkdir(parents=True)
+        config = codex_home / "config.toml"
+        config.write_text('model = "kept"\n')
+        subprocess.run(["git", "init", "-q", str(dotfiles)], check=True)
+        subprocess.run(["git", "-C", str(dotfiles), "add", ".codex/config.toml"], check=True)
+        self.env["CODEX_HOME"] = str(codex_home)
+        refused = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--scope", "user", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("tracked by Git", refused.stderr)
+        self.assertEqual(config.read_text(), 'model = "kept"\n')
+
+    def test_doctor_distinguishes_host_failure_and_missing_registered_paths(self):
+        fake_python = self.base / "old-python"
+        fake_python.write_text("#!/bin/sh\nexit 3\n")
+        fake_python.chmod(0o755)
+        failed = self.run_cli("skills", "doctor", "--target", "codex-cli",
+                              "--python", str(fake_python), "--json")
+        self.assertEqual(failed.returncode, 0, failed.stdout + failed.stderr)
+        self.assertEqual(json.loads(failed.stdout)["host"], "host_failed")
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        receipt = json.loads(applied.stdout)
+        config = self.project / ".codex/config.toml"
+        original = config.read_text()
+        missing_command = str(self.base / "missing/metactl")
+        config.write_text(original.replace(json.dumps(receipt["command"]),
+                                           json.dumps(missing_command)))
+        missing = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        state = json.loads(missing.stdout)
+        self.assertEqual(state["registered_command_state"], "missing")
+        self.assertEqual(state["registration_drift"], "registered_command_missing")
+        python = receipt["args"][receipt["args"].index("--python") + 1]
+        config.write_text(original.replace(json.dumps(python),
+                                           json.dumps(str(self.base / "missing/python3"))))
+        missing = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
+        state = json.loads(missing.stdout)
+        self.assertEqual(state["registered_python_state"], "missing")
+        self.assertEqual(state["registration_drift"], "registered_python_missing")
+
     def test_existing_config_permissions_are_preserved(self):
         path = self.project / ".cursor/mcp.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -395,6 +439,16 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(json.loads(result)["z"], 1)
         self.assertEqual(json.loads(result)["a"]["large"], number)
         self.assertEqual(json.loads(result)["mcpServers"]["other"]["command"], "other")
+
+    def test_json_integer_outside_64_bits_refuses_lossy_rewrite(self):
+        path = self.project / ".cursor/mcp.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        original = '{"other":{"large":18446744073709551616,"label":"123456789012345678901"}}\n'
+        path.write_text(original)
+        refused = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("outside the exact 64-bit range", refused.stderr)
+        self.assertEqual(path.read_text(), original)
 
     def test_jsonc_configs_refuse_with_manual_guidance(self):
         gemini = self.project / ".gemini/settings.json"
