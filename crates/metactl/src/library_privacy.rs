@@ -26,6 +26,21 @@ fn private_output(
             .is_some_and(|p| p == &output.destination_path)
 }
 
+fn graph_has_private_metadata(graph: &ResolveGraph) -> bool {
+    graph
+        .pack_visibility
+        .values()
+        .any(|v| *v != VisibilityScope::Shared)
+        || graph
+            .auto_surface_selection
+            .as_ref()
+            .is_some_and(|selection| {
+                !selection.selected_surface_ids.is_empty()
+                    || !selection.pinned_surface_ids.is_empty()
+                    || !selection.blocked_surface_ids.is_empty()
+            })
+}
+
 pub(super) fn private_paths(
     outputs: &[StagedOutputInput],
     graph: &ResolveGraph,
@@ -36,12 +51,7 @@ pub(super) fn private_paths(
         .filter(|o| private_output(o, graph, target))
         .map(|o| o.destination_path.clone())
         .collect();
-    if !paths.is_empty()
-        || graph
-            .pack_visibility
-            .values()
-            .any(|v| *v != VisibilityScope::Shared)
-    {
+    if !paths.is_empty() || graph_has_private_metadata(graph) {
         // Ignoring the directory itself protects future staged payloads and
         // journals, including filenames not allocated until publication.
         paths.push(".metactl/".into());
@@ -147,11 +157,10 @@ impl LibraryRegistry {
             .filter_map(|o| o.destination_path.clone())
             .collect();
         if !paths.is_empty()
-            || manifest.resolve_graph.as_ref().is_some_and(|g| {
-                g.pack_visibility
-                    .values()
-                    .any(|v| *v != VisibilityScope::Shared)
-            })
+            || manifest
+                .resolve_graph
+                .as_ref()
+                .is_some_and(graph_has_private_metadata)
         {
             paths.push(".metactl/".into());
         }

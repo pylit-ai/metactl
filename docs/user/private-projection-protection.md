@@ -49,3 +49,9 @@ local Git exclude file when their paths reveal private identifiers. A tracked
 mixed aggregate refuses publication; inspect and remove it from tracking while
 retaining the working file before compiling again. No hook executes during
 compilation, apply, or the preservation tests.
+
+Saved Auto selections are local metadata even after a pack is deselected or
+unavailable on another target. Shared instruction diagnostics report a generic
+`auto_surface_selection` warning without surface identifiers. Detailed selection
+IDs remain in protected local state, whose `.metactl/` directory must remain
+ignored and untracked. This applies to selected, pinned, and blocked surfaces.

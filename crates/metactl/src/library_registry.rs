@@ -2884,6 +2884,13 @@ mod tests {
     #[test]
     fn relevance_selector_auto_uses_saved_selection() {
         let project = TempDir::new().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(project.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        fs::write(project.path().join(".gitignore"), ".metactl/\n").unwrap();
         let kernel =
             ReferenceKernel::load_from_library_roots(vec![starter_root()]).expect("library kernel");
         let target = starter_target("codex-cli");

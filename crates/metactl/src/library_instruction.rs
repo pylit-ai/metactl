@@ -159,12 +159,28 @@ pub(super) fn instruction_document(
             ));
         }
     }
-    for gap in resolve_graph.capability_gaps.iter().filter(|gap| {
-        gap.affected_refs
-            .iter()
-            .all(|reference| packs_in_plan(plan).contains(&reference.id.as_str()))
-    }) {
-        lines.push(format!("|gap:{}={:?}", gap.feature, gap.reason_code));
+    let mut rendered_gaps = BTreeSet::new();
+    for gap in &resolve_graph.capability_gaps {
+        // Saved local selections can refer to private, suppressed, deselected,
+        // or unknown packs. Keep a useful diagnostic, never its opaque id.
+        let feature = if gap.feature.starts_with("auto_surface_selection:") {
+            "auto_surface_selection"
+        } else if gap.feature == "pack_selection" && gap.reason_code == ReasonCode::ZeroMatch {
+            "pack_selection"
+        } else if !gap.affected_refs.is_empty()
+            && gap.affected_refs.iter().all(|reference| {
+                reference.kind == RefKind::Pack
+                    && packs_in_plan(plan).contains(&reference.id.as_str())
+            })
+        {
+            gap.feature.as_str()
+        } else {
+            continue;
+        };
+        let rendered = format!("|gap:{feature}={:?}", gap.reason_code);
+        if rendered_gaps.insert(rendered.clone()) {
+            lines.push(rendered);
+        }
     }
 
     budget_instruction_document(lines.join("\n"))

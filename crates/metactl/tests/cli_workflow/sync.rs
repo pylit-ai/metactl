@@ -1387,3 +1387,143 @@ fn cli_sync_gemini_produces_extension_bundle() {
         skill_files
     );
 }
+
+#[test]
+fn cli_saved_private_auto_gaps_never_enter_shared_docs() {
+    for deselected in [false, true] {
+        let project = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        copy_directory(Path::new(&starter_library_root()), library.path());
+        let pack_path = library.path().join("packs/local-only-example.json");
+        let mut pack: Value = serde_json::from_slice(&fs::read(&pack_path).unwrap()).unwrap();
+        pack["compatible_targets"] = json!(["claude-code"]);
+        fs::write(&pack_path, serde_json::to_vec(&pack).unwrap()).unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        let init = run_cli(
+            project.path(),
+            &["init", "--target", "claude-code", "--target", "codex-cli"],
+        );
+        assert!(init.status.success(), "{}", stderr(&init));
+        let config_path = project.path().join("metactl.yaml");
+        let config = fs::read_to_string(&config_path).unwrap();
+        fs::write(
+            config_path,
+            format!(
+                "{config}\nstarter_library:\n  - {}\n",
+                library.path().display()
+            ),
+        )
+        .unwrap();
+        let packs = if deselected {
+            "packs: []"
+        } else {
+            "packs:\n  - local-only-example"
+        };
+        fs::write(project.path().join("metactl.local.yaml"), format!("{packs}\ndefaults:\n  surface_selection_mode: auto\n  auto_surface_selection:\n    selected_surface_ids: [local-only-example:local-only-example]\n    pinned_surface_ids: [local-only-example:private-pin]\n    blocked_surface_ids: [absent-private-pack:private-block]\n")).unwrap();
+        let ignore = run_cli(
+            project.path(),
+            &["ignore", "install", "--scope", "both", "--yes"],
+        );
+        assert!(ignore.status.success(), "{}", stderr(&ignore));
+        let sync = run_cli(project.path(), &["sync", "--no-input"]);
+        assert!(sync.status.success(), "{}", stderr(&sync));
+        for doc in ["AGENTS.md", "CLAUDE.md"] {
+            let body = fs::read_to_string(project.path().join(doc)).unwrap();
+            assert!(
+                !body.contains("local-only-example"),
+                "deselected={deselected} {doc}: {body}"
+            );
+            assert!(!body.contains("absent-private-pack"), "{doc}: {body}");
+            assert!(
+                body.contains("|gap:auto_surface_selection=NotFound"),
+                "safe diagnostic missing: {body}"
+            );
+        }
+        let exclude = project.path().join(".git/info/exclude");
+        let rules = fs::read_to_string(&exclude).unwrap();
+        fs::write(exclude, format!("{rules}\n.test-home/\n")).unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["add", "--all"])
+            .status()
+            .unwrap()
+            .success());
+        let staged = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["diff", "--cached"])
+            .output()
+            .unwrap();
+        let staged = String::from_utf8(staged.stdout).unwrap();
+        assert!(!staged.contains("local-only-example"));
+        assert!(!staged.contains("absent-private-pack"));
+    }
+}
+
+#[test]
+fn cli_saved_auto_metadata_requires_private_staging_after_deselection() {
+    for field in [
+        "selected_surface_ids",
+        "pinned_surface_ids",
+        "blocked_surface_ids",
+    ] {
+        let project = TempDir::new().unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        init_project(project.path());
+        fs::write(project.path().join("metactl.local.yaml"), format!("packs: []\ndefaults:\n  surface_selection_mode: auto\n  auto_surface_selection:\n    {field}: [absent-private-pack:private-surface]\n")).unwrap();
+        let ignore_path = project.path().join(".gitignore");
+        let ignore = fs::read_to_string(&ignore_path).unwrap_or_default();
+        fs::write(ignore_path, format!("{ignore}\n!/.metactl/\n")).unwrap();
+        let generated = project
+            .path()
+            .join(".metactl/generated/codex-cli/compile.manifest.json");
+        let before = fs::read(&generated).ok();
+        let compile = run_cli(project.path(), &["compile"]);
+        assert!(!compile.status.success(), "{field}: {}", stdout(&compile));
+        assert_eq!(
+            fs::read(&generated).ok(),
+            before,
+            "private graph staged despite failed preflight"
+        );
+    }
+}
+
+#[test]
+fn cli_zero_match_shared_document_retains_safe_diagnostic() {
+    let project = TempDir::new().unwrap();
+    init_project(project.path());
+    let library = TempDir::new().unwrap();
+    copy_directory(Path::new(&starter_library_root()), library.path());
+    let role_path = library.path().join("roles/builder.json");
+    let mut role: Value = serde_json::from_slice(&fs::read(&role_path).unwrap()).unwrap();
+    role["default_pack_refs"] = json!([]);
+    fs::write(role_path, serde_json::to_vec(&role).unwrap()).unwrap();
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["packs"] = serde_yaml::to_value(Vec::<String>::new()).unwrap();
+    config["starter_library"] =
+        serde_yaml::to_value(vec![library.path().display().to_string()]).unwrap();
+    fs::write(config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+    let compile = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "copy"],
+    );
+    assert!(compile.status.success(), "{}", stderr(&compile));
+    let body = fs::read_to_string(project.path().join("AGENTS.md")).unwrap();
+    assert!(body.contains("|packs:none"), "{body}");
+    assert!(body.contains("|gap:pack_selection=ZeroMatch"), "{body}");
+}
