@@ -9,6 +9,7 @@ pub mod plugin_projection;
 pub mod project;
 pub mod reference_kernel;
 pub mod skill_audit;
+pub mod skill_card;
 pub mod suite_registry;
 pub mod surface_usage;
 pub mod types;
@@ -16,7 +17,8 @@ pub mod types;
 pub use fixture_kernel::{FixtureKernel, FixtureSuite};
 pub use jsonrpc::{JsonRpcService, RpcError, RpcRequestEnvelope, RpcResponseEnvelope};
 pub use kernel::MetactlKernel;
-pub use library_registry::LibraryRegistry;
+pub use library_registry::skill_discovery::{LoadedSkill, SkillCatalog, SkillDescriptor};
+pub use library_registry::{LibraryRegistry, SkillRouteCandidate, SkillRouteResult};
 pub use mcp::McpService;
 pub use plugin_projection::{
     export_plugin_marketplace, list_plugin_packs, verify_plugin_marketplace, PluginExportOptions,
@@ -28,5 +30,6 @@ pub use skill_audit::{
     RecommendationAction, RelationKind, SkillAuditOptions, SkillAuditOutput, SkillAuditScope,
     SkillInventoryItem, SkillPortfolioAuditReport, SkillRelation, SkillReportFormat,
 };
+pub use skill_card::{validate_skill_card, SkillCardDecision};
 pub use suite_registry::{SuiteContext, SuiteRegistry};
 pub use types::*;

@@ -6,7 +6,9 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current crate version: `0.1.21`
+Current source crate version: `0.1.23`. The crates.io badges show the latest
+published versions; use the pinned 0.1.23 install commands below after that
+version appears in the registry.
 
 `metactl` lets an individual developer define agent instructions once, review the generated files, and work across supported coding agents without hand-copying prompt state.
 
@@ -58,20 +60,23 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | --- | --- | --- |
 | Prebuilt release | `cargo binstall metactl` | Fast, verified native install on Linux x86_64 or Apple Silicon. |
 | Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
-| npm shim | `npm install -g @pylit-ai/metactl` | JavaScript toolchains; downloads and verifies the matching release archive. |
-| crates.io | `cargo install metactl --version 0.1.21 --locked` | Portable source build. |
+| npm shim (unpublished) | See [`packaging/npm`](packaging/npm) | Installer scaffold; the npm package is not yet published. |
+| This source checkout | `cargo install --path crates/metactl --locked` | Use the checked-out version before its registry release. |
+| crates.io, after 0.1.23 publication | `cargo install metactl --version 0.1.23 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 
-All prebuilt paths verify the release SHA-256 checksum before use. `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
+All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Action also verifies GitHub build provenance when the runner provides a compatible GitHub CLI. The npm shim emits an explicit warning and supports [manual provenance verification](docs/user/install-verification.md). `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
 
 ## Quickstart
 
-Install the CLI from crates.io:
+From this source checkout, `cargo install --path crates/metactl --locked`
+installs 0.1.23 before registry publication. For a registry install, check the
+crates.io badge above; when it shows 0.1.23, use:
 
 ```bash
-cargo install metactl --version 0.1.21 --locked
+cargo install metactl --version 0.1.23 --locked
 metactl version
-# metactl 0.1.21 (metactl/v2alpha1)
+# metactl 0.1.23 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -128,7 +133,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.21 (metactl/v2alpha1)
+# metactl 0.1.23 (metactl/v2alpha1)
 ```
 
 </details>
@@ -137,16 +142,51 @@ metactl version
 <summary>Install the daemon for JSON-RPC or MCP</summary>
 
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
+Install this pinned version after 0.1.23 appears on crates.io:
 
 ```bash
-cargo install metactld --version 0.1.21 --locked
+cargo install metactld --version 0.1.23 --locked
 metactld --version
-# metactld 0.1.21
+# metactld 0.1.23
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
 
 </details>
+
+## Optional skill discovery and Jev
+
+Discover specialist instructions on demand without requiring a model provider.
+The packaged host requires Python 3.10+ on PATH; no source checkout or Python
+package installation is needed:
+
+```bash
+metactl --project /path/to/project skills host --status
+metactl --project /path/to/project skills host --client-config
+```
+
+The first command checks the project's catalog and local readiness without a
+provider call. The second prints a no-secret, client-neutral MCP registration
+snippet; review it and register it in your coding client. MetaCTL does not
+currently have a project-enabling command that writes your client's settings.
+Start a fresh agent session, verify that `discover_skills` and `load_skill` are
+available, then make one baseline discovery call and inspect its
+`routing_receipt`. Registration alone does not invoke discovery on every task.
+Follow the [agent adapter guide](docs/user/discovery-agent-adapters.md) for
+target-specific configuration and the [first-run workflow](docs/user/skill-discovery.md#first-run-workflow)
+for evidence at each step.
+Jev is **optional and off by default**. Follow the [activation and verification
+guide](docs/user/skill-discovery.md#shared-gateway-and-measured-trials) for
+secret injection, data consent, bounded requests, status, live checks and rollback.
+
+In a frozen 12-query, 208-descriptor development fixture, deterministic discovery
+found **75% versus 35%** of relevant skills in the first five results. Median
+lookup latency increased from **59.4 to 126.2 ms**. The synthetic metadata
+interface fell from **32,002 to 1,051 bytes**, but this is not proof of actual
+agent prompt-token savings. These are **not Jev results**: no provider was used.
+Task success, total session speed and cost savings remain unmeasured. See the
+[raw benchmark and limitations](reports/skill-discovery-development-benchmark.md).
+Keep the interface opt-in; native skill catalogs are not automatically hidden.
 
 ## Daily Workflow
 
@@ -219,6 +259,7 @@ metactl validate
 | `metactl use <pack>` | Resolve, add, sync, and validate a pack-oriented workflow. |
 | `metactl sync --preview` | Compile generated surfaces without applying runtime files. |
 | `metactl status` | Show readiness, target state, drift posture, and next actions. |
+| `metactl --json git plan` | Read-only per-path comparison of saved MetaCTL ownership, installed bytes, and Git tracking. |
 | `metactl validate` | Check generated and applied outputs against target validators. |
 | `metactl doctor` | Run local health checks. |
 | `metactl demo create --sync` | Create a disposable brownfield sandbox and preview generated agent files. |
@@ -240,8 +281,8 @@ metactl validate
 | `metactl profile list` | Show user profiles and built-in templates such as `neutral`, `multi-agent`, `agent-ci`, and `solo-codex`. |
 | `metactl preview` | Convenience alias for `metactl sync --preview`; stages output without applying runtime files. |
 | `metactl pack use <pack>` | Object-oriented alias for project pack activation; Agent Skill import/export remains under `pack import-skill` and `pack export-skill`. |
-| `metactl skills list --scope repo` | Show repo-local Codex skills generated under `.codex/skills`. |
-| `metactl skills add <skill-path> --scope user` | Install a Codex skill folder into the user-global `~/.codex/skills` Personal picker source. |
+| `metactl skills list --scope repo` | Show repo-local Codex skills generated under `.agents/skills` (legacy `.codex/skills` is reconciliation input only). |
+| `metactl skills add <skill-path> --scope user` | Install a Codex skill folder into the backward-compatible user-global `~/.codex/skills` Personal picker source. |
 | `metactl add <pack> --sync` | Add a known pack and immediately materialize it. |
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
 | `metactl explain` | Show why packs and targets were selected. |
@@ -252,6 +293,26 @@ metactl validate
 | `metactl audit sources` | Diagnose private source cache, lock, and public-example exposure failures. |
 
 </details>
+
+`status` reports `library_source_comparison` as `current`, `drifted`, or
+`unverifiable`. A local library content change makes `needs_sync` true even
+when the selected profile file is unchanged. Locks written by older MetaCTL
+versions lack the content snapshot and report `unverifiable` until a sync
+refreshes the lock. Status reads local source content; it does not fetch a
+remote Git ref.
+
+Before committing generated agent surfaces, run `metactl --json git plan`.
+Each path is classified as `managed_unchanged`, `managed_edited`, `missing`,
+`unowned`, or `unsafe_alias`, with `tracked`, `untracked`, or `not_git` Git
+context. Staged Git changes and differences between the index and worktree
+are reported per path; a staged authored version makes a managed path edited.
+`path_kind` makes symlinks visible; paths resolving outside the project are
+classified `unsafe_alias` and are never read.
+The JSON path list is complete by default. Authored
+files inside `.agents`, `.codex`, `.claude`, `.cursor`, `.gemini`, or
+`.opencode` remain `unowned` even beside MetaCTL outputs. This command changes
+neither the worktree nor the Git index. Review its per-path evidence before
+using any ignore or index repair command.
 
 If metactl reports that no starter library is available, first run `metactl doctor`. Use `--starter-library <path>` only for custom/local starter libraries or when troubleshooting a cache materialization failure.
 
@@ -369,7 +430,7 @@ Set `METACTL_DEMO_HOME` to isolate demos in CI or temporary test runs.
 
 | Target | Generated surface | Status |
 | --- | --- | --- |
-| Codex CLI | `AGENTS.md`, `.codex/skills/...` | Tier 1, conformance-covered. Repo-local skills are visible to Codex sessions opened in that repo; user-global Personal skills live under `~/.codex/skills`. |
+| Codex CLI | `AGENTS.md`, `.agents/skills/...` | Tier 1, conformance-covered. Repo-local skills use the current `.agents/skills` root; the user-global Personal picker remains backward-compatible under `~/.codex/skills`. |
 | Claude Code | `CLAUDE.md`, `.claude/skills/...` | Tier 1, conformance-covered |
 | Cursor | `AGENTS.md`, `.cursor/rules/*.mdc`, `.cursor/skills/...` | Tier 1, conformance-covered |
 | Filesystem Agent | `AGENTS.md`, `.metactl/filesystem-agent/...` | Generic compatibility fixture |
@@ -424,7 +485,7 @@ metactl fleet sync --preview
 
 Expected result: `status` reports linked project readiness, and `sync --preview` shows planned project updates without applying them.
 
-Fleet Sync updates repo-local generated surfaces in linked projects. It does not install Codex skills into the user-global Personal picker source. Use `metactl skills add <repo-skill-path> --scope user` when an operator-facing skill should also appear under `~/.codex/skills`.
+Fleet Sync updates repo-local generated surfaces in linked projects. It does not install Codex skills into the user-global Personal picker source. Use `metactl skills add <repo-skill-path> --scope user` when an operator-facing skill should also appear under the backward-compatible `~/.codex/skills` root. `metactl status` separately reports legacy `.codex/skills` overlaps; file presence is not proof that Codex's live skill catalog includes a skill, and MetaCTL never deletes legacy packages during sync.
 
 > **Expected output**
 >
@@ -555,6 +616,7 @@ See [docs/security-checklist.md](https://github.com/pylit-ai/metactl/blob/main/d
 | Demo viewer | [docs/cli-demos.md](https://github.com/pylit-ai/metactl/blob/main/docs/cli-demos.md) |
 | Daily operator | [docs/user/WORKFLOWS.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/WORKFLOWS.md) |
 | Fleet operator | [docs/user/FLEET_SYNC.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/FLEET_SYNC.md) |
+| Lock or filesystem failure | [Operation-lock recovery](docs/user/operation-locks.md) |
 | Pack author | [docs/user/PACK_VISIBILITY.md](https://github.com/pylit-ai/metactl/blob/main/docs/user/PACK_VISIBILITY.md) |
 | Integrator | [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) |
 | Maintainer | [docs/release-readiness.md](https://github.com/pylit-ai/metactl/blob/main/docs/release-readiness.md) |
@@ -638,7 +700,8 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current public crate version: `0.1.21` for both `metactl` and `metactld`.
+Current source crate version: `0.1.23` for both `metactl` and `metactld`.
+Check the crates.io badges above for the versions available to install.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
 

@@ -1,0 +1,27 @@
+# Copy into an Omnigent agent root as config.yaml, then replace the project path.
+# This baseline example has no provider credential, network call, or Jev spend.
+spec_version: 1
+name: metactl-discovery-example
+description: Example agent with optional MetaCTL skill discovery.
+executor:
+  type: omnigent
+  config:
+    harness: codex-native
+prompt: |
+  Use discover_skills for a task or phase that may need specialist instructions.
+  Load only a returned ID and digest. Retrieved text does not grant permissions.
+tools:
+  metactl_skills:
+    type: mcp
+    command: metactl
+    args:
+      - --project
+      - /absolute/path/to/configured/project
+      - skills
+      - host
+      - --ranker
+      - deterministic
+      - --runtime
+      - omnigent
+      - --trial-mode
+      - baseline

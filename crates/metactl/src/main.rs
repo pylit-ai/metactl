@@ -14,11 +14,12 @@ use metactl::project::{
     current_config_digest, current_local_config_digest, current_overlay_digest,
     default_project_config, detect_brownfield_repo, digest_path,
     ensure_bundled_starter_library_root, ensure_gitignore_entries, ensure_project_layout,
-    is_candidate_pack, list_user_profiles, load_compile_manifest, load_lock,
-    load_partial_project_config, load_policy_report, load_profile_partial, load_project_context,
-    load_project_context_with_profile_preferences, load_user_settings, metactl_user_config_dir,
-    policy_report_path, preferred_apply_mode_for_target, private_source_lock_path, profile_path,
-    profiles_directory, project_config_path, project_lock_path, resolve_profile_name_for_init,
+    is_candidate_pack, library_content_comparison, library_content_digest, list_user_profiles,
+    load_compile_manifest, load_lock, load_partial_project_config, load_policy_report,
+    load_profile_partial, load_project_context, load_project_context_with_profile_preferences,
+    load_user_settings, metactl_user_config_dir, policy_report_path,
+    preferred_apply_mode_for_target, private_source_lock_path, profile_path, profiles_directory,
+    project_config_path, project_lock_path, resolve_profile_name_for_init,
     resolve_starter_library_roots, save_user_settings, strip_ansi_codes, target_supports_takeover,
     update_managed_files_index, user_settings_path, write_lock, write_lock_relaxed,
     write_partial_project_config, write_policy_report, write_policy_report_relaxed,
@@ -42,6 +43,7 @@ use metactl::{
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
+mod git_plan;
 mod noise_report;
 mod project_import;
 mod setup;
@@ -59,8 +61,8 @@ const EXIT_STALE_LOCK: u8 = 11;
 const EXIT_CONFLICT: u8 = 12;
 const EXIT_VALIDATION: u8 = 13;
 
-const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills under .codex/skills are visible to Codex sessions opened in that repository. User-global Personal skills live under ~/.codex/skills.";
-const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync updates repo-local .codex/skills in linked projects; it does not install user-global Personal skills under ~/.codex/skills.";
+const CODEX_SKILL_SCOPE_NOTE: &str = "Codex repo-local skills are written canonically under .agents/skills. Legacy .codex/skills remains read-only reconciliation input. User-global Personal skills live under ~/.codex/skills.";
+const CODEX_FLEET_SCOPE_NOTE: &str = "Fleet sync writes repo-local .agents/skills in linked projects, reads legacy .codex/skills only for safe reconciliation, and does not install user-global Personal skills under ~/.codex/skills.";
 const MACHINE_LIST_LIMIT: usize = 15;
 const AGENT_ARTIFACT_POLICY_METADATA_KEY: &str = "agent_artifact_policy";
 const AGENT_ARTIFACT_STEWARDSHIP_PACK: &str = "agentic-artifact-forge";
@@ -206,6 +208,8 @@ enum Commands {
     Fleet(FleetArgs),
     /// Show project config, targets, and sync readiness at a glance
     Status(StatusArgs),
+    /// Read-only per-path Git plan for projected files
+    Git(GitArgs),
     /// List roles, packs, policies, or targets from the library or project
     #[command(hide = true)]
     List(ListArgs),
@@ -846,6 +850,73 @@ enum SkillsCommand {
     Remove(SkillsRemoveArgs),
     /// Audit skill-like artifacts across repo, generated, user, and explicit roots
     Audit(SkillsAuditArgs),
+    /// Explain a read-only route from a task description to declared skill resources
+    Route(SkillsRouteArgs),
+    /// List eligible plain-instruction metadata for an external discovery host (read-only)
+    Catalog,
+    /// Find eligible plain-instruction skills without model access (read-only)
+    Discover(SkillsDiscoverArgs),
+    /// Read original eligible instructions after checking their package digest
+    Load(SkillsLoadArgs),
+    /// Packaged optional discovery host (Python 3.10+); status and live verification
+    Host(SkillsHostArgs),
+    /// Save an Auto-mode surface decision in machine-local project configuration
+    Select(SkillsSelectArgs),
+    /// Private discovery event reports and session outcome recording
+    Trials(SkillsTrialsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsTrialsArgs {
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct SkillsHostArgs {
+    /// Python 3.10+ executable; useful where system python3 is older
+    #[arg(long, default_value = "python3", env = "METACTL_DISCOVERY_PYTHON")]
+    python: PathBuf,
+    /// Offline readiness report; never contacts the provider
+    #[arg(long, conflicts_with_all = ["check", "client_config"])]
+    status: bool,
+    /// One synthetic request; nonzero unless Jev answers validly
+    #[arg(long, conflicts_with = "client_config")]
+    check: bool,
+    /// Print a no-secret MCP registration snippet without installing it
+    #[arg(long)]
+    client_config: bool,
+    #[arg(long, default_value = "deterministic", value_parser = ["deterministic", "jev"], env = "METACTL_SKILL_RANKER")]
+    ranker: String,
+    #[arg(long, env = "METACTL_JEV_ALLOW_DATA")]
+    allow_provider_data: bool,
+    /// Per-process request ceiling, including failures; not a dollar quota
+    #[arg(long, default_value_t = 0, env = "METACTL_JEV_MAX_CALLS")]
+    max_provider_calls: u32,
+    #[arg(long, default_value_t = 1.5)]
+    provider_deadline: f64,
+    #[arg(long)]
+    exclude_skill: Vec<String>,
+    #[arg(long, default_value = "direct", value_parser = ["direct", "gateway"])]
+    jev_transport: String,
+    #[arg(long, default_value = "jev")]
+    gateway_command: String,
+    #[arg(long)]
+    gateway_project: Option<String>,
+    #[arg(long, value_parser = ["synthetic", "public-nonsensitive"])]
+    gateway_data_class: Option<String>,
+    #[arg(long, default_value = "advisory", value_parser = ["baseline", "shadow", "advisory"])]
+    trial_mode: String,
+    #[arg(long)]
+    event_log: Option<PathBuf>,
+    #[arg(long)]
+    session_id: Option<String>,
+    #[arg(long, default_value = "other", value_parser = ["claude-code", "codex-cli", "cursor", "filesystem-agent", "gemini-cli", "openclaw", "opencode", "codex", "omnigent", "pi", "other", "contract"])]
+    runtime: String,
+    #[arg(long, value_parser = ["discover_skills", "load_skill"], conflicts_with_all = ["status", "check", "client_config"])]
+    call_tool: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -1049,6 +1120,18 @@ struct StatusArgs {
     target: Option<String>,
 }
 
+#[derive(Debug, Args)]
+struct GitArgs {
+    #[command(subcommand)]
+    command: GitCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum GitCommand {
+    /// Compare saved MetaCTL ownership, installed bytes, and Git tracking
+    Plan,
+}
+
 #[derive(Debug, Clone, ValueEnum)]
 enum InitMode {
     Greenfield,
@@ -1096,6 +1179,59 @@ struct SkillsAuditArgs {
     /// Write the selected report format to a custom path
     #[arg(long)]
     output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+struct SkillsRouteArgs {
+    /// Task or intent to route to available skills
+    query: String,
+    /// Target runtime to require when a skill card declares compatibility
+    #[arg(long, short = 't')]
+    target: Option<String>,
+    /// Maximum candidate skills to return
+    #[arg(long, short = 'n', default_value_t = 10)]
+    limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsDiscoverArgs {
+    #[arg(
+        required_unless_present = "query_stdin",
+        conflicts_with = "query_stdin"
+    )]
+    query: Option<String>,
+    /// Read private query text from stdin instead of process arguments
+    #[arg(long)]
+    query_stdin: bool,
+    /// Host-owned disabled IDs/names, applied before result truncation
+    #[arg(long = "exclude")]
+    excluded: Vec<String>,
+    #[arg(long, default_value_t = 5)]
+    limit: usize,
+}
+
+#[derive(Debug, Args)]
+struct SkillsLoadArgs {
+    id: String,
+    #[arg(long)]
+    digest: String,
+}
+
+#[derive(Debug, Args)]
+struct SkillsSelectArgs {
+    /// Stable surface id from `metactl skills route --json` (pack-id:surface-slug)
+    surface_id: String,
+    /// Decision to save; block wins over pin, and pin wins over select
+    #[arg(long, value_enum, default_value = "select")]
+    mode: SkillSelectionModeArg,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SkillSelectionModeArg {
+    Select,
+    Pin,
+    Block,
+    Clear,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1429,6 +1565,9 @@ struct SyncArgs {
     /// Explicitly apply generated changes (default when --preview is not passed)
     #[arg(long)]
     apply: bool,
+    /// Bind an explicit apply to the complete plan digest emitted by preview
+    #[arg(long, value_name = "SHA256")]
+    plan_digest: Option<String>,
     /// Folder-native surface selection mode (overrides defaults.surface_selection_mode)
     #[arg(long, value_enum)]
     surface_mode: Option<SurfaceSelectionModeArg>,
@@ -1448,6 +1587,9 @@ struct ApplyArgs {
     /// Show what would be applied without writing files
     #[arg(long)]
     preview: bool,
+    /// Bind apply to the complete plan digest emitted by a prior preview
+    #[arg(long, value_name = "SHA256")]
+    plan_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -1756,6 +1898,7 @@ fn command_contract_name(command: &Commands) -> &'static str {
         Commands::Target(_) => "target",
         Commands::Fleet(_) => "fleet",
         Commands::Status(_) => "status",
+        Commands::Git(_) => "git",
         Commands::List(_) => "list",
         Commands::Search(_) => "search",
         Commands::Stats(_) => "stats",
@@ -1837,10 +1980,25 @@ fn main() -> ExitCode {
         }
         Err(error) => error.exit(),
     };
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Host(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_host(&cli, args);
+    }
+    if let Commands::Skills(SkillsArgs {
+        command: SkillsCommand::Trials(args),
+    }) = &cli.command
+    {
+        return cli_skills::run_discovery_trials(args);
+    }
     match run(&cli) {
         Ok(output) => {
             if cli.machine_output() {
-                let json = bounded_machine_json(output.json, cli.full);
+                let json = bounded_machine_json(
+                    output.json,
+                    cli.full || matches!(&cli.command, Commands::Git(_)),
+                );
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&json).unwrap_or_else(|_| "{}".to_string())
@@ -1920,6 +2078,7 @@ fn run(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
         Commands::Target(args) => cmd_target(cli, args),
         Commands::Fleet(args) => cmd_fleet(cli, args),
         Commands::Status(args) => cmd_status(cli, args),
+        Commands::Git(args) => cmd_git(cli, args),
         Commands::List(args) => cmd_list(cli, args),
         Commands::Search(args) => cmd_search(cli, args),
         Commands::Stats(args) => cmd_stats(cli, args),
@@ -2016,6 +2175,13 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             SkillsCommand::List(_) => None,
             SkillsCommand::Remove(_) => Some("skills remove"),
             SkillsCommand::Audit(_) => Some("skills audit"),
+            SkillsCommand::Route(_) => None,
+            SkillsCommand::Catalog
+            | SkillsCommand::Discover(_)
+            | SkillsCommand::Load(_)
+            | SkillsCommand::Host(_)
+            | SkillsCommand::Trials(_) => None,
+            SkillsCommand::Select(_) => Some("skills select"),
         },
         Commands::Plugin(args) => match &args.command {
             PluginCommand::List(_) | PluginCommand::Verify(_) => None,
@@ -2111,6 +2277,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             Some(SourceCommand::Remove(_)) => Some("source remove"),
         },
         Commands::Status(_)
+        | Commands::Git(_)
         | Commands::List(_)
         | Commands::Search(_)
         | Commands::Explain(_)
@@ -2209,8 +2376,30 @@ fn codex_skill_entry_json(entry: &CodexSkillEntry) -> Value {
 }
 
 fn codex_skill_visibility_json(project_root: &Path) -> Result<Value> {
-    let repo_root = project_root.join(".codex").join("skills");
+    let repo_root = project_root.join(".agents").join("skills");
     let repo_entries = discover_codex_skill_entries(&repo_root)?;
+    let legacy_root = project_root.join(".codex").join("skills");
+    let legacy_entries = discover_codex_skill_entries(&legacy_root)?;
+    let mut repo_by_name: BTreeMap<&str, Vec<&CodexSkillEntry>> = BTreeMap::new();
+    for entry in &repo_entries {
+        repo_by_name.entry(&entry.name).or_default().push(entry);
+    }
+    let mut legacy_overlap_count = 0;
+    let mut legacy_identical_instruction_count = 0;
+    let mut legacy_ambiguous_canonical_count = 0;
+    let mut legacy_only_count = 0;
+    for legacy in &legacy_entries {
+        if let Some(canonical_matches) = repo_by_name.get(legacy.name.as_str()) {
+            legacy_overlap_count += 1;
+            if canonical_matches.len() != 1 {
+                legacy_ambiguous_canonical_count += 1;
+            } else if fs::read(&legacy.skill_md)? == fs::read(&canonical_matches[0].skill_md)? {
+                legacy_identical_instruction_count += 1;
+            }
+        } else {
+            legacy_only_count += 1;
+        }
+    }
     let user_root = codex_user_skill_root();
     let user_entries = match user_root.as_ref() {
         Some(root) => discover_codex_skill_entries(root)?,
@@ -2243,6 +2432,16 @@ fn codex_skill_visibility_json(project_root: &Path) -> Result<Value> {
         "target": "codex-cli",
         "repo_scope": "repo",
         "repo_root": repo_root.to_string_lossy(),
+        "legacy_repo_root": legacy_root.to_string_lossy(),
+        "legacy_repo_count": legacy_entries.len(),
+        "legacy_overlap_count": legacy_overlap_count,
+        "legacy_identical_instruction_count": legacy_identical_instruction_count,
+        "legacy_ambiguous_canonical_count": legacy_ambiguous_canonical_count,
+        "legacy_divergent_instruction_count": legacy_overlap_count - legacy_identical_instruction_count - legacy_ambiguous_canonical_count,
+        "legacy_only_count": legacy_only_count,
+        "host_discovery_verified": false,
+        "project_slash_commands_supported": false,
+        "legacy_project_command_root": project_root.join(".codex/commands").to_string_lossy(),
         "user_scope": "user",
         "user_root": user_root.as_ref().map(|root| root.to_string_lossy().to_string()),
         "repo_local_count": repo_entries.len(),
@@ -2265,12 +2464,27 @@ fn append_codex_skill_visibility_lines(lines: &mut Vec<String>, visibility: &Val
     lines.push("  Codex skill visibility:".to_string());
     lines.push(format!(
         "    repo-local: {repo_count} skill(s) under {}",
-        visibility["repo_root"].as_str().unwrap_or(".codex/skills")
+        visibility["repo_root"].as_str().unwrap_or(".agents/skills")
     ));
     lines.push(format!(
         "    user-global: {user_count} skill(s) under {}",
         visibility["user_root"].as_str().unwrap_or("HOME not set")
     ));
+    let legacy_count = visibility["legacy_repo_count"].as_u64().unwrap_or(0);
+    if legacy_count > 0 {
+        lines.push(format!(
+            "    legacy .codex/skills: {legacy_count} skill(s); {} same-name overlap(s), {} divergent instruction(s), {} ambiguous canonical match(es), {} legacy-only skill(s)",
+            visibility["legacy_overlap_count"].as_u64().unwrap_or(0),
+            visibility["legacy_divergent_instruction_count"]
+                .as_u64()
+                .unwrap_or(0),
+            visibility["legacy_ambiguous_canonical_count"]
+                .as_u64()
+                .unwrap_or(0),
+            visibility["legacy_only_count"].as_u64().unwrap_or(0)
+        ));
+        lines.push("    warning: files in both roots may crowd host skill discovery; inspect and preserve customized packages before reconciliation".to_string());
+    }
     if missing_count > 0 {
         let missing = visibility["missing_user_global"]
             .as_array()
@@ -2286,6 +2500,14 @@ fn append_codex_skill_visibility_lines(lines: &mut Vec<String>, visibility: &Val
         lines.push("    next: metactl skills add <repo-skill-path> --scope user".to_string());
     }
     lines.push(format!("    note: {CODEX_SKILL_SCOPE_NOTE}"));
+    lines.push(
+        "    host discovery: not verified by metactl; check the actual Codex prompt catalog"
+            .to_string(),
+    );
+    lines.push(
+        "    project slash commands: unsupported; .codex/commands files are not invocable in Codex (use $skill-name)"
+            .to_string(),
+    );
 }
 
 fn should_show_codex_skill_visibility(
@@ -2393,7 +2615,7 @@ fn validate_skill_name(name: &str) -> Result<()> {
 }
 
 fn validate_skill_description(description: &str) -> Result<()> {
-    if description.trim().is_empty() || description.len() > 512 {
+    if description.trim().is_empty() || description.chars().count() > 512 {
         return Err(anyhow!("frontmatter.description must be 1..512 characters"));
     }
     Ok(())
@@ -2448,8 +2670,11 @@ fn skill_import_safety_findings(
 ) -> Vec<String> {
     let mut findings = Vec::new();
     let total_bytes: u64 = files.iter().map(|file| file.byte_len).sum();
-    if total_bytes > 2 * 1024 * 1024 {
-        findings.push(format!("oversized Agent Skill bundle: {total_bytes} bytes"));
+    const MAX_SKILL_BUNDLE_BYTES: u64 = 2 * 1024 * 1024;
+    if total_bytes > MAX_SKILL_BUNDLE_BYTES {
+        findings.push(format!(
+            "oversized Agent Skill bundle: {total_bytes} bytes (limit {MAX_SKILL_BUNDLE_BYTES} bytes)"
+        ));
     }
     for file in files {
         let lower = file.relative_path.to_ascii_lowercase();
@@ -2641,7 +2866,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
             let available_display = available_targets_display(&available);
             return Err(CliError::new(
                 EXIT_STATE,
-                &format!(
+                format!(
                     "No target specified and none detected.\n\
                      Available targets: {}\n\
                      Hint: use `metactl init --target <id>` or `metactl init --target all`",
@@ -2690,6 +2915,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
         fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
         discovery_mode: Some(DiscoveryMode::CandidateSearch),
         surface_selection_mode: None,
+        auto_surface_selection: None,
     });
 
     let mut metadata = BTreeMap::new();
@@ -2716,7 +2942,7 @@ fn cmd_init(cli: &Cli, args: &InitArgs) -> std::result::Result<CommandOutput, Cl
         );
     }
 
-    let extends_profile_written = if cli.profile.as_ref().map_or(false, |s| !s.is_empty()) {
+    let extends_profile_written = if cli.profile.as_ref().is_some_and(|s| !s.is_empty()) {
         cli.profile.clone()
     } else if args.bind_profile {
         init_resolution.name.clone()
@@ -2886,9 +3112,10 @@ fn cmd_library_init(
         fs::create_dir_all(parent).map_err(|err| internal_error(anyhow!(err)))?;
     }
     let starter = ensure_bundled_starter_library_root().map_err(internal_error)?;
-    let mut starter_library = Vec::new();
-    starter_library.push(starter.to_string_lossy().to_string());
-    starter_library.push(library_root.to_string_lossy().to_string());
+    let starter_library = vec![
+        starter.to_string_lossy().to_string(),
+        library_root.to_string_lossy().to_string(),
+    ];
     let profile = metactl::project::PartialProjectConfig {
         api_version: Some(API_VERSION.to_string()),
         role: Some("builder".to_string()),
@@ -2900,6 +3127,7 @@ fn cmd_library_init(
             fleet_sync_adopt: Some(FleetSyncAdoptMode::Patch),
             discovery_mode: Some(DiscoveryMode::CandidateSearch),
             surface_selection_mode: None,
+            auto_surface_selection: None,
         }),
         ..metactl::project::PartialProjectConfig::default()
     };
@@ -3125,13 +3353,13 @@ fn add_pack_to_config_and_maybe_sync(
             write_partial_project_config(&local_path, &local).map_err(internal_error)?;
         }
     } else {
-        let mut raw = load_partial_project_config(&config_path).map_err(internal_error)?;
+        let mut raw = load_partial_project_config(config_path).map_err(internal_error)?;
         if raw.packs.contains(&config_pack_ref.to_string()) {
             already_configured = true;
         } else {
             already_configured = false;
             raw.packs.push(config_pack_ref.to_string());
-            write_partial_project_config(&config_path, &raw).map_err(internal_error)?;
+            write_partial_project_config(config_path, &raw).map_err(internal_error)?;
         }
     };
 
@@ -3166,6 +3394,7 @@ fn add_pack_to_config_and_maybe_sync(
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -3186,8 +3415,8 @@ fn add_pack_to_config_and_maybe_sync(
     }
 
     Ok(CommandOutput {
-        human: project_human_output(&project_root, human_parts.join("\n\n")),
-        json: success_json("use", Some(&project_root), use_json),
+        human: project_human_output(project_root, human_parts.join("\n\n")),
+        json: success_json("use", Some(project_root), use_json),
     })
 }
 
@@ -3615,6 +3844,7 @@ fn cmd_target_add(
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -3668,6 +3898,7 @@ fn cmd_target_add(
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -3743,6 +3974,7 @@ fn cmd_target_remove(
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -3803,6 +4035,7 @@ fn cmd_target_remove(
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -3930,6 +4163,7 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -3990,6 +4224,7 @@ fn cmd_add(cli: &Cli, args: &AddArgs) -> std::result::Result<CommandOutput, CliE
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -4056,6 +4291,7 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
             let sync_output = cmd_sync(
                 cli,
                 &SyncArgs {
+                    plan_digest: None,
                     target: Vec::new(),
                     all: false,
                     role: None,
@@ -4109,6 +4345,7 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
         let sync_output = cmd_sync(
             cli,
             &SyncArgs {
+                plan_digest: None,
                 target: Vec::new(),
                 all: false,
                 role: None,
@@ -4135,654 +4372,6 @@ fn cmd_remove(cli: &Cli, args: &RemoveArgs) -> std::result::Result<CommandOutput
     }
 
     Ok(remove_output)
-}
-
-fn cmd_fleet(cli: &Cli, args: &FleetArgs) -> std::result::Result<CommandOutput, CliError> {
-    match &args.command {
-        Some(FleetCommand::List) => cmd_fleet_list(cli),
-        Some(FleetCommand::Status(args)) => cmd_fleet_status(cli, args),
-        Some(FleetCommand::Sync(args)) => cmd_fleet_sync(cli, args),
-        Some(FleetCommand::Controller(args)) => cmd_fleet_controller(cli, args),
-        None => cmd_fleet_status(
-            cli,
-            &FleetStatusArgs {
-                ids: Vec::new(),
-                include_disabled: false,
-            },
-        ),
-    }
-}
-
-fn cmd_fleet_controller(
-    cli: &Cli,
-    args: &FleetControllerArgs,
-) -> std::result::Result<CommandOutput, CliError> {
-    match &args.command {
-        FleetControllerCommand::Init { name, path, force } => {
-            validate_fleet_controller_name(name)?;
-            let controller_path = resolve_fleet_controller_init_path(cli, name, path.as_deref())?;
-            fs::create_dir_all(&controller_path).map_err(|err| {
-                internal_error(anyhow!(
-                    "create Fleet controller {}: {}",
-                    controller_path.display(),
-                    err
-                ))
-            })?;
-            ensure_project_layout(&controller_path).map_err(internal_error)?;
-
-            let config_path = project_config_path(&controller_path, cli.config.as_deref());
-            if config_path.exists() && !force {
-                return Err(CliError::new(
-                    EXIT_STATE,
-                    format!(
-                        "Fleet controller config already exists: {}.\nHint: rerun with --force to replace it, or use `metactl fleet controller set {name} {}`.",
-                        config_path.display(),
-                        controller_path.display()
-                    ),
-                ));
-            }
-            let mut config = default_project_config();
-            config.linked_projects = Vec::new();
-            config
-                .metadata
-                .insert("fleet_controller".to_string(), "true".to_string());
-            write_project_config(&config_path, &config).map_err(internal_error)?;
-
-            let readme_path = controller_path.join("README.md");
-            if !readme_path.exists() || *force {
-                atomic_write(
-                    &readme_path,
-                    fleet_controller_readme(name, &controller_path).as_bytes(),
-                )
-                .map_err(internal_error)?;
-            }
-
-            let context = load_required_context_for_path(cli, &controller_path)?;
-            save_fleet_controller_pointer(name, &controller_path)?;
-            Ok(CommandOutput {
-                human: format!(
-                    "Fleet controller `{name}` initialized at {}.\nNext: edit {} and add linked_projects, then run `metactl fleet sync --preview`.\n",
-                    controller_path.display(),
-                    config_path.display()
-                ),
-                json: success_json(
-                    "fleet",
-                    cli.project.as_deref(),
-                    json!({
-                        "action": "controller-init",
-                        "controller": {
-                            "id": name,
-                            "path": controller_path.to_string_lossy(),
-                            "source": "user_default",
-                            "config_path": config_path.to_string_lossy(),
-                            "registry_digest": current_config_digest(&context).ok(),
-                        },
-                        "created_files": [
-                            config_path.to_string_lossy(),
-                            readme_path.to_string_lossy(),
-                        ],
-                    }),
-                ),
-            })
-        }
-        FleetControllerCommand::Show => {
-            let settings = load_user_settings();
-            let path = user_settings_path();
-            let controller = resolve_fleet_controller(cli).ok();
-            let human = if let Some(controller) = controller.as_ref() {
-                fleet_controller_human_header(controller).join("\n")
-            } else {
-                format!(
-                    "Fleet controller: (none)\nUser settings file: {}",
-                    path.as_ref()
-                        .map(|item| item.display().to_string())
-                        .unwrap_or_else(
-                            || "(unavailable — set HOME or XDG_CONFIG_HOME)".to_string()
-                        )
-                )
-            };
-            Ok(CommandOutput {
-                human: format!("{human}\n"),
-                json: success_json(
-                    "fleet",
-                    cli.project.as_deref(),
-                    json!({
-                        "action": "controller-show",
-                        "settings_path": path,
-                        "default_controller": settings.fleet.as_ref().and_then(|fleet| fleet.default_controller.as_deref()),
-                        "controller": controller.as_ref().map(fleet_controller_json),
-                    }),
-                ),
-            })
-        }
-        FleetControllerCommand::List => {
-            let settings = load_user_settings();
-            let path = user_settings_path();
-            let fleet = settings.fleet.unwrap_or_default();
-            let controllers = fleet
-                .controllers
-                .iter()
-                .map(|(name, controller)| {
-                    let resolved = resolve_user_path(&controller.path);
-                    json!({
-                        "name": name,
-                        "path": controller.path,
-                        "resolved_path": resolved.to_string_lossy(),
-                        "default": fleet.default_controller.as_deref() == Some(name.as_str()),
-                    })
-                })
-                .collect::<Vec<_>>();
-            let mut lines = vec!["Fleet controllers:".to_string()];
-            if controllers.is_empty() {
-                lines.push("  (none)".to_string());
-            }
-            for item in &controllers {
-                let marker = if item["default"].as_bool().unwrap_or(false) {
-                    " *"
-                } else {
-                    ""
-                };
-                lines.push(format!(
-                    "  {}{} — {}",
-                    item["name"].as_str().unwrap_or("?"),
-                    marker,
-                    item["resolved_path"].as_str().unwrap_or("?")
-                ));
-            }
-            Ok(CommandOutput {
-                human: format!("{}\n", lines.join("\n")),
-                json: success_json(
-                    "fleet",
-                    cli.project.as_deref(),
-                    json!({
-                        "action": "controller-list",
-                        "settings_path": path,
-                        "default_controller": fleet.default_controller,
-                        "controllers": controllers,
-                    }),
-                ),
-            })
-        }
-        FleetControllerCommand::Set { name, path } => {
-            validate_fleet_controller_name(name)?;
-            let mut resolved = resolve_user_path(&path.to_string_lossy());
-            if !resolved.is_absolute() {
-                let cwd = project_root(cli).map_err(internal_error)?;
-                resolved = cwd.join(resolved);
-            }
-            let context = load_required_context_for_path(cli, &resolved)?;
-            save_fleet_controller_pointer(name, &resolved)?;
-            Ok(CommandOutput {
-                human: format!("Fleet controller `{name}` set to {}.\n", resolved.display()),
-                json: success_json(
-                    "fleet",
-                    cli.project.as_deref(),
-                    json!({
-                        "action": "controller-set",
-                        "controller": {
-                            "id": name,
-                            "path": resolved.to_string_lossy(),
-                            "source": "user_default",
-                            "config_path": project_config_path(&resolved, cli.config.as_deref()).to_string_lossy(),
-                            "registry_digest": current_config_digest(&context).ok(),
-                        },
-                    }),
-                ),
-            })
-        }
-        FleetControllerCommand::ClearDefault => {
-            let mut settings = load_user_settings();
-            if let Some(fleet) = settings.fleet.as_mut() {
-                fleet.default_controller = None;
-            }
-            save_user_settings(&settings).map_err(internal_error)?;
-            Ok(CommandOutput {
-                human: "Cleared default Fleet controller.\n".to_string(),
-                json: success_json(
-                    "fleet",
-                    cli.project.as_deref(),
-                    json!({
-                        "action": "controller-clear-default",
-                        "default_controller": Value::Null,
-                    }),
-                ),
-            })
-        }
-    }
-}
-
-fn validate_fleet_controller_name(name: &str) -> std::result::Result<(), CliError> {
-    if !name.is_empty()
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-    {
-        return Ok(());
-    }
-    Err(CliError::new(
-        EXIT_STATE,
-        format!(
-            "Invalid Fleet controller name `{name}`.\nHint: use only ASCII letters, numbers, '.', '_', and '-'."
-        ),
-    ))
-}
-
-fn resolve_fleet_controller_init_path(
-    cli: &Cli,
-    name: &str,
-    path: Option<&Path>,
-) -> std::result::Result<PathBuf, CliError> {
-    if let Some(path) = path {
-        let mut resolved = resolve_user_path(&path.to_string_lossy());
-        if !resolved.is_absolute() {
-            let cwd = project_root(cli).map_err(internal_error)?;
-            resolved = cwd.join(resolved);
-        }
-        return Ok(resolved);
-    }
-    let Some(config_dir) = metactl_user_config_dir() else {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "HOME (or XDG_CONFIG_HOME) is not set; cannot create a default Fleet controller path.",
-        ));
-    };
-    Ok(config_dir.join("fleet").join(name))
-}
-
-fn save_fleet_controller_pointer(name: &str, path: &Path) -> std::result::Result<(), CliError> {
-    let mut settings = load_user_settings();
-    let fleet = settings
-        .fleet
-        .get_or_insert_with(UserFleetSettings::default);
-    fleet.controllers.insert(
-        name.to_string(),
-        UserFleetController {
-            path: path.to_string_lossy().to_string(),
-        },
-    );
-    fleet.default_controller = Some(name.to_string());
-    save_user_settings(&settings).map_err(internal_error)
-}
-
-fn fleet_controller_readme(name: &str, path: &Path) -> String {
-    format!(
-        r#"# metactl Fleet Controller: {name}
-
-This directory is an explicit local Fleet controller.
-
-- `metactl.yaml` owns the `linked_projects` registry.
-- User-global config stores only a pointer to this directory.
-- `metactl fleet sync --preview` is the default safe review command.
-- `metactl --yes --no-input fleet sync --apply` applies across selected projects.
-
-Add projects manually:
-
-```yaml
-linked_projects:
-  - id: example
-    path: /path/to/repo
-```
-
-Controller path: {path}
-"#,
-        path = path.display()
-    )
-}
-
-fn cmd_fleet_list(cli: &Cli) -> std::result::Result<CommandOutput, CliError> {
-    let controller = resolve_fleet_controller(cli)?;
-    let projects =
-        fleet_projects_for_output(&controller.project_root, &controller.context.config_file);
-    let project_json = projects
-        .iter()
-        .map(fleet_project_list_json)
-        .collect::<Vec<_>>();
-    let mut lines = fleet_controller_human_header(&controller);
-    lines.push("Fleet projects:".to_string());
-    if project_json.is_empty() {
-        lines.push("  (none configured)".to_string());
-    }
-    for project in &project_json {
-        lines.push(format!(
-            "  {:<18} {:<14} {}",
-            project["id"].as_str().unwrap_or("?"),
-            project["status"].as_str().unwrap_or("?"),
-            project["path"].as_str().unwrap_or("?")
-        ));
-    }
-    Ok(CommandOutput {
-        human: project_human_output(&controller.project_root, lines.join("\n")),
-        json: success_json(
-            "fleet",
-            Some(&controller.project_root),
-            json!({
-                "action": "list",
-                "controller": fleet_controller_json(&controller),
-                "projects": project_json,
-            }),
-        ),
-    })
-}
-
-fn cmd_fleet_status(
-    cli: &Cli,
-    args: &FleetStatusArgs,
-) -> std::result::Result<CommandOutput, CliError> {
-    let controller = resolve_fleet_controller(cli)?;
-    let projects = select_fleet_projects(
-        &controller.project_root,
-        &controller.context.config_file,
-        &args.ids,
-        args.include_disabled,
-    )?;
-    let statuses = projects
-        .iter()
-        .map(|project| fleet_project_status_json(project))
-        .collect::<Vec<_>>();
-    let mut lines = fleet_controller_human_header(&controller);
-    lines.push("Fleet status:".to_string());
-    for status in &statuses {
-        lines.push(format!(
-            "  {:<18} {:<14} {}",
-            status["id"].as_str().unwrap_or("?"),
-            status["status"].as_str().unwrap_or("?"),
-            status["path"].as_str().unwrap_or("?")
-        ));
-    }
-    append_fleet_codex_skill_scope_note(&mut lines);
-    Ok(CommandOutput {
-        human: project_human_output(&controller.project_root, lines.join("\n")),
-        json: success_json(
-            "fleet",
-            Some(&controller.project_root),
-            json!({
-                "action": "status",
-                "controller": fleet_controller_json(&controller),
-                "projects": statuses,
-                "scope_note": CODEX_FLEET_SCOPE_NOTE,
-            }),
-        ),
-    })
-}
-
-fn cmd_fleet_sync(cli: &Cli, args: &FleetSyncArgs) -> std::result::Result<CommandOutput, CliError> {
-    let controller = resolve_fleet_controller(cli)?;
-    let apply = args.apply;
-    if apply && !(cli.yes && cli.no_input_enabled()) {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "fleet sync --apply requires explicit --yes --no-input confirmation",
-        ));
-    }
-    let projects = select_fleet_projects(
-        &controller.project_root,
-        &controller.context.config_file,
-        &args.ids,
-        args.include_disabled,
-    )?;
-    let mut results = Vec::new();
-    for project in &projects {
-        let mut result = linked_project_json(project);
-        if project.status != LinkedProjectStatus::Ready {
-            result["result"] = json!("skipped");
-            results.push(result);
-            continue;
-        }
-        let fleet_sync_adopt = match fleet_sync_adopt_for_project(project) {
-            Ok(mode) => mode,
-            Err(err) => {
-                result["status"] = json!("failed");
-                result["result"] = json!("invalid_config");
-                result["message"] = json!(err.to_string());
-                results.push(result);
-                continue;
-            }
-        };
-        result["fleet_sync_adopt"] = json!(fleet_sync_adopt_label(fleet_sync_adopt));
-        if !apply {
-            result["status"] = json!("planned");
-            result["result"] = json!("preview");
-            result["planned_command"] = json!(fleet_sync_command_label(fleet_sync_adopt));
-            attach_codex_skill_visibility(&mut result, &project.path);
-            results.push(result);
-            continue;
-        }
-        if git_worktree_dirty(&project.path) {
-            result["worktree_dirty"] = json!(true);
-            result["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
-        }
-        match run_project_sync(project, fleet_sync_adopt) {
-            Ok(sync_json) => {
-                result["status"] = json!("applied");
-                result["result"] = json!("applied");
-                result["sync"] = sync_json;
-            }
-            Err(message) => {
-                result["status"] = json!("failed");
-                result["result"] = json!("sync_failed");
-                result["message"] = json!(message);
-            }
-        }
-        attach_codex_skill_visibility(&mut result, &project.path);
-        results.push(result);
-    }
-    if apply {
-        write_fleet_sync_log(&controller.project_root, &results).map_err(internal_error)?;
-    }
-    let failed = results.iter().any(|item| item["status"] == "failed");
-    let mut lines = fleet_controller_human_header(&controller);
-    lines.push(if apply {
-        "Fleet sync applied:".to_string()
-    } else {
-        "Fleet sync preview:".to_string()
-    });
-    for item in &results {
-        lines.push(format!(
-            "  {:<18} {:<14} {}",
-            item["id"].as_str().unwrap_or("?"),
-            item["status"].as_str().unwrap_or("?"),
-            item["path"].as_str().unwrap_or("?")
-        ));
-        if item["worktree_dirty"] == true {
-            lines.push(format!("    Warning: {DIRTY_WORKTREE_WARNING}"));
-        }
-    }
-    append_fleet_codex_skill_scope_note(&mut lines);
-    let mut json_payload = success_json(
-        "fleet",
-        Some(&controller.project_root),
-        json!({
-            "action": "sync",
-            "controller": fleet_controller_json(&controller),
-            "preview": !apply,
-            "projects": results,
-            "scope_note": CODEX_FLEET_SCOPE_NOTE,
-        }),
-    );
-    if results.iter().any(|item| item["worktree_dirty"] == true) {
-        json_payload["worktree_dirty"] = json!(true);
-        json_payload["warnings"] = json!([DIRTY_WORKTREE_WARNING]);
-    }
-    if failed {
-        let details = fleet_sync_failure_details(&results);
-        let mut err = CliError::new(EXIT_STATE, "one or more fleet projects failed");
-        json_payload["ok"] = json!(false);
-        json_payload["message"] = json!("one or more fleet projects failed");
-        json_payload["details"] = json!(details);
-        err.json = json_payload;
-        err.details = details;
-        return Err(err);
-    }
-    Ok(CommandOutput {
-        human: project_human_output(&controller.project_root, lines.join("\n")),
-        json: json_payload,
-    })
-}
-
-fn fleet_sync_failure_details(results: &[Value]) -> Vec<String> {
-    let failures: Vec<&Value> = results
-        .iter()
-        .filter(|item| item["status"] == "failed")
-        .collect();
-    let mut details: Vec<String> = failures
-        .iter()
-        .take(20)
-        .map(|item| {
-            let id = item["id"].as_str().unwrap_or("?");
-            let path = item["path"].as_str().unwrap_or("?");
-            let result = item["result"].as_str().unwrap_or("failed");
-            let message = item["message"]
-                .as_str()
-                .map(fleet_sync_failure_message_summary)
-                .unwrap_or_else(|| "no failure detail returned".to_string());
-            format!("{id} ({path}) {result}: {message}")
-        })
-        .collect();
-    let omitted = failures.len().saturating_sub(20);
-    if omitted > 0 {
-        details.push(format!(
-            "{omitted} more failed project(s); rerun with --json for the full fleet payload"
-        ));
-    }
-    details
-}
-
-fn fleet_sync_failure_message_summary(message: &str) -> String {
-    if let Ok(value) = serde_json::from_str::<Value>(message) {
-        let mut parts = Vec::new();
-        if let Some(text) = value.get("message").and_then(Value::as_str) {
-            parts.push(text.to_string());
-        }
-        if let Some(details) = value.get("details").and_then(Value::as_array) {
-            parts.extend(
-                details
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .take(3)
-                    .map(ToString::to_string),
-            );
-        }
-        if let Some(findings) = value
-            .pointer("/source_audit/findings")
-            .and_then(Value::as_array)
-        {
-            for finding in findings.iter().take(3) {
-                let id = finding
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("source-audit");
-                let text = finding
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("source audit finding");
-                match finding.get("path").and_then(Value::as_str) {
-                    Some(path) => parts.push(format!("{id}: {text} ({path})")),
-                    None => parts.push(format!("{id}: {text}")),
-                }
-            }
-        }
-        if !parts.is_empty() {
-            return fleet_sync_single_line(&parts.join("; "), 600);
-        }
-    }
-    fleet_sync_single_line(message, 600)
-}
-
-fn fleet_sync_single_line(input: &str, max_chars: usize) -> String {
-    let single_line = input.split_whitespace().collect::<Vec<&str>>().join(" ");
-    if single_line.is_empty() {
-        return "no failure detail returned".to_string();
-    }
-    if single_line.chars().count() <= max_chars {
-        return single_line;
-    }
-    let keep_chars = max_chars.saturating_sub(3);
-    let mut truncated = single_line.chars().take(keep_chars).collect::<String>();
-    truncated.push_str("...");
-    truncated
-}
-
-#[derive(Debug)]
-struct FleetControllerContext {
-    id: Option<String>,
-    source: FleetControllerSource,
-    project_root: PathBuf,
-    context: metactl::project::ProjectContext,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum FleetControllerSource {
-    CommandLine,
-    Environment,
-    CurrentProject,
-    UserDefault,
-}
-
-fn resolve_fleet_controller(cli: &Cli) -> std::result::Result<FleetControllerContext, CliError> {
-    if cli.project.is_some() || cli.config.is_some() {
-        let project_root = project_root(cli).map_err(internal_error)?;
-        let context = load_required_context(cli, &project_root)?;
-        return Ok(FleetControllerContext {
-            id: None,
-            source: FleetControllerSource::CommandLine,
-            project_root,
-            context,
-        });
-    }
-
-    if let Ok(raw_path) = std::env::var("METACTL_FLEET_CONTROLLER") {
-        if !raw_path.trim().is_empty() {
-            let project_root = resolve_user_path(raw_path.trim());
-            let context = load_required_context_for_path(cli, &project_root)?;
-            return Ok(FleetControllerContext {
-                id: None,
-                source: FleetControllerSource::Environment,
-                project_root,
-                context,
-            });
-        }
-    }
-
-    let cwd = project_root(cli).map_err(internal_error)?;
-    let cwd_config = project_config_path(&cwd, cli.config.as_deref());
-    if cwd_config.exists() {
-        let context = load_required_context(cli, &cwd)?;
-        if !context.config_file.linked_projects.is_empty() {
-            return Ok(FleetControllerContext {
-                id: None,
-                source: FleetControllerSource::CurrentProject,
-                project_root: cwd,
-                context,
-            });
-        }
-    }
-
-    let settings = load_user_settings();
-    if let Some(fleet) = settings.fleet {
-        if let Some(default_controller) = fleet.default_controller {
-            if let Some(controller) = fleet.controllers.get(&default_controller) {
-                let project_root = resolve_user_path(&controller.path);
-                let context = load_required_context_for_path(cli, &project_root)?;
-                return Ok(FleetControllerContext {
-                    id: Some(default_controller),
-                    source: FleetControllerSource::UserDefault,
-                    project_root,
-                    context,
-                });
-            }
-            return Err(CliError::new(
-                EXIT_STATE,
-                format!(
-                    "Fleet default controller `{default_controller}` is not configured.\nHint: run `metactl fleet controller set {default_controller} /path/to/controller`."
-                ),
-            ));
-        }
-    }
-
-    Err(CliError::new(
-        EXIT_STATE,
-        "Fleet controller not found.\nHint: run from a project with linked_projects, pass `--project /path/to/controller`, set METACTL_FLEET_CONTROLLER, or run `metactl fleet controller set personal /path/to/controller`.",
-    ))
 }
 
 fn load_required_context_for_path(
@@ -4838,156 +4427,6 @@ fn resolve_user_path(raw_path: &str) -> PathBuf {
     }
 }
 
-fn fleet_controller_human_header(controller: &FleetControllerContext) -> Vec<String> {
-    vec![
-        format!(
-            "Fleet controller: {}",
-            controller.id.as_deref().unwrap_or("(explicit)")
-        ),
-        format!(
-            "Controller source: {}",
-            fleet_controller_source_label(controller.source)
-        ),
-        format!("Controller path: {}", controller.project_root.display()),
-    ]
-}
-
-fn fleet_controller_json(controller: &FleetControllerContext) -> Value {
-    json!({
-        "id": controller.id.as_deref(),
-        "source": fleet_controller_source_label(controller.source),
-        "path": controller.project_root.to_string_lossy(),
-        "config_path": project_config_path(&controller.project_root, None).to_string_lossy(),
-        "registry_digest": current_config_digest(&controller.context).ok(),
-    })
-}
-
-fn fleet_controller_source_label(source: FleetControllerSource) -> &'static str {
-    match source {
-        FleetControllerSource::CommandLine => "command_line",
-        FleetControllerSource::Environment => "environment",
-        FleetControllerSource::CurrentProject => "current_project",
-        FleetControllerSource::UserDefault => "user_default",
-    }
-}
-
-fn fleet_projects_for_output(
-    project_root: &Path,
-    config: &ProjectConfigFile,
-) -> Vec<LinkedProject> {
-    metactl::project::discover_linked_projects(project_root, config)
-}
-
-fn select_fleet_projects(
-    project_root: &Path,
-    config: &ProjectConfigFile,
-    ids: &[String],
-    include_disabled: bool,
-) -> std::result::Result<Vec<LinkedProject>, CliError> {
-    let projects = fleet_projects_for_output(project_root, config);
-    let selected = projects
-        .into_iter()
-        .filter(|project| ids.is_empty() || ids.iter().any(|id| id == &project.id))
-        .filter(|project| include_disabled || project.status != LinkedProjectStatus::Disabled)
-        .collect::<Vec<_>>();
-    if !ids.is_empty() {
-        let found = selected
-            .iter()
-            .map(|project| project.id.as_str())
-            .collect::<BTreeSet<_>>();
-        let missing = ids
-            .iter()
-            .filter(|id| !found.contains(id.as_str()))
-            .cloned()
-            .collect::<Vec<_>>();
-        if !missing.is_empty() {
-            return Err(CliError::new(
-                EXIT_STATE,
-                format!("linked project id(s) not found: {}", missing.join(", ")),
-            ));
-        }
-    }
-    Ok(selected)
-}
-
-fn linked_project_json(project: &LinkedProject) -> Value {
-    json!({
-        "id": project.id,
-        "path": project.path.to_string_lossy(),
-        "config_path": project.config_path.to_string_lossy(),
-        "profile": project.profile,
-        "status": linked_project_status_label(project.status),
-    })
-}
-
-fn fleet_project_list_json(project: &LinkedProject) -> Value {
-    let mut value = linked_project_json(project);
-    if project.status == LinkedProjectStatus::Ready {
-        if let Err(err) =
-            load_project_context(&project.path, None, project.profile.as_deref(), None)
-        {
-            value["status"] = json!("invalid_config");
-            value["result"] = json!("invalid_config");
-            value["message"] = json!(err.to_string());
-            let details = error_details(&err);
-            if !details.is_empty() {
-                value["details"] = json!(details);
-            }
-        }
-    }
-    value
-}
-
-fn fleet_project_status_json(project: &LinkedProject) -> Value {
-    let mut value = linked_project_json(project);
-    if project.status == LinkedProjectStatus::Ready {
-        match load_project_context(&project.path, None, project.profile.as_deref(), None) {
-            Ok(context) => {
-                let fleet_sync_adopt = fleet_sync_adopt_from_context(&context);
-                let stale = metactl::project::lock_stale_reason(&context).ok().flatten();
-                value["lock_stale"] = json!(stale.is_some());
-                value["stale_reason"] = json!(stale);
-                value["targets"] = json!(context.config_file.targets);
-                value["packs"] = json!(context.config_file.packs);
-                value["fleet_sync_adopt"] = json!(fleet_sync_adopt_label(fleet_sync_adopt));
-                value["needs_sync"] =
-                    json!(context.lock.targets.is_empty() || value["lock_stale"] == true);
-                attach_codex_skill_visibility(&mut value, &project.path);
-            }
-            Err(err) => {
-                value["status"] = json!("invalid_config");
-                value["result"] = json!("invalid_config");
-                value["message"] = json!(err.to_string());
-                let details = error_details(&err);
-                if !details.is_empty() {
-                    value["details"] = json!(details);
-                }
-            }
-        }
-    }
-    value
-}
-
-fn attach_codex_skill_visibility(value: &mut Value, project_root: &Path) {
-    if let Ok(visibility) = codex_skill_visibility_json(project_root) {
-        value["skill_visibility"] = visibility;
-    }
-}
-
-fn append_fleet_codex_skill_scope_note(lines: &mut Vec<String>) {
-    lines.push(format!("  Codex skill scope: {CODEX_FLEET_SCOPE_NOTE}"));
-    lines.push("  next: metactl skills add <repo-skill-path> --scope user".to_string());
-}
-
-fn linked_project_status_label(status: LinkedProjectStatus) -> &'static str {
-    match status {
-        LinkedProjectStatus::Ready => "ready",
-        LinkedProjectStatus::Disabled => "disabled",
-        LinkedProjectStatus::MissingPath => "missing_path",
-        LinkedProjectStatus::MissingConfig => "missing_config",
-    }
-}
-
 const DIRTY_WORKTREE_WARNING: &str =
     "Git worktree has uncommitted changes; sync may modify files alongside local edits.";
 
@@ -5012,97 +4451,22 @@ fn git_worktree_dirty(project_root: &Path) -> bool {
     !output.stdout.is_empty()
 }
 
-fn run_project_sync(
-    project: &LinkedProject,
-    fleet_sync_adopt: FleetSyncAdoptMode,
-) -> std::result::Result<Value, String> {
-    let exe = std::env::current_exe().map_err(|err| err.to_string())?;
-    let mut command = Command::new(exe);
-    command
-        .arg("--json")
-        .arg("--yes")
-        .arg("--no-input")
-        .arg("--project")
-        .arg(&project.path);
-    if let Some(profile) = project.profile.as_ref() {
-        command.arg("--profile").arg(profile);
+fn cmd_git(cli: &Cli, args: &GitArgs) -> std::result::Result<CommandOutput, CliError> {
+    let project_root = project_root(cli).map_err(internal_error)?;
+    match args.command {
+        GitCommand::Plan => {
+            let plan = git_plan::build(&project_root).map_err(internal_error)?;
+            let counts = &plan["counts"];
+            Ok(CommandOutput {
+                human: format!(
+                    "Projection Git plan (read-only): {} managed unchanged, {} managed edited, {} missing, {} unowned, {} unsafe aliases.\nReview every path with `metactl --json git plan`; no Git changes were made.",
+                    counts["managed_unchanged"], counts["managed_edited"],
+                    counts["missing"], counts["unowned"], counts["unsafe_alias"]
+                ),
+                json: success_json("git", Some(&project_root), plan),
+            })
+        }
     }
-    command.arg("sync");
-    if fleet_sync_adopt == FleetSyncAdoptMode::Patch {
-        command.arg("--adopt").arg("patch");
-    }
-    let output = command.output().map_err(|err| err.to_string())?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Err(if stderr.is_empty() { stdout } else { stderr });
-    }
-    serde_json::from_slice(&output.stdout).map_err(|err| err.to_string())
-}
-
-fn fleet_sync_adopt_for_project(project: &LinkedProject) -> Result<FleetSyncAdoptMode> {
-    let context = load_project_context(&project.path, None, project.profile.as_deref(), None)
-        .with_context(|| format!("load linked project {}", project.id))?;
-    Ok(fleet_sync_adopt_from_context(&context))
-}
-
-fn fleet_sync_adopt_from_context(context: &metactl::project::ProjectContext) -> FleetSyncAdoptMode {
-    context
-        .config_file
-        .defaults
-        .as_ref()
-        .and_then(|defaults| defaults.fleet_sync_adopt)
-        .unwrap_or(FleetSyncAdoptMode::Patch)
-}
-
-fn fleet_sync_adopt_label(mode: FleetSyncAdoptMode) -> &'static str {
-    match mode {
-        FleetSyncAdoptMode::Patch => "patch",
-        FleetSyncAdoptMode::Refuse => "refuse",
-    }
-}
-
-fn fleet_sync_command_label(mode: FleetSyncAdoptMode) -> &'static str {
-    match mode {
-        FleetSyncAdoptMode::Patch => "metactl sync --adopt patch",
-        FleetSyncAdoptMode::Refuse => "metactl sync",
-    }
-}
-
-fn write_fleet_sync_log(project_root: &Path, results: &[Value]) -> Result<()> {
-    let log_dir = project_root.join(".metactl").join("logs");
-    fs::create_dir_all(&log_dir).with_context(|| format!("create {}", log_dir.display()))?;
-    let entry = json!({
-        "timestamp": fleet_timestamp(),
-        "metactl_version": env!("CARGO_PKG_VERSION"),
-        "projects": results.iter().map(redact_fleet_log_project).collect::<Vec<_>>(),
-    });
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("fleet-sync.jsonl"))
-        .context("open fleet sync log")?;
-    use std::io::Write as _;
-    writeln!(file, "{}", entry).context("write fleet sync log")
-}
-
-fn redact_fleet_log_project(project: &Value) -> Value {
-    json!({
-        "id": project["id"],
-        "status": project["status"],
-        "result": project["result"],
-        "profile": project["profile"],
-    })
-}
-
-fn fleet_timestamp() -> String {
-    format!(
-        "{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|value| value.as_secs())
-            .unwrap_or_default()
-    )
 }
 
 fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput, CliError> {
@@ -5128,6 +4492,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
     let context = load_required_context(cli, &project_root)?;
     let stale_reason = metactl::project::lock_stale_reason(&context).map_err(internal_error)?;
     let stale = stale_reason.is_some();
+    let source_comparison = library_content_comparison(&context);
     let profile = profile_status_json(&context);
     let profile_resolution = profile_resolution_json(cli, &context);
     let discoverability = discoverability_report(&context, &ConfigOverrides::default());
@@ -5328,6 +4693,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         None => "ok".to_string(),
     };
     lines.push(format!("  Lock:    {}", lock_display));
+    lines.push(format!("  Library source: {}", source_comparison));
     lines.push(format!("  Profile: {}", profile_status_message(&profile)));
     if let Some(notice) = profile_resolution_notice(&profile_resolution) {
         lines.push(format!("  {notice}"));
@@ -5426,7 +4792,10 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
         }
     }
 
-    let needs_sync = stale || targets.is_empty() || !surface_mode_mismatches.is_empty();
+    let needs_sync = stale
+        || targets.is_empty()
+        || !surface_mode_mismatches.is_empty()
+        || source_comparison != "current";
     if !blocking_checks.is_empty() {
         lines.push(String::new());
         lines.push("Next: metactl doctor".to_string());
@@ -5458,6 +4827,7 @@ fn cmd_status(cli: &Cli, args: &StatusArgs) -> std::result::Result<CommandOutput
                     "auto_discovered": import_roots.len(),
                 },
                 "source_state": source_state,
+                "library_source_comparison": source_comparison,
                 "skill_visibility": codex_skill_visibility,
                 "agent_artifact_policy": agent_artifact_policy,
                 "instruction_noise": instruction_noise,
@@ -5590,7 +4960,6 @@ fn cmd_list(cli: &Cli, args: &ListArgs) -> std::result::Result<CommandOutput, Cl
                 .into_iter()
                 .filter(|item| !args.installed || installed.contains(&item.manifest.id))
                 .filter(|item| args.candidate || !is_candidate_pack(&item.promotion_status))
-                .filter(|_| args.starter_only || !args.starter_only)
                 .map(|item| {
                     json!({
                         "id": item.manifest.id,
@@ -6249,7 +5618,7 @@ fn background_run_output(
     results: Vec<Value>,
     failures: usize,
 ) -> std::result::Result<CommandOutput, CliError> {
-    let lines = vec![
+    let lines = [
         "Background refresh complete.".to_string(),
         format!("Scope: {}", scope.as_str()),
         format!("Projects: {}", results.len()),
@@ -6417,7 +5786,7 @@ fn background_scheduler_plan_for_os(
             &stderr_path,
         );
         let uid = current_uid_string().unwrap_or_else(|| "$(id -u)".to_string());
-        return Ok(BackgroundSchedulerPlan {
+        Ok(BackgroundSchedulerPlan {
             scope,
             project_root,
             label: label.clone(),
@@ -6465,7 +5834,7 @@ fn background_scheduler_plan_for_os(
                 ],
                 vec!["rm".to_string(), plist_path.to_string_lossy().to_string()],
             ],
-        });
+        })
     }
     #[cfg(target_os = "linux")]
     {
@@ -7159,10 +6528,11 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         .registry
         .as_ref()
         .map(|registry| {
-            registry.surface_summaries_for_target(
+            registry.surface_summaries_for_target_with_auto_selection(
                 &explain.resolve_graph.activated_pack_refs,
                 &explain_target,
                 selected_surface_mode.clone(),
+                explain.resolve_graph.auto_surface_selection.as_ref(),
             )
         })
         .transpose()
@@ -7202,11 +6572,13 @@ fn cmd_explain(cli: &Cli, args: &ExplainArgs) -> std::result::Result<CommandOutp
         &project_root,
         args.query.as_deref(),
         &explain,
-        &target_projection,
-        &surface_usage_summary,
-        surface_details.as_deref(),
-        pack_lifecycle.as_ref(),
-        &pack_sources,
+        ExplainOutputContext {
+            target_projection: &target_projection,
+            surface_usage_summary: &surface_usage_summary,
+            surface_details: surface_details.as_deref(),
+            pack_lifecycle: pack_lifecycle.as_ref(),
+            pack_sources: &pack_sources,
+        },
     );
     if let Some(notice) = profile_resolution_notice(&profile_resolution) {
         output.human.push_str(&format!("\n{notice}"));
@@ -7286,21 +6658,25 @@ fn cmd_sync(cli: &Cli, args: &SyncArgs) -> std::result::Result<CommandOutput, Cl
             target: None,
             mode: None,
             preview: true,
+            plan_digest: None,
         },
         Some(SyncAdoptArg::Patch) => ApplyArgs {
             target: None,
             mode: Some(ApplyModeArg::Patch),
             preview: false,
+            plan_digest: args.plan_digest.clone(),
         },
         Some(SyncAdoptArg::Takeover) => ApplyArgs {
             target: None,
             mode: Some(ApplyModeArg::Takeover),
             preview: false,
+            plan_digest: args.plan_digest.clone(),
         },
         None => ApplyArgs {
             target: None,
             mode: None,
             preview: false,
+            plan_digest: args.plan_digest.clone(),
         },
     };
 
@@ -7660,6 +7036,8 @@ fn cmd_compile_with_durable_writes(
         .as_ref()
         .and_then(|profile| profile.digest.clone());
     lock.local_config_digest = current_local_config_digest(&context).map_err(internal_error)?;
+    lock.library_content_digest =
+        Some(library_content_digest(&context.library_roots).map_err(internal_error)?);
     lock.updated_at = Some(now_string());
 
     for target_id in target_overrides {
@@ -7767,6 +7145,7 @@ fn cmd_compile_with_durable_writes(
         compiled_targets.push(json!({
             "target": target.target_id,
             "generated_outputs": compile.compile_manifest.generated_outputs.iter().map(|item| item.path.clone()).collect::<Vec<_>>(),
+            "pruned_outputs": compile.compile_manifest.pruned_outputs,
             "degradations": compile.compile_manifest.degradations,
             "apply_modes_supported": compile.compile_manifest.apply_modes_supported,
             "surface_selection_mode": compile.compile_manifest.surface_selection_mode.as_ref().map(surface_selection_mode_label),
@@ -7788,18 +7167,33 @@ fn cmd_compile_with_durable_writes(
                 .map(|a| a.len())
                 .unwrap_or(0);
             let degradations = ct["degradations"].as_array().map(|a| a.len()).unwrap_or(0);
+            let pruned = ct["pruned_outputs"]
+                .as_array()
+                .map(|items| items.len())
+                .unwrap_or(0);
             let surface_mode = ct["surface_selection_mode"]
                 .as_str()
                 .map(|mode| format!(", surface: {mode}"))
                 .unwrap_or_default();
-            let note = if degradations > 0 {
-                format!(
-                    " ({} degradation{})",
+            let mut notes = Vec::new();
+            if pruned > 0 {
+                notes.push(format!(
+                    "{} stale output{} pruned",
+                    pruned,
+                    if pruned == 1 { "" } else { "s" }
+                ));
+            }
+            if degradations > 0 {
+                notes.push(format!(
+                    "{} degradation{}",
                     degradations,
                     if degradations == 1 { "" } else { "s" }
-                )
-            } else {
+                ));
+            }
+            let note = if notes.is_empty() {
                 String::new()
+            } else {
+                format!(" ({})", notes.join(", "))
             };
             human_lines.push(format!(
                 "  {} ({} output{}{}{})",
@@ -7839,6 +7233,7 @@ fn cmd_compile_with_durable_writes(
     let apply_out = cmd_apply(
         cli,
         &ApplyArgs {
+            plan_digest: None,
             target: None,
             mode: args.apply_mode,
             preview: false,
@@ -7866,8 +7261,15 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
     }
     let kernel = kernel_from_context(&context).map_err(internal_error)?;
     let targets = select_locked_targets(&context.lock, args.target.clone())?;
+    if args.plan_digest.is_some() && targets.len() != 1 {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "--plan-digest requires exactly one selected target.",
+        ));
+    }
     let mut outputs = Vec::new();
     let mut notes = Vec::new();
+    let mut prepared_targets = Vec::new();
     for target in targets {
         let manifest_path = project_root.join(&target.compile_manifest_path);
         let manifest = load_compile_manifest(&manifest_path).map_err(state_error)?;
@@ -7881,22 +7283,78 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             &manifest,
             target_capability.as_ref(),
         )?;
+        prepared_targets.push((target, manifest, apply_mode, note));
+    }
+    // Single-target apply already checks access after conflict/stale-plan checks.
+    // For multiple targets, catch later access failures before earlier targets write.
+    if !args.preview && prepared_targets.len() > 1 {
+        for (_, manifest, apply_mode, _) in &prepared_targets {
+            if !kernel
+                .preflight_compiled_outputs_access(&project_root, manifest, apply_mode)
+                .map_err(state_error)?
+            {
+                break;
+            }
+        }
+    }
+    for (target, manifest, apply_mode, note) in prepared_targets {
         if let Some(note) = note {
             notes.push(note);
         }
+        let review_plan = kernel
+            .apply_review_plan(&project_root, &manifest, &apply_mode)
+            .map_err(state_error)?;
+        let plan_path =
+            write_apply_review_plan(&project_root, &review_plan).map_err(internal_error)?;
+        let action_total = review_plan.actions.len();
+        let hidden_count = action_total.saturating_sub(MACHINE_LIST_LIMIT);
         if args.preview {
             outputs.push(json!({
                 "target": target.target.id,
                 "apply_mode": apply_mode,
-                "preview": preview_manifest(&project_root, &manifest),
+                "plan_digest": review_plan.digest,
+                "plan_path": plan_path,
+                "actions": review_plan.actions,
+                "actions_total_count": action_total,
+                "actions_hidden_count": hidden_count,
+                "render_authorizing": false,
+                "complete_plan_authorizing": true,
             }));
             continue;
         }
+        let expected_digest = args
+            .plan_digest
+            .as_deref()
+            .unwrap_or(review_plan.digest.as_str());
         let report = kernel
-            .apply_compiled_outputs(&project_root, &manifest, &apply_mode)
+            .apply_compiled_outputs_bound(&project_root, &manifest, &apply_mode, expected_digest)
             .map_err(state_error)?;
         if !report.conflicts.is_empty() {
-            return Err(conflict_error(&report));
+            let receipt_status = if report
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.detail.starts_with("compensated_failure:"))
+            {
+                "compensated_failure"
+            } else if report
+                .conflicts
+                .iter()
+                .any(|conflict| conflict.detail.starts_with("failed_partial:"))
+            {
+                "failed_partial"
+            } else {
+                "conflict"
+            };
+            let receipt_path =
+                write_apply_receipt(&project_root, &review_plan, receipt_status, &report)
+                    .map_err(internal_error)?;
+            let mut err = conflict_error(&report);
+            err.details.push(format!("Receipt: {receipt_path}"));
+            if let Some(object) = err.json.as_object_mut() {
+                object.insert("plan_digest".to_string(), json!(review_plan.digest));
+                object.insert("receipt_path".to_string(), json!(receipt_path));
+            }
+            return Err(err);
         }
         append_history_entry(
             &project_root,
@@ -7910,11 +7368,27 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             },
         )
         .map_err(internal_error)?;
+        let receipt_status =
+            if review_plan.actions.iter().all(|action| {
+                action.before_digest.as_deref() == Some(action.desired_digest.as_str())
+            }) {
+                "noop"
+            } else {
+                "success"
+            };
+        let receipt_path =
+            write_apply_receipt(&project_root, &review_plan, receipt_status, &report)
+                .map_err(internal_error)?;
         outputs.push(json!({
             "target": report.target.id,
             "apply_mode": apply_mode,
             "applied_paths": report.applied_paths,
             "state_path": report.state_path,
+            "plan_digest": review_plan.digest,
+            "plan_path": plan_path,
+            "receipt_path": receipt_path,
+            "actions_total_count": action_total,
+            "actions_hidden_count": hidden_count,
         }));
     }
     update_managed_files_index(&project_root).map_err(internal_error)?;
@@ -7929,7 +7403,7 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
             let target_id = output["target"].as_str().unwrap_or("unknown");
             let apply_mode = output["apply_mode"].as_str().unwrap_or("unknown");
             let paths = if args.preview {
-                output["preview"]
+                output["actions"]
                     .as_array()
                     .map(|items| {
                         items
@@ -7951,8 +7425,43 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
                 paths.len(),
                 if paths.len() == 1 { "" } else { "s" }
             ));
-            for path in &paths {
-                human_lines.push(format!("    {}", path));
+            for path in paths.iter().take(MACHINE_LIST_LIMIT) {
+                if args.preview {
+                    let action = output["actions"].as_array().and_then(|actions| {
+                        actions
+                            .iter()
+                            .find(|action| action["destination_path"].as_str() == Some(path))
+                    });
+                    if let Some(action) = action {
+                        human_lines.push(format!(
+                            "    {} [{}; {}; approval: {}]",
+                            path,
+                            action["classification"].as_str().unwrap_or("unknown"),
+                            action["reason_code"].as_str().unwrap_or("unknown"),
+                            action["approval_required"].as_bool().unwrap_or(false)
+                        ));
+                        human_lines.push(format!(
+                            "      {}",
+                            action["consequence"]
+                                .as_str()
+                                .unwrap_or("Consequence unavailable.")
+                        ));
+                    }
+                } else {
+                    human_lines.push(format!("    {}", path));
+                }
+            }
+            if let Some(digest) = output["plan_digest"].as_str() {
+                human_lines.push(format!("    plan digest: {digest}"));
+            }
+            if let Some(path) = output["plan_path"].as_str() {
+                human_lines.push(format!("    complete plan: {path}"));
+            }
+            let hidden = output["actions_hidden_count"].as_u64().unwrap_or(0);
+            if hidden > 0 {
+                human_lines.push(format!(
+                    "    {hidden} action(s) hidden here; this rendered summary cannot authorize apply"
+                ));
             }
         }
         project_human_output(&project_root, human_lines.join("\n"))
@@ -8816,16 +8325,27 @@ fn search_output(
     }
 }
 
+struct ExplainOutputContext<'a> {
+    target_projection: &'a Value,
+    surface_usage_summary: &'a Value,
+    surface_details: Option<&'a [metactl::library_registry::PackSurfaceSummary]>,
+    pack_lifecycle: Option<&'a std::collections::BTreeMap<String, metactl::PackLifecycle>>,
+    pack_sources: &'a Value,
+}
+
 fn explain_output(
     project_root: &Path,
     query: Option<&str>,
     explain: &ExplainResult,
-    target_projection: &Value,
-    surface_usage_summary: &Value,
-    surface_details: Option<&[metactl::library_registry::PackSurfaceSummary]>,
-    pack_lifecycle: Option<&std::collections::BTreeMap<String, metactl::PackLifecycle>>,
-    pack_sources: &Value,
+    context: ExplainOutputContext<'_>,
 ) -> CommandOutput {
+    let ExplainOutputContext {
+        target_projection,
+        surface_usage_summary,
+        surface_details,
+        pack_lifecycle,
+        pack_sources,
+    } = context;
     let mut lines = vec![explain.summary.clone()];
     if let Some(query) = query {
         lines.push(format!("Query context: {query}"));
@@ -8858,6 +8378,23 @@ fn explain_output(
                 .iter()
                 .map(|item| format!("- {item}")),
         );
+    }
+    if let Some(selection) = explain.resolve_graph.auto_surface_selection.as_ref() {
+        lines.push("Saved Auto-selection:".to_string());
+        for (label, ids) in [
+            ("selected", &selection.selected_surface_ids),
+            ("pinned", &selection.pinned_surface_ids),
+            ("blocked", &selection.blocked_surface_ids),
+        ] {
+            lines.push(if ids.is_empty() {
+                format!("- {label}: none")
+            } else {
+                format!(
+                    "- {label}: {}",
+                    ids.iter().cloned().collect::<Vec<_>>().join(", ")
+                )
+            });
+        }
     }
     lines.push("Projection:".to_string());
     if let Some(summary) = target_projection["summary"].as_str() {
@@ -9013,52 +8550,70 @@ fn normalize_apply_mode(
     )))
 }
 
-fn preview_manifest(project_root: &Path, manifest: &CompileManifest) -> Vec<serde_json::Value> {
-    let managed_index = load_managed_index(project_root);
-    manifest
-        .generated_outputs
-        .iter()
-        .map(|item| {
-            let destination = item.destination_path.clone().unwrap_or_default();
-            let destination_abs = project_root.join(&destination);
-            let classification = if managed_index.contains(&destination) {
-                "managed"
-            } else if destination_abs.exists() {
-                "unmanaged-existing"
-            } else {
-                "new"
-            };
-            json!({
-                "destination_path": destination,
-                "staged_path": item.path,
-                "classification": classification,
-            })
-        })
-        .collect()
+fn write_apply_review_plan(project_root: &Path, plan: &metactl::ApplyReviewPlan) -> Result<String> {
+    let relative = Path::new(".metactl")
+        .join("plans")
+        .join(format!("{}.json", plan.target.id));
+    let path = project_root.join(&relative);
+    atomic_write(
+        &path,
+        &serde_json::to_vec_pretty(plan).context("serialize complete apply plan")?,
+    )?;
+    restrict_private_file(&path)?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn load_managed_index(project_root: &Path) -> BTreeSet<String> {
-    let path = project_root.join(".metactl/state/managed_files.json");
-    let Ok(raw) = fs::read(&path) else {
-        return BTreeSet::new();
+fn write_apply_receipt(
+    project_root: &Path,
+    plan: &metactl::ApplyReviewPlan,
+    status: &str,
+    report: &ApplyReport,
+) -> Result<String> {
+    let digest_name = plan.digest.strip_prefix("sha256:").unwrap_or(&plan.digest);
+    let relative = Path::new(".metactl")
+        .join("receipts")
+        .join(&plan.target.id)
+        .join(format!("{digest_name}.json"));
+    let path = project_root.join(&relative);
+    let receipt = metactl::ApplyReceipt {
+        schema_version: "metactl.apply-receipt.v1".to_string(),
+        plan_digest: plan.digest.clone(),
+        target: plan.target.clone(),
+        status: status.to_string(),
+        applied_paths: report.applied_paths.clone(),
+        conflicts: report.conflicts.clone(),
+        state_path: Some(report.state_path.clone()),
+        journal_path: Some(
+            Path::new(".metactl")
+                .join("state")
+                .join("apply-journal")
+                .join(&plan.target.id)
+                .join(format!("{digest_name}.jsonl"))
+                .to_string_lossy()
+                .replace('\\', "/"),
+        ),
+        rollback_command: format!("metactl revert --target {}", plan.target.id),
+        backup_retention:
+            "Project-private until successful verified rollback or explicit operator cleanup."
+                .to_string(),
     };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&raw) else {
-        return BTreeSet::new();
-    };
-    value
-        .as_object()
-        .into_iter()
-        .flat_map(|map| map.values())
-        .filter_map(|items| items.as_array())
-        .flat_map(|items| items.iter())
-        .filter_map(|item| {
-            item.as_str().map(ToString::to_string).or_else(|| {
-                item.get("destination_path")
-                    .and_then(|value| value.as_str())
-                    .map(ToString::to_string)
-            })
-        })
-        .collect()
+    atomic_write(
+        &path,
+        &serde_json::to_vec_pretty(&receipt).context("serialize apply receipt")?,
+    )?;
+    restrict_private_file(&path)?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(unix)]
+fn restrict_private_file(path: &Path) -> Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restrict permissions on {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn restrict_private_file(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn shared_surface_rules(
@@ -10336,24 +9891,27 @@ fn stale_lock_error() -> CliError {
 }
 
 fn operation_lock_error(error: anyhow::Error) -> CliError {
-    let message = error.to_string();
-    let mut err = CliError::new(EXIT_STATE, message.clone()).with_details(vec![
-        "Next: wait for the active command to finish before retrying.".to_string(),
-        "If no metactl process is running, inspect the repo and remove .metactl/state/operation.lock.".to_string(),
-    ]);
+    use metactl::project::OperationLockError;
+    let Some(lock_error) = error.downcast_ref::<OperationLockError>() else {
+        return state_error(error);
+    };
+    let steps = lock_error.next_steps();
+    let mut err = CliError::new(EXIT_STATE, lock_error.to_string())
+        .with_details(steps.iter().map(|step| format!("Next: {step}")).collect());
     if let Some(obj) = err.json.as_object_mut() {
-        obj.insert("code".to_string(), json!("operation_lock_active"));
+        obj.insert("code".to_string(), json!(lock_error.code()));
         obj.insert("category".to_string(), json!("project_state"));
-        if message.contains("stale metactl operation lock") {
-            obj.insert("code".to_string(), json!("operation_lock_stale"));
+        obj.insert("path".to_string(), json!(lock_error.path()));
+        obj.insert("next_steps".to_string(), json!(steps));
+        if let OperationLockError::Io {
+            operation, source, ..
+        } = lock_error
+        {
+            obj.insert("operation".to_string(), json!(operation));
+            obj.insert("io_kind".to_string(), json!(format!("{:?}", source.kind())));
+            obj.insert("raw_os_error".to_string(), json!(source.raw_os_error()));
+            obj.insert("cause".to_string(), json!(source.to_string()));
         }
-        obj.insert(
-            "next_steps".to_string(),
-            json!([
-                "wait for the active command to finish",
-                "if stale, inspect the repo and remove .metactl/state/operation.lock"
-            ]),
-        );
     }
     err
 }
@@ -11544,7 +11102,7 @@ fn repo_gitignore_can_hide(path: &Path, patterns: &[&str]) -> bool {
                 .lines()
                 .map(str::trim)
                 .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                .any(|line| patterns.iter().any(|pattern| line == *pattern))
+                .any(|line| patterns.contains(&line))
         })
         .unwrap_or(false)
 }
@@ -11605,6 +11163,7 @@ fn git_ignore_patterns(
 
     if targets.iter().any(|target| target == "codex-cli") {
         patterns.insert(".codex/".to_string());
+        patterns.insert(".agents/".to_string());
     }
     if targets.iter().any(|target| target == "claude-code") {
         patterns.insert(".claude/".to_string());
@@ -11636,9 +11195,12 @@ fn cursor_allowlist_patterns(targets: &[String]) -> Vec<String> {
         patterns.extend(
             [
                 "!/AGENTS.md",
+                "!/.agents/",
+                "!/.agents/skills/",
+                "!/.agents/skills/**",
                 "!/.codex/",
-                "!/.codex/skills/",
-                "!/.codex/skills/**",
+                "!/.codex/commands/",
+                "!/.codex/commands/**",
             ]
             .iter()
             .map(|item| item.to_string()),
@@ -11820,6 +11382,7 @@ fn ignore_scope_label(scope: IgnoreScopeArg) -> &'static str {
 
 mod cli_demo;
 mod cli_export;
+mod cli_fleet;
 mod cli_hook;
 mod cli_pack;
 mod cli_plugin;
@@ -11829,6 +11392,10 @@ mod cli_source;
 
 use cli_demo::cmd_demo;
 use cli_export::{cmd_check_public_boundary, cmd_export, public_boundary_findings};
+use cli_fleet::{
+    cmd_fleet, fleet_projects_for_output, linked_project_status_label, resolve_fleet_controller,
+    FleetControllerContext, FleetControllerSource,
+};
 use cli_pack::{
     cmd_pack, codex_user_skill_root, codex_user_skill_root_for_command, ensure_codex_skill_target,
     ensure_removable_user_skill_dir, replace_existing_user_skill_dir, resolve_skill_source_dir,

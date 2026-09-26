@@ -1,0 +1,15 @@
+{
+  "kind": "pack",
+  "id": "skill-discovery",
+  "version": "1.0.1",
+  "title": "Optional Skill Discovery",
+  "description": "Small entrypoint for project-bound specialist discovery without requiring a model provider.",
+  "activation_class": "instruction",
+  "side_effect_class": "none",
+  "trust_tier": "first_party_validated",
+  "requires_confirmation": false,
+  "compatible_roles": ["builder", "reviewer"],
+  "compatible_targets": ["codex-cli"],
+  "resources": [{"path": "packs/skill-discovery/SKILL.md", "kind": "instruction", "required": true, "surface_relevance": "always_on"}],
+  "metadata": {"support": "experimental; projection tested, native request inspection pending"}
+}

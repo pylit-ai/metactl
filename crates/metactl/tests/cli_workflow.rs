@@ -13,6 +13,8 @@ mod error_paths_workflow;
 mod explain_status_workflow;
 #[path = "cli_workflow/fleet.rs"]
 mod fleet_workflow;
+#[path = "cli_workflow/git.rs"]
+mod git_workflow;
 #[path = "cli_workflow/ignore.rs"]
 mod ignore_workflow;
 #[path = "cli_workflow/plugin.rs"]
@@ -812,6 +814,80 @@ Run release verification and produce a handoff.
 }
 
 #[test]
+fn cli_skills_add_reports_frontmatter_limit_and_counts_characters() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+    let skill_root = project.path().join("description-skill");
+    fs::create_dir_all(&skill_root).expect("skill dir");
+    fs::write(
+        skill_root.join("SKILL.md"),
+        format!(
+            "---\nname: description-skill\ndescription: {}\n---\n\n# Skill\n",
+            "x".repeat(513)
+        ),
+    )
+    .expect("overlong description");
+    let rejected = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(!rejected.status.success());
+    let rejected_json = json_output(&rejected);
+    assert!(rejected_json["details"][0]
+        .as_str()
+        .unwrap_or_default()
+        .contains("frontmatter.description must be 1..512 characters"));
+
+    fs::write(
+        skill_root.join("SKILL.md"),
+        "---\nname: description-skill\ndescription: [unclosed\n---\n\n# Skill\n",
+    )
+    .expect("malformed YAML");
+    let malformed = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(!malformed.status.success());
+    let malformed_json = json_output(&malformed);
+    assert!(
+        malformed_json["details"][0]
+            .as_str()
+            .unwrap_or_default()
+            .contains("line"),
+        "{malformed_json}"
+    );
+
+    fs::write(
+        skill_root.join("SKILL.md"),
+        format!(
+            "---\nname: description-skill\ndescription: {}\n---\n\n# Skill\n",
+            "é".repeat(512)
+        ),
+    )
+    .expect("512-character description");
+    let accepted = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "add",
+            skill_root.to_str().expect("skill path"),
+        ],
+    );
+    assert!(accepted.status.success(), "{}", stderr(&accepted));
+}
+
+#[test]
 fn cli_pack_import_skill_rejects_unsafe_agent_skill_fixtures() {
     let project = TempDir::new().expect("tempdir");
 
@@ -1386,19 +1462,15 @@ fn cli_target_native_harness_outputs() {
 
     let sync = run_cli(project.path(), &["sync"]);
     assert!(sync.status.success(), "{}", stderr(&sync));
-    // Spec 019 plus Codex command support: codex-cli emits AGENTS.md,
-    // .codex/skills/..., and project slash commands under .codex/commands.
-    // Other .codex/* paths (rules, plugins, scripts, hooks, config.toml)
-    // are not real Codex project surfaces and remain removed.
+    // Codex emits AGENTS.md and project skills under .agents/skills.
+    // Legacy .codex/commands output is not generated in new projects.
+    // Existing installations retain it until a separate safe migration.
     assert!(project.path().join("AGENTS.md").exists());
     assert!(project
         .path()
-        .join(".codex/skills/unit-test-loop/unit-test-loop/SKILL.md")
+        .join(".agents/skills/unit-test-loop/unit-test-loop/SKILL.md")
         .exists());
-    assert!(project
-        .path()
-        .join(".codex/commands/run-targeted-tests.md")
-        .exists());
+    assert!(!project.path().join(".codex/commands").exists());
     assert!(!project.path().join(".codex/config.toml").exists());
     assert!(!project.path().join(".codex/rules").exists());
     assert!(!project.path().join(".codex/plugins").exists());
@@ -1651,6 +1723,48 @@ fn local_config_layer_additive_packs_and_staleness() {
         "expected stale lock after local config change: {}",
         stdout(&compile_stale)
     );
+}
+
+#[test]
+fn skills_select_persists_machine_local_auto_selection_and_rejects_unknown_ids() {
+    let project = TempDir::new().expect("tempdir");
+    init_project(project.path());
+
+    let selected = run_cli(
+        project.path(),
+        &[
+            "--json",
+            "skills",
+            "select",
+            "metactl-skill-library-curator:metactl-skill-library-curator",
+            "--mode",
+            "pin",
+        ],
+    );
+    assert!(selected.status.success(), "{}", stderr(&selected));
+    let json = json_output(&selected);
+    assert_eq!(json["decision"], "pinned");
+    assert_eq!(
+        json["selection"]["pinned_surface_ids"],
+        json!(["metactl-skill-library-curator:metactl-skill-library-curator"])
+    );
+    let local =
+        fs::read_to_string(project.path().join("metactl.local.yaml")).expect("read local config");
+    assert!(local.contains("surface_selection_mode: auto"));
+    assert!(local.contains("pinned_surface_ids"));
+
+    let unknown = run_cli(
+        project.path(),
+        &[
+            "skills",
+            "select",
+            "does-not-exist:surface",
+            "--mode",
+            "select",
+        ],
+    );
+    assert_eq!(unknown.status.code(), Some(13));
+    assert!(stderr(&unknown).contains("Unknown skill surface id"));
 }
 
 #[test]
@@ -2067,12 +2181,10 @@ fn walk_project_files(root: &Path, out: &mut Vec<PathBuf>) {
                 continue;
             }
             walk_project_files(&path, out);
-        } else if file_type.is_file() {
+        } else if file_type.is_file()
+            || (file_type.is_symlink() && path.metadata().map(|m| m.is_file()).unwrap_or(false))
+        {
             out.push(path);
-        } else if file_type.is_symlink() {
-            if path.metadata().map(|m| m.is_file()).unwrap_or(false) {
-                out.push(path);
-            }
         }
     }
 }

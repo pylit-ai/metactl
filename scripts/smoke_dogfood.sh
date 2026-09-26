@@ -105,7 +105,9 @@ EOF
 "$METACTL_BIN" --project "$PROJECT_ROOT" source add extra-packs "$EXTRA_SOURCE" --private >/dev/null
 "$METACTL_BIN" --project "$PROJECT_ROOT" source sync extra-packs >/dev/null
 SOURCE_LIST=$("$METACTL_BIN" --project "$PROJECT_ROOT" --json source list 2>/dev/null)
-if ! echo "$SOURCE_LIST" | grep -q "$EXTRA_SOURCE"; then
+# Shell substring checks avoid grep -q closing a large producer pipe early
+# under pipefail. The path is literal data, not a regular expression.
+if [[ "$SOURCE_LIST" != *"$EXTRA_SOURCE"* ]]; then
     echo "FAIL: source list should include added source path" >&2
     exit 1
 fi
@@ -124,7 +126,7 @@ echo "  [pass] cursor compile output paths"
 # 7. Status shows provenance layers
 # ========================================================================
 STATUS_OUTPUT=$("$METACTL_BIN" --project "$PROJECT_ROOT" status 2>/dev/null)
-if ! echo "$STATUS_OUTPUT" | grep -q "Layers:"; then
+if [[ "$STATUS_OUTPUT" != *"Layers:"* ]]; then
     echo "FAIL: status should show Layers section" >&2
     exit 1
 fi

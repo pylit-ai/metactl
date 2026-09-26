@@ -45,7 +45,7 @@ fn cmd_pack_import_skill(
     let skill_md = skill_dir.join("SKILL.md");
     let frontmatter = read_skill_frontmatter(&skill_md).map_err(|err| {
         CliError::new(EXIT_VALIDATION, "Agent Skill frontmatter is invalid.")
-            .with_details(error_details(&err))
+            .with_details(vec![format!("{err:#}")])
     })?;
     let files = collect_skill_files(&skill_dir).map_err(|err| {
         CliError::new(EXIT_VALIDATION, "Agent Skill import safety check failed.")
@@ -248,7 +248,7 @@ pub(super) fn resolve_skill_source_dir(project_root: &Path, input: &Path) -> Res
 
     let name = input.to_string_lossy();
     validate_skill_name(&name)?;
-    let repo_root = project_root.join(".codex").join("skills");
+    let repo_root = project_root.join(".agents").join("skills");
     let matches = discover_codex_skill_entries(&repo_root)?
         .into_iter()
         .filter(|entry| entry.name == name)
