@@ -115,19 +115,23 @@ The raw equivalent for `setup --target codex-cli --yes` is still `init`:
 metactl init --target codex-cli --no-input
 ```
 
-For generated adapter noise, repair in two steps. The plan reports ignore-file
-writes and any Git-index untracking before mutation:
+For MetaCTL-local state, repair in two steps. The plan reports ignore-file
+writes before mutation:
 
 ```bash
 metactl ignore status
 metactl ignore fix --plan --scope both
-metactl ignore fix --scope both --untrack-generated --yes
+metactl ignore fix --scope both --yes
 ```
 
-`--untrack-generated --yes` removes generated roots such as `.codex/` or
-`.claude/` from the Git index only. It does not delete files from disk. Root
-adapter docs such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are not treated
-as generated roots by this repair.
+Agent roots such as `.agents/`, `.codex/`, and `.claude/` can contain authored
+content. The ignore commands keep those roots visible and tracked; an old broad
+MetaCTL-managed ignore block is replaced by the safer policy. The
+`--untrack-generated` flag is currently refused. Root adapter docs such as
+`AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` remain outside this repair.
+Each changed ignore file leaves a reported copy under the private,
+Git-ignored `.metactl/ignore-recovery/` directory. Keep it until any
+concurrent edit has been reconciled; MetaCTL does not delete it.
 
 Project pack activation has both top-level and object-oriented aliases:
 
