@@ -179,9 +179,13 @@ available, then make one baseline discovery call and inspect its
 Follow the [agent adapter guide](docs/user/discovery-agent-adapters.md) for
 target-specific configuration and the [first-run workflow](docs/user/skill-discovery.md#first-run-workflow)
 for evidence at each step.
-Jev is **optional and off by default**. Follow the [activation and verification
-guide](docs/user/skill-discovery.md#shared-gateway-and-measured-trials) for
-secret injection, data consent, bounded requests, status, live checks and rollback.
+Jev is **optional and off by default**. Operators with an approved gateway can
+[enable saved preferences for explicitly enrolled projects](docs/user/skill-discovery.md#enable-jev-once-for-managed-projects)
+and connect clients with `--use-preferences`. That choice persists across tasks;
+unambiguous requests still use local discovery. See the
+[status command map and budget layers](docs/user/skill-discovery.md#check-status-and-limits)
+for free checks, receipt interpretation and the limits that can stop Jev calls.
+For a bounded experiment, use the [gateway trial workflow](docs/user/skill-discovery.md#shared-gateway-and-measured-trials).
 
 In a frozen 12-query, 208-descriptor development fixture, deterministic discovery
 found **75% versus 35%** of relevant skills in the first five results. Median
