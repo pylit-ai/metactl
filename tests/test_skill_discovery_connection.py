@@ -48,9 +48,14 @@ class ConnectionFirstRun(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 original = 'model = "kept"\n' if target == "codex-cli" else '{"other":{"kept":true}}\n'
                 path.write_text(original)
+                before_preview = {str(item.relative_to(self.base)): item.read_bytes()
+                                  for item in self.base.rglob("*") if item.is_file()}
                 preview = self.run_cli("skills", "connect", "--target", target, "--json")
                 self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
                 self.assertEqual(path.read_text(), original)
+                after_preview = {str(item.relative_to(self.base)): item.read_bytes()
+                                 for item in self.base.rglob("*") if item.is_file()}
+                self.assertEqual(after_preview, before_preview)
                 self.assertEqual(json.loads(preview.stdout)["provider_calls"], 0)
                 preview_args = json.loads(preview.stdout)["args"]
                 self.assertTrue(pathlib.Path(preview_args[preview_args.index("--python") + 1]).is_absolute())
@@ -134,6 +139,17 @@ class ConnectionFirstRun(unittest.TestCase):
         config = (self.project / ".codex/config.toml").read_text()
         command = json.loads(re.search(r'^command = (.+)$', config, re.MULTILINE).group(1))
         args = json.loads(re.search(r'^args = (.+)$', config, re.MULTILINE).group(1))
+        wire = "\n".join(json.dumps(request) for request in (
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )) + "\n"
+        mcp = subprocess.run([command, *args], env=self.env, text=True,
+                             input=wire, capture_output=True, timeout=25)
+        self.assertEqual(mcp.returncode, 0, mcp.stdout + mcp.stderr)
+        responses = [json.loads(line) for line in mcp.stdout.splitlines()]
+        self.assertEqual(responses[0]["result"]["serverInfo"]["name"], "metactl-skill-discovery")
+        tool_names = {tool["name"] for tool in responses[1]["result"]["tools"]}
+        self.assertTrue({"discover_skills", "load_skill"}.issubset(tool_names))
         call = subprocess.run([command, *args, "--call-tool", "discover_skills"],
                               env=self.env, text=True, capture_output=True, timeout=25,
                               input=json.dumps({"query": "Review a small CLI user workflow"}))
@@ -316,6 +332,9 @@ class ConnectionFirstRun(unittest.TestCase):
         applied = self.run_cli("--no-profile", "skills", "connect", "--target", "cursor", "--apply")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
         original = path.read_text()
+        doctor = self.run_cli("skills", "doctor", "--target", "cursor")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertIn("--apply --replace", doctor.stdout)
         refused = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("--replace", refused.stderr)
@@ -394,6 +413,10 @@ class ConnectionFirstRun(unittest.TestCase):
         fake_python = self.base / "old-python"
         fake_python.write_text("#!/bin/sh\nexit 3\n")
         fake_python.chmod(0o755)
+        refused = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--python", str(fake_python), "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("host_failed", refused.stderr)
         failed = self.run_cli("skills", "doctor", "--target", "codex-cli",
                               "--python", str(fake_python), "--json")
         self.assertEqual(failed.returncode, 0, failed.stdout + failed.stderr)
@@ -485,6 +508,20 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("Cannot verify whether the target config is tracked", refused.stderr)
         self.assertFalse((self.project / ".cursor/mcp.json").exists())
+
+    def test_unignored_git_project_requires_explicit_opt_in(self):
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        preview = self.run_cli("skills", "connect", "--target", "claude-code", "--json")
+        self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
+        self.assertEqual(json.loads(preview.stdout)["git_visibility"], "unignored")
+        refused = self.run_cli("skills", "connect", "--target", "claude-code", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("--allow-unignored", refused.stderr)
+        self.assertFalse((self.project / ".mcp.json").exists())
+        allowed = self.run_cli("skills", "connect", "--target", "claude-code",
+                               "--apply", "--allow-unignored")
+        self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+        self.assertIn("metactl-skills", (self.project / ".mcp.json").read_text())
 
     def test_doctor_reports_states_when_python_or_config_is_unavailable(self):
         path = self.project / ".codex/config.toml"

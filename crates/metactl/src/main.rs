@@ -943,6 +943,9 @@ struct SkillsConnectArgs {
     /// Explicitly replace a managed registration with different profile or log options
     #[arg(long, conflicts_with = "remove")]
     replace: bool,
+    /// Allow machine-specific paths in a project config that Git does not ignore
+    #[arg(long, conflicts_with = "remove")]
+    allow_unignored: bool,
 }
 
 #[derive(Debug, Args)]

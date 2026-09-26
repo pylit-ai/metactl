@@ -990,8 +990,9 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
     if !options.remove {
         let (host, count) = offline_status(&command, &args);
         if host != "ready" || count.as_u64().unwrap_or(0) == 0 {
-            return Err(CliError::new(EXIT_STATE,
-                "Discovery catalog is not ready or has no eligible skills. Check Python 3.10+ (use --python if needed), the project/profile, then run `metactl skills host --status` and `metactl skills catalog --json`."));
+            return Err(CliError::new(EXIT_STATE, format!(
+                "Discovery host status is {host} (eligible skills: {}). Check Python 3.10+ (use --python if needed), the project/profile, then run `metactl skills host --status` and `metactl skills catalog --json`.",
+                count.as_u64().map(|value| value.to_string()).unwrap_or_else(|| "unknown".into()))));
         }
     }
     ensure_safe_destination(&path)?;
@@ -1022,9 +1023,29 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             options.replace,
         )?
     };
+    let visibility = git_visibility(&root, &path, options.scope);
     if options.apply || options.remove {
         if tracked(&root, &path)? {
-            return Err(CliError::new(EXIT_STATE, format!("{} is tracked by Git; choose user scope or untrack the machine-specific configuration first.", path.display())));
+            let remedy = if options.remove {
+                "Review and remove the managed server entry from the tracked file manually."
+            } else if options.target == "codex-cli" && options.scope == DiscoveryScopeArg::Project {
+                "Choose --scope user or use a reviewed local-only config."
+            } else {
+                "Use a reviewed local-only config or the manual adapter."
+            };
+            return Err(CliError::new(
+                EXIT_STATE,
+                format!("{} is tracked by Git; {}", path.display(), remedy),
+            ));
+        }
+        if options.apply
+            && old != new
+            && options.scope == DiscoveryScopeArg::Project
+            && visibility == "unignored"
+            && !options.allow_unignored
+        {
+            return Err(CliError::new(EXIT_STATE, format!(
+                "{} is not ignored by Git and would contain machine-specific paths. Add it to .git/info/exclude or a reviewed .gitignore, or rerun with --allow-unignored after reviewing the publication risk.", path.display())));
         }
         if old != new {
             if !options.remove {
@@ -1072,9 +1093,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             "project"
         }
     );
-    let visibility = git_visibility(&root, &path, options.scope);
     let git_note = if visibility == "unignored" {
-        "Machine-specific config is not ignored by Git. Add this path to .git/info/exclude or a reviewed .gitignore before committing."
+        "Machine-specific config is not ignored by Git. Add this path to .git/info/exclude or a reviewed .gitignore; --apply otherwise requires --allow-unignored."
     } else if visibility == "tracked" {
         "This config is tracked by Git, so --apply will refuse. Review a portable registration or move machine-specific settings to a local config."
     } else if visibility == "unknown" {
@@ -1094,7 +1114,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
                 "config_path": path, "server": SERVER, "command": command, "args": args,
                 "mode": "baseline", "provider_calls": 0, "event_log": ledger,
                 "entry_preview": entry,
-                "git_visibility": visibility, "native_acceptance_note": acceptance_note(&options.target, options.scope),
+                "git_visibility": visibility, "allow_unignored": options.allow_unignored,
+                "native_acceptance_note": acceptance_note(&options.target, options.scope),
                 "changed": old != new, "applied": options.apply || options.remove, "rollback": rollback,
                 "native_acceptance": "unknown", "benefit": "unknown"
             }),
@@ -1283,15 +1304,24 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
             }
         },
     };
-    let routing = if (log_status == "readable" || log_status == "partial") && observed > 0 {
+    let routing = if registered_log.is_some_and(|path| path != ledger.to_string_lossy().as_ref()) {
+        "unknown_log_path_drift"
+    } else if (log_status == "readable" || log_status == "partial") && observed > 0 {
         "observed"
     } else if matches!(log_status, "missing" | "readable" | "partial") {
         "unknown_no_event"
     } else {
         "unknown_log_error"
     };
+    let drift_hint = match drift {
+        Some("options_differ" | "event_log_differs") => {
+            "preview with --replace, then run --apply --replace"
+        }
+        Some(_) => "rerun skills connect --apply after an upgrade",
+        None => "",
+    };
     let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; rerun skills connect --apply after an upgrade)")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; {drift_hint})")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
     Ok(CommandOutput {
         human,
         json: success_json(

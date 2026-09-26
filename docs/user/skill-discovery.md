@@ -33,6 +33,10 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    this one project. Project scope is the default; Codex loads project config
    only when the project is trusted. The connector supports project config for
    `codex-cli`, `claude-code`, `cursor`, `gemini-cli`, and `opencode`.
+   In a Git project, an unignored config containing machine-specific paths
+   requires explicit `--allow-unignored` on apply. Prefer a reviewed local Git
+   exclusion for that config. Tracked configs are refused, including a tracked
+   user-scope Codex dotfile.
    `openclaw`, `filesystem-agent`, Pi and Omnigent have manual adapters; the
    connector reports that limitation explicitly. The entry is deterministic
    baseline with `provider_calls=0`; it does not turn on Jev. A private event
