@@ -2,7 +2,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -96,6 +96,246 @@ fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
         );
     }
     Ok(out.stdout)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct IndexStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    created: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+fn index_stamp(metadata: &fs::Metadata) -> IndexStamp {
+    #[cfg(unix)]
+    use std::os::unix::fs::MetadataExt;
+    IndexStamp {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        created: metadata.created().ok(),
+        #[cfg(unix)]
+        device: metadata.dev(),
+        #[cfg(unix)]
+        inode: metadata.ino(),
+    }
+}
+
+fn regular_index(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return false;
+        }
+    }
+    metadata.is_file() && !metadata.file_type().is_symlink()
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct IndexSnapshot {
+    parent: PathBuf,
+    state: Option<(IndexStamp, Vec<u8>)>,
+}
+
+fn snapshot_index(path: &Path) -> Result<IndexSnapshot> {
+    let parent_path = path
+        .parent()
+        .ok_or_else(|| anyhow!("Git index has no parent"))?;
+    let parent = fs::canonicalize(parent_path)?;
+    let resolved = parent.join(
+        path.file_name()
+            .ok_or_else(|| anyhow!("Git index has no filename"))?,
+    );
+    let metadata = match fs::symlink_metadata(&resolved) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(IndexSnapshot {
+                parent,
+                state: None,
+            });
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if !regular_index(&metadata) {
+        bail!("selected Git index must be a regular file");
+    }
+    let stamp = index_stamp(&metadata);
+    let mut file = fs::File::open(&resolved)?;
+    if index_stamp(&file.metadata()?) != stamp {
+        bail!("selected Git index changed during snapshot");
+    }
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    let current = fs::symlink_metadata(&resolved)?;
+    if !regular_index(&current)
+        || index_stamp(&current) != stamp
+        || index_stamp(&file.metadata()?) != stamp
+        || fs::canonicalize(parent_path)? != parent
+    {
+        bail!("selected Git index changed during snapshot");
+    }
+    Ok(IndexSnapshot {
+        parent,
+        state: Some((stamp, bytes)),
+    })
+}
+
+struct SelectedIndex {
+    project: PathBuf,
+    inherited: Option<std::ffi::OsString>,
+    path: PathBuf,
+    effective: PathBuf,
+    snapshot: IndexSnapshot,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct JunctionSnapshot {
+    link: PathBuf,
+    resolved: PathBuf,
+}
+
+fn namespace_junction(path: &Path) -> Result<Option<JunctionSnapshot>> {
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Ok(None)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        #[repr(C)]
+        struct AttributeTag {
+            attributes: u32,
+            tag: u32,
+        }
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn GetFileInformationByHandleEx(
+                handle: *mut std::ffi::c_void,
+                class: i32,
+                info: *mut std::ffi::c_void,
+                size: u32,
+            ) -> i32;
+        }
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .access_mode(0)
+            .share_mode(7)
+            .custom_flags(0x00200000 | 0x02000000)
+            .open(path)?;
+        let mut info = AttributeTag {
+            attributes: 0,
+            tag: 0,
+        };
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                file.as_raw_handle(),
+                9,
+                (&mut info as *mut AttributeTag).cast(),
+                std::mem::size_of::<AttributeTag>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error().into());
+        }
+        // IO_REPARSE_TAG_MOUNT_POINT identifies junctions; directory symlinks
+        // and unknown reparse kinds retain the strict parent refusal.
+        if info.tag != 0xA0000003 {
+            return Ok(None);
+        }
+        let link = fs::read_link(path)?;
+        let resolved = fs::canonicalize(path)?;
+        if !fs::metadata(&resolved)?.is_dir() {
+            bail!("junction target must be a directory");
+        }
+        if fs::read_link(path)? != link || fs::canonicalize(path)? != resolved {
+            bail!("junction changed during privacy snapshot");
+        }
+        Ok(Some(JunctionSnapshot { link, resolved }))
+    }
+}
+
+impl SelectedIndex {
+    fn capture(project: &Path) -> Result<Self> {
+        // Hooks may inherit an alternate or commit -a temporary index. Restore
+        // only that selection for source reads; every shadow command stays clean.
+        let inherited = std::env::var_os("GIT_INDEX_FILE");
+        Self::from_selection(project, inherited)
+    }
+
+    fn from_selection(project: &Path, inherited: Option<std::ffi::OsString>) -> Result<Self> {
+        let path = Self::selection(project, inherited.as_deref())?;
+        let snapshot = snapshot_index(&path)?;
+        let effective = Self::resolve(project, inherited.as_deref())?;
+        Ok(Self {
+            project: project.to_owned(),
+            inherited,
+            path,
+            effective,
+            snapshot,
+        })
+    }
+
+    fn selection(project: &Path, inherited: Option<&std::ffi::OsStr>) -> Result<PathBuf> {
+        if let Some(value) = inherited {
+            let path = PathBuf::from(value);
+            return Ok(if path.is_absolute() {
+                path
+            } else {
+                project.join(path)
+            });
+        }
+        // Do not resolve the index leaf here: --git-path with absolute output
+        // can resolve a symlink and conceal the unsafe selected leaf itself.
+        let directory = output(project, &["rev-parse", "--absolute-git-dir"])?;
+        Ok(PathBuf::from(String::from_utf8(directory)?.trim_end_matches('\n')).join("index"))
+    }
+
+    fn resolve(project: &Path, inherited: Option<&std::ffi::OsStr>) -> Result<PathBuf> {
+        let mut command = git(project);
+        if let Some(value) = inherited {
+            command.env("GIT_INDEX_FILE", value);
+        }
+        let result = command
+            .args(["rev-parse", "--path-format=absolute", "--git-path", "index"])
+            .output()?;
+        if !result.status.success() {
+            bail!(
+                "cannot resolve selected Git index: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        Ok(PathBuf::from(
+            String::from_utf8(result.stdout)?.trim_end_matches('\n'),
+        ))
+    }
+
+    fn output(&self, root: &Path, args: &[&str]) -> Result<Vec<u8>> {
+        let result = git(root)
+            .env("GIT_INDEX_FILE", git_path_argument(&self.path))
+            .args(args)
+            .output()?;
+        if !result.status.success() {
+            bail!(
+                "selected Git index enumeration failed: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        Ok(result.stdout)
+    }
+
+    fn revalidate(&self) -> Result<()> {
+        if Self::selection(&self.project, self.inherited.as_deref())? != self.path
+            || Self::resolve(&self.project, self.inherited.as_deref())? != self.effective
+            || snapshot_index(&self.path)? != self.snapshot
+        {
+            bail!("selected Git index changed during privacy preflight");
+        }
+        Ok(())
+    }
 }
 
 fn config(root: &Path, key: &str) -> Result<Option<String>> {
@@ -241,7 +481,6 @@ pub fn evaluate(
                 "GIT_DIR"
                     | "GIT_WORK_TREE"
                     | "GIT_COMMON_DIR"
-                    | "GIT_INDEX_FILE"
                     | "GIT_CEILING_DIRECTORIES"
                     | "GIT_DISCOVERY_ACROSS_FILESYSTEM"
             )
@@ -255,6 +494,23 @@ pub fn evaluate(
     )?;
     let project = fs::canonicalize(project)?;
     let prefix = project.strip_prefix(&root)?;
+    // Reading an ignore source may follow Git's source-specific link rules;
+    // proposed publication destinations must still be ordinary files.
+    for (path, _) in writes {
+        // An empty junction need not appear in Git's enumeration. Validate
+        // every proposed destination independently of observed worktree paths.
+        for ancestor in path.ancestors() {
+            if fs::symlink_metadata(ancestor).is_ok_and(|m| m.file_type().is_symlink())
+                && namespace_junction(ancestor)?.is_some()
+            {
+                bail!(
+                    "junction private destination unsupported: {}",
+                    path.display()
+                );
+            }
+        }
+        read_optional(path)?;
+    }
     let exclude = PathBuf::from(
         String::from_utf8(output(
             &project,
@@ -267,14 +523,15 @@ pub fn evaluate(
         )?)?
         .trim_end_matches('\n'),
     );
-    let tracked = names(&output(
-        &root,
-        &["ls-files", "--cached", "--full-name", "-z"],
-    )?)?;
-    let mut paths = names(&output(
+    let index = SelectedIndex::capture(&project)?;
+    let tracked = names(&index.output(&root, &["ls-files", "--cached", "--full-name", "-z"])?)?;
+    let mut paths = names(&index.output(
         &root,
         &["ls-files", "--cached", "--others", "--full-name", "-z"],
     )?)?;
+    index.revalidate()?;
+    let observed_paths = paths.clone();
+    let requested_paths: Vec<PathBuf> = requested.iter().map(|path| project.join(path)).collect();
     for path in requested {
         relative(path)?;
         paths.insert(git_relative(&prefix.join(path))?);
@@ -315,12 +572,17 @@ pub fn evaluate(
     });
     let global_path = global_path.map(|p| if p.is_absolute() { p } else { root.join(p) });
     let shadow_global = temp.path().join("global-ignore");
-    let global_bytes = global_path
+    let global_source = global_path
         .as_ref()
-        .map(|p| read_optional(p))
-        .transpose()?
-        .flatten();
-    fs::write(&shadow_global, global_bytes.as_deref().unwrap_or_default())?;
+        .map(|p| read_global_ignore(p))
+        .transpose()?;
+    fs::write(
+        &shadow_global,
+        global_source
+            .as_ref()
+            .and_then(IgnoreSource::bytes)
+            .unwrap_or_default(),
+    )?;
     output(
         &shadow,
         &[
@@ -340,9 +602,10 @@ pub fn evaluate(
     let mut ignores = BTreeMap::new();
     ignores.insert(
         root.join(".gitignore"),
-        read_optional(&root.join(".gitignore"))?,
+        read_worktree_ignore(&root.join(".gitignore"))?,
     );
     let mut directories = BTreeSet::new();
+    let mut junctions = BTreeMap::new();
     for path in &paths {
         let rel = Path::new(path);
         let mut src = root.clone();
@@ -355,10 +618,45 @@ pub fn evaluate(
                 continue;
             }
             let metadata = fs::symlink_metadata(&src).ok();
+            let junction = if metadata
+                .as_ref()
+                .is_some_and(|m| m.file_type().is_symlink())
+            {
+                namespace_junction(&src)?
+            } else {
+                None
+            };
+            if let Some(snapshot) = &junction {
+                let writes_through = writes.iter().any(|(path, _)| {
+                    path.starts_with(&src)
+                        || path
+                            .parent()
+                            .and_then(|p| fs::canonicalize(p).ok())
+                            .is_some_and(|p| p.starts_with(&snapshot.resolved))
+                });
+                if !observed_paths.contains(path)
+                    || requested_paths.iter().any(|p| p.starts_with(&src))
+                    || writes_through
+                {
+                    bail!("junction private destination unsupported: {path}");
+                }
+            }
+            if let Some(snapshot) = junction.as_ref() {
+                if let Some(previous) = junctions.get(&src) {
+                    if previous != snapshot {
+                        bail!("junction changed during privacy preflight");
+                    }
+                }
+            }
+            let is_junction = junction.is_some();
+            if let Some(snapshot) = junction {
+                junctions.insert(src.clone(), snapshot);
+            }
             if index + 1 < parts.len() {
                 if metadata
                     .as_ref()
                     .is_some_and(|m| m.file_type().is_symlink())
+                    && !is_junction
                 {
                     bail!("symlink parent in privacy probe: {path}");
                 }
@@ -368,9 +666,12 @@ pub fn evaluate(
                 fs::create_dir_all(&dst)?;
                 let ignore = src.join(".gitignore");
                 if !ignores.contains_key(&ignore) {
-                    ignores.insert(ignore.clone(), read_optional(&ignore)?);
+                    ignores.insert(ignore.clone(), read_worktree_ignore(&ignore)?);
                 }
-            } else if metadata.as_ref().is_some_and(|m| m.is_dir()) || path.ends_with('/') {
+            } else if is_junction
+                || metadata.as_ref().is_some_and(|m| m.is_dir())
+                || path.ends_with('/')
+            {
                 fs::create_dir_all(&dst)?;
             } else if metadata
                 .as_ref()
@@ -392,8 +693,8 @@ pub fn evaluate(
             // assumption before trusting any proposed decisions.
         }
     }
-    for (path, bytes) in &ignores {
-        if let Some(bytes) = bytes {
+    for (path, source) in &ignores {
+        if let Some(bytes) = source.bytes() {
             fs::write(shadow.join(path.strip_prefix(&root)?), bytes)?;
         }
     }
@@ -430,20 +731,25 @@ pub fn evaluate(
     if read_optional(&exclude)? != exclude_bytes
         || global_path
             .as_ref()
-            .map(|p| read_optional(p))
+            .map(|p| read_global_ignore(p))
             .transpose()?
-            .flatten()
-            != global_bytes
+            != global_source
     {
         bail!("Git exclude context changed during privacy preflight");
     }
-    for (path, bytes) in ignores {
-        if read_optional(&path)? != bytes {
+    for (path, source) in ignores {
+        if read_worktree_ignore(&path)? != source {
             bail!("Git ignore context changed during privacy preflight");
         }
     }
     if probe(&root, &paths, &exclude, global_path.as_deref())? != before {
         bail!("Git ignore decisions changed during privacy preflight");
+    }
+    index.revalidate()?;
+    for (path, snapshot) in junctions {
+        if namespace_junction(&path)? != Some(snapshot) {
+            bail!("junction changed during privacy preflight");
+        }
     }
     let result = paths
         .into_iter()
@@ -471,6 +777,60 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.into()),
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum IgnoreSource {
+    Missing,
+    Regular(Vec<u8>),
+    SkippedSymlink(PathBuf),
+    FollowedSymlink {
+        link: PathBuf,
+        resolved: PathBuf,
+        bytes: Vec<u8>,
+    },
+}
+
+impl IgnoreSource {
+    fn bytes(&self) -> Option<&[u8]> {
+        match self {
+            Self::Regular(bytes) | Self::FollowedSymlink { bytes, .. } => Some(bytes),
+            Self::Missing | Self::SkippedSymlink(_) => None,
+        }
+    }
+}
+
+fn read_worktree_ignore(path: &Path) -> Result<IgnoreSource> {
+    // Git never follows worktree .gitignore symlinks. Record the link itself
+    // for revalidation without opening or resolving its potentially private target.
+    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Ok(IgnoreSource::SkippedSymlink(fs::read_link(path)?));
+    }
+    Ok(read_optional(path)?
+        .map(IgnoreSource::Regular)
+        .unwrap_or(IgnoreSource::Missing))
+}
+
+fn read_global_ignore(path: &Path) -> Result<IgnoreSource> {
+    // core.excludesFile follows symlinks, unlike a worktree .gitignore. Snapshot
+    // selection identity as well as target bytes so retargeting fails revalidation.
+    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        let link = fs::read_link(path)?;
+        let resolved = fs::canonicalize(path)?;
+        let bytes =
+            read_optional(&resolved)?.ok_or_else(|| anyhow!("global ignore target disappeared"))?;
+        if fs::read_link(path)? != link || fs::canonicalize(path)? != resolved {
+            bail!("global ignore symlink changed during snapshot");
+        }
+        return Ok(IgnoreSource::FollowedSymlink {
+            link,
+            resolved,
+            bytes,
+        });
+    }
+    Ok(read_optional(path)?
+        .map(IgnoreSource::Regular)
+        .unwrap_or(IgnoreSource::Missing))
 }
 
 pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
@@ -503,6 +863,89 @@ pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_index_revalidation_rejects_same_bytes_parent_retarget() {
+        let temp = tempfile::tempdir().unwrap();
+        output(temp.path(), &["init", "-q"]).unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        let alias = temp.path().join("alias");
+        for directory in [&first, &second] {
+            fs::create_dir(directory).unwrap();
+            fs::write(directory.join("index"), "same index bytes").unwrap();
+        }
+        std::os::unix::fs::symlink(&first, &alias).unwrap();
+        let selected =
+            SelectedIndex::from_selection(temp.path(), Some(alias.join("index").into_os_string()))
+                .unwrap();
+        selected.revalidate().unwrap();
+        fs::remove_file(&alias).unwrap();
+        std::os::unix::fs::symlink(&second, &alias).unwrap();
+        assert!(selected
+            .revalidate()
+            .unwrap_err()
+            .to_string()
+            .contains("changed"));
+    }
+
+    #[test]
+    fn selected_index_revalidation_rejects_mutation_and_creation() {
+        let temp = tempfile::tempdir().unwrap();
+        output(temp.path(), &["init", "-q"]).unwrap();
+        let selected = SelectedIndex::capture(temp.path()).unwrap();
+        selected.revalidate().unwrap();
+        fs::write(&selected.path, "created after enumeration").unwrap();
+        assert!(selected
+            .revalidate()
+            .unwrap_err()
+            .to_string()
+            .contains("changed"));
+        let snapshot = snapshot_index(&selected.path).unwrap();
+        let selected = SelectedIndex {
+            snapshot,
+            ..selected
+        };
+        fs::write(&selected.path, "mutated after enumeration").unwrap();
+        assert!(selected
+            .revalidate()
+            .unwrap_err()
+            .to_string()
+            .contains("changed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignore_source_snapshots_distinguish_skipped_followed_and_retargeted_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        let link = temp.path().join("link");
+        fs::write(&first, "*.private\n").unwrap();
+        fs::write(&second, "*.private\n").unwrap();
+        std::os::unix::fs::symlink(&first, &link).unwrap();
+        let skipped = read_worktree_ignore(&link).unwrap();
+        let followed = read_global_ignore(&link).unwrap();
+        assert!(skipped.bytes().is_none());
+        assert_eq!(followed.bytes().unwrap(), b"*.private\n");
+        assert!(
+            read_optional(&link).is_err(),
+            "publication target remains strict"
+        );
+        fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&second, &link).unwrap();
+        assert_ne!(skipped, read_worktree_ignore(&link).unwrap());
+        assert_ne!(followed, read_global_ignore(&link).unwrap());
+        fs::write(&second, "changed\n").unwrap();
+        assert_ne!(followed, read_global_ignore(&link).unwrap());
+        fs::remove_file(&second).unwrap();
+        assert!(read_worktree_ignore(&link).unwrap().bytes().is_none());
+        assert!(
+            read_global_ignore(&link).is_err(),
+            "broken external link fails closed"
+        );
+    }
 
     #[cfg(windows)]
     #[test]
@@ -558,14 +1001,24 @@ mod tests {
             ),
         ] {
             fs::write(&ignore, []).unwrap();
+            let requested: Vec<String> = names
+                .iter()
+                .filter(|name| name.as_str() != "junction")
+                .cloned()
+                .collect();
+            let checked: Vec<String> = requested
+                .iter()
+                .cloned()
+                .chain(["junction/payload".into()])
+                .collect();
             let (_, predicted) = evaluate(
                 &root,
-                &names,
+                &requested,
                 &[(ignore.clone(), proposed.as_bytes().to_vec())],
             )
             .unwrap();
             fs::write(&ignore, &proposed).unwrap();
-            for name in &names {
+            for name in &checked {
                 let native = git(&root)
                     .args(["check-ignore", "--no-index", "--quiet", name])
                     .status()
@@ -578,10 +1031,49 @@ mod tests {
                 );
             }
         }
+        for requested in ["junction", "junction/", "junction/payload"] {
+            let error = evaluate(&root, &[requested.into()], &[]).unwrap_err();
+            assert!(
+                error.to_string().contains("junction private destination"),
+                "{error}"
+            );
+        }
+        let error = evaluate(
+            &root,
+            &[],
+            &[(root.join("junction/.gitignore"), b"*\n".to_vec())],
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("junction private destination"),
+            "{error}"
+        );
         assert_eq!(
             fs::read_to_string(external.join("payload")).unwrap(),
             "must stay outside probe"
         );
+        // An empty junction contributes no enumerated child. Publication must
+        // still refuse it even when its internal target is otherwise modeled.
+        let empty = root.join("empty-target");
+        fs::create_dir(&empty).unwrap();
+        let output = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("empty-junction"))
+            .arg(&empty)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let error = evaluate(
+            &root,
+            &["empty-target/".into()],
+            &[(root.join("empty-junction/.gitignore"), b"*\n".to_vec())],
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("junction private destination"),
+            "{error}"
+        );
+        assert!(!empty.join(".gitignore").exists());
     }
 
     #[test]

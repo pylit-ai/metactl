@@ -90,6 +90,87 @@ fn payloads(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
 const PRIVATE_ID: &str = "platform-private-fixture";
 const PRIVATE_PAYLOAD: &str = "PLATFORM_PRIVATE_PAYLOAD_48";
 
+fn file_symlink(target: &Path, link: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(target, link)
+        .expect("Windows runner must permit symlink fixture creation");
+}
+
+#[test]
+fn cli_nested_ignore_symlink_is_skipped_like_native_git() {
+    let repo = Repo::new();
+    let target = repo.home.join("nested-ignore-target");
+    fs::write(&target, "*.public\n").unwrap();
+    fs::create_dir(repo.root.join("nested")).unwrap();
+    let link = repo.root.join("nested/.gitignore");
+    file_symlink(&target, &link);
+    fs::write(repo.root.join("nested/visible.public"), "authored content").unwrap();
+    assert_eq!(
+        repo.git(&["check-ignore", "--quiet", "nested/visible.public"])
+            .status
+            .code(),
+        Some(1)
+    );
+    for operation in ["install", "fix"] {
+        assert_ok(&repo.cli(&[
+            "ignore",
+            operation,
+            "--scope",
+            "both",
+            "--target",
+            "claude-code",
+            "--yes",
+        ]));
+        assert_eq!(
+            repo.git(&["check-ignore", "--quiet", "nested/visible.public"])
+                .status
+                .code(),
+            Some(1)
+        );
+        assert_eq!(fs::read_link(&link).unwrap(), target);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "*.public\n");
+    }
+}
+
+#[test]
+fn cli_configured_global_ignore_symlink_matches_native_git() {
+    let repo = Repo::new();
+    let target = repo.home.join("global-ignore-target");
+    let link = repo.home.join("global-ignore-link");
+    fs::write(&target, "*.private\n").unwrap();
+    file_symlink(&target, &link);
+    assert_ok(
+        &repo
+            .command("git")
+            .args(["config", "core.excludesFile"])
+            .arg(metactl::git_privacy::git_path_argument(&link))
+            .output()
+            .unwrap(),
+    );
+    fs::write(repo.root.join("payload.private"), PRIVATE_PAYLOAD).unwrap();
+    let before = repo.git(&["check-ignore", "--no-index", "--verbose", "payload.private"]);
+    assert_ok(&before);
+    for operation in ["install", "fix"] {
+        assert_ok(&repo.cli(&[
+            "ignore",
+            operation,
+            "--scope",
+            "both",
+            "--target",
+            "claude-code",
+            "--yes",
+        ]));
+        let after = repo.git(&["check-ignore", "--no-index", "--verbose", "payload.private"]);
+        assert_ok(&after);
+        assert_eq!(before.stdout, after.stdout);
+        assert_eq!(fs::read_link(&link).unwrap(), target);
+        assert_eq!(fs::read_to_string(&target).unwrap(), "*.private\n");
+        assert_index_is_public(&repo);
+    }
+}
+
 fn copy_tree(from: &Path, to: &Path) {
     fs::create_dir_all(to).unwrap();
     for entry in fs::read_dir(from).unwrap() {
@@ -342,12 +423,12 @@ fn cli_non_utf8_ignored_file_refuses_without_file_mutation() {
 
 #[test]
 fn cli_scoped_git_context_refuses_without_file_mutation() {
-    for key in ["GIT_DIR", "GIT_INDEX_FILE"] {
+    for key in ["GIT_DIR", "GIT_WORK_TREE"] {
         let repo = Repo::new();
         let value = if key == "GIT_DIR" {
             repo.root.join(".git")
         } else {
-            repo.root.join(".git/index")
+            repo.root.clone()
         };
         let before = payloads(&repo.root);
         let output = repo
@@ -368,6 +449,92 @@ fn cli_scoped_git_context_refuses_without_file_mutation() {
         assert!(String::from_utf8_lossy(&output.stderr)
             .contains(&format!("unsupported Git environment override {key}")));
         assert_eq!(before, payloads(&repo.root));
+    }
+}
+
+#[test]
+fn cli_selected_index_supports_missing_and_alternate_but_refuses_private_tracking() {
+    let repo = private_project();
+    assert_ok(&repo.cli(&["sync"]));
+    let alternate = repo.root.join(".git/alternate-index");
+    let cli_with_index = || {
+        repo.command(env!("CARGO_BIN_EXE_metactl"))
+            .env("GIT_INDEX_FILE", &alternate)
+            .arg("sync")
+            .output()
+            .unwrap()
+    };
+    // An absent alternate index is a legitimate empty Git index.
+    assert_ok(&cli_with_index());
+    assert!(!alternate.exists());
+    assert_ok(
+        &repo
+            .command("git")
+            .env("GIT_INDEX_FILE", &alternate)
+            .args(["read-tree", "--empty"])
+            .output()
+            .unwrap(),
+    );
+    assert_ok(&cli_with_index());
+    let private = ".metactl/generated/claude-code/CLAUDE.local.md";
+    assert_ok(
+        &repo
+            .command("git")
+            .env("GIT_INDEX_FILE", &alternate)
+            .args(["add", "--force", private])
+            .output()
+            .unwrap(),
+    );
+    assert!(repo.git(&["ls-files", private]).stdout.is_empty());
+    let before = payloads(&repo.root);
+    let refused = cli_with_index();
+    assert!(!refused.status.success());
+    let message = String::from_utf8_lossy(&refused.stderr);
+    assert!(message.contains("tracked"), "{message}");
+    assert!(
+        before == payloads(&repo.root),
+        "private alternate-index refusal mutated file bytes"
+    );
+}
+
+#[test]
+fn cli_selected_index_rejects_symlink_and_directory() {
+    for symlink in [false, true] {
+        let repo = Repo::new();
+        let index = repo.root.join(".git/unsafe-index");
+        if symlink {
+            let target = repo.home.join("index-target");
+            fs::write(&target, "fixture").unwrap();
+            file_symlink(&target, &index);
+        } else {
+            fs::create_dir(&index).unwrap();
+        }
+        let before = payloads(&repo.root);
+        let output = repo
+            .command(env!("CARGO_BIN_EXE_metactl"))
+            .env("GIT_INDEX_FILE", &index)
+            .args([
+                "ignore",
+                "install",
+                "--scope",
+                "both",
+                "--target",
+                "claude-code",
+                "--yes",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("selected Git index must be a regular file"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            before == payloads(&repo.root),
+            "unsafe selected index refusal mutated file bytes"
+        );
     }
 }
 
