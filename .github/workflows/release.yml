@@ -52,6 +52,11 @@ jobs:
         shell: bash
         run: |
           python3 scripts/package_release.py --target "${{ matrix.target }}" --binary-dir "target/${{ matrix.target }}/release"
+      - name: Smoke assembled archive outside the source checkout
+        shell: bash
+        run: |
+          version=$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("crates/metactl/Cargo.toml").read_text())["package"]["version"])')
+          python3 scripts/smoke_release_archive.py "dist/metactl-v${version}-${{ matrix.target }}.tar.gz" --version "$version"
       - name: Attest archive provenance
         uses: actions/attest-build-provenance@v2
         with:

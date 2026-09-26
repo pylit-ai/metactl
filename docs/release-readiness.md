@@ -1,22 +1,20 @@
 # Release Readiness
 
-Release candidate: **0.1.24**, prepared September 26, 2026. Distribution unit:
-GitHub native binary archives and existing metactl/metactld crates, in dependency
-order. npm remains an unpublished scaffold; no new registry distribution.
+Release candidate: **0.1.25**, prepared September 26, 2026. Distribution unit:
+GitHub native binary archives. Crate packaging and dry-run checks remain gates;
+registry publication is a separate, explicitly verified action. npm remains an
+unpublished scaffold; no new registry distribution is included.
 
-This release adds bounded gateway-backed discovery trials, routing receipts,
-private event inspection and first-run activation guidance. It also includes
-Codex projection safety and library source-drift planning since v0.1.22. Native
-defaults remain unchanged. See [activation](user/skill-discovery.md),
-[trial modes](user/discovery-trials.md), the [historical deterministic
-development benchmark](../reports/skill-discovery-development-benchmark.md),
+This release repairs ignore migration and preserves protected private skills,
+resources, hooks and runtime configuration. Native Git evaluates proposed rules
+before private publication; current synthesis evidence distinguishes shared
+outputs from private or unknown content. Recovery retains displaced files on
+macOS, Linux and Windows. See [private projection protection](user/private-projection-protection.md)
 and the [changelog](../CHANGELOG.md).
 
 ## Evidence and claims
 
-The v0.1.22 discovery implementation passed 373 Rust and 19 Python tests.
-This candidate adds gateway trials and onboarding guidance. Run all final
-gates on the release commit; completed test counts, CI,
+Run all final gates on the release commit; completed test counts, CI,
 checksums, attestations and publication identity belong in its release notes.
 No provider quality, native prompt-token or session-cost improvement is claimed.
 
@@ -40,16 +38,20 @@ Python 3.10+ at runtime; other CLI commands do not.
 Release automation in `.github/workflows/release.yml` creates a draft after both
 supported platform packages pass. Download both archives, verify SHA-256 sidecars
 and `gh attestation verify` provenance, then run clean installation smoke checks
-before publishing. See [install verification](user/install-verification.md).
+before publishing. The workflow exercises fresh init/use/sync/validate and the
+packaged discovery host from each assembled archive on its native runner, using
+an isolated home and no provider credentials. See [install verification](user/install-verification.md).
 
 ## Publication order and recovery
 
 1. Push candidate and require green exact-head CI; merge through normal PR flow.
-2. Verify merged main, then push an annotated v0.1.24 tag. Never move a published tag.
+2. Verify merged main, then push an annotated v0.1.25 tag. Never move a published tag.
 3. Verify workflow and draft assets before public release.
-4. Publish metactl to crates.io after its dry-run passes.
-5. Wait for metactl 0.1.24 to be visible; dry-run and publish metactld next.
-6. Verify both registry versions and installed binary provenance.
+
+If crate publication is separately included in the release scope, publish
+metactl only after its dry-run passes, wait for metactl 0.1.25 to be visible,
+then dry-run and publish metactld. Verify both registry versions independently;
+the GitHub release does not imply registry publication.
 
 A private overlay records the same public version and tag, never a competing
 release identity. Retain installed-binary backups through rollout verification.

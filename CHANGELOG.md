@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.25 - 2026-09-26
+
 ### Fixed
 
 - Verify private projection protection against complete proposed native Git
@@ -13,6 +15,15 @@
   synthesis evidence so legitimate shared migrations can succeed.
 - Keep private pack identifiers out of shared runtime configuration and
   instruction diagnostics.
+- Preserve private hooks and mixed runtime configuration behind verified local
+  Git protection; reject stale or altered synthesis evidence before apply.
+- Retain displaced ignore files and independent recovery snapshots on macOS,
+  Linux and Windows, including failed multi-file publication and rollback.
+
+### Verification
+
+- Add native Windows ignore-safety CI and clean-project smoke checks of assembled
+  macOS/Linux release archives before provenance attestation.
 
 ## 0.1.24 - 2026-09-26
 
