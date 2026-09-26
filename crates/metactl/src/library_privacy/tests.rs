@@ -265,3 +265,33 @@ fn private_pack_without_native_contribution_keeps_shared_aggregate_shareable() {
         .apply_manifest(project.path(), &stale, &ApplyMode::Copy)
         .is_err());
 }
+
+#[test]
+fn replay_rejects_unknown_output_even_when_kind_and_attribution_are_forged() {
+    let (_library, project, registry, params) = fixture(false);
+    fs::write(
+        project.path().join(".git/info/exclude"),
+        ".metactl/\n.claude/\nCLAUDE.local.md\n",
+    )
+    .unwrap();
+    let mut manifest = registry.compile(params).unwrap().compile_manifest;
+    let mut injected = manifest
+        .generated_outputs
+        .iter()
+        .find(|o| o.destination_path.as_deref() == Some(".claude/settings.json"))
+        .unwrap()
+        .clone();
+    let staged_source = project.path().join(&injected.path);
+    injected.destination_path = Some("ordinary-document.txt".into());
+    injected.path = ".metactl/generated/claude-code/ordinary-document.txt".into();
+    injected.kind = GeneratedOutputKind::Other;
+    injected.pack_ref = None;
+    injected.id = Some("ordinary-document".into());
+    injected.ownership_token = Some("ordinary-document".into());
+    fs::copy(staged_source, project.path().join(&injected.path)).unwrap();
+    manifest.generated_outputs.push(injected);
+    assert!(registry
+        .apply_manifest(project.path(), &manifest, &ApplyMode::Copy)
+        .is_err());
+    assert!(!project.path().join("ordinary-document.txt").exists());
+}

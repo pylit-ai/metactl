@@ -108,6 +108,10 @@ impl LibraryRegistry {
                 if proof.private {
                     replay_private.insert(destination.clone());
                 }
+            } else if proofs.is_some() {
+                anyhow::bail!(
+                    "output absent from current synthesis evidence; recompile before apply"
+                );
             } else if matches!(
                 output.kind,
                 GeneratedOutputKind::RuntimeJson
