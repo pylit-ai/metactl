@@ -287,9 +287,9 @@ metactl validate
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
 | `metactl explain` | Show why packs and targets were selected. |
 | `metactl revert` | Remove applied outputs tracked by metactl. |
-| `metactl ignore install` | Hide generated agent surfaces from local git status. |
+| `metactl ignore install` | Protect MetaCTL-local state without hiding mixed agent roots. |
 | `metactl ignore status` | Check whether generated surfaces and private source state are protected. |
-| `metactl ignore fix --plan` | Plan generated-surface ignore repair and Git-index untracking safely. |
+| `metactl ignore fix --plan` | Plan repair of MetaCTL's managed ignore blocks; agent-root files stay visible and tracked. |
 | `metactl audit sources` | Diagnose private source cache, lock, and public-example exposure failures. |
 
 </details>
@@ -336,9 +336,14 @@ metactl ignore fix --scope local --include-private-sources --yes
 ```
 
 Local ignore scope writes `.git/info/exclude` for the current checkout only. Use
-repo scope only when the team wants the ignore posture committed. If generated
-roots are already tracked, use `--untrack-generated --yes`; this removes them
-from the Git index only and leaves files on disk.
+repo scope only when the team wants the ignore posture committed. Agent roots
+can contain authored files, so `ignore fix` and `ignore install` do not hide or
+untrack `.agents/`, `.codex/`, `.claude/`, `.cursor/`, or `.gemini/` files.
+`--untrack-generated` is refused until exclusive ownership can be proven.
+Changed ignore files retain a reported recovery copy under the private,
+Git-ignored `.metactl/ignore-recovery/` directory. Review these copies before
+removing them. A concurrent edit may make the command fail while preserving
+both versions for manual reconciliation.
 
 </details>
 
