@@ -66,6 +66,51 @@ task text or skill bodies. Local logging is separate from provider retention.
 Enabled does not prove a coding agent invoked discovery: ask it to show its
 receipt. Default-on uses Jev when useful; unambiguous requests remain local.
 
+## Check status and limits
+
+These checks make no provider request. Use the same absolute project path and
+target as the installed connection. The `jev` commands below refer to the scoped
+gateway client supplied by your operator; MetaCTL does not provision that service.
+
+| Question | Command or evidence |
+| --- | --- |
+| What preferences apply to this project? | `metactl --project /absolute/path/to/project skills preferences` |
+| Is this client's connection ready, and what discovery events were observed? | `metactl --project /absolute/path/to/project skills doctor --target codex-cli --use-preferences --json` |
+| Is the preference-aware local host ready? | `metactl --project /absolute/path/to/project skills host --use-preferences --status` |
+| Does the scoped gateway report access and remaining policy allowance? | `jev status --project approved-project-id` |
+| Does this working directory match the gateway project? | From the intended project directory: `jev check-project --project approved-project-id` |
+| What happened in a particular run? | Read its `routing_receipt`, then `metactl skills trials inspect --log /private/path/discovery-events.jsonl --session-id SESSION_SHA256 --run-id RUN_UUID_HEX` using the event log and identifiers reported for that run. |
+
+Gateway status and the directory-binding check answer different questions. A
+healthy service or accepted project identity does not by itself prove that the
+current directory is enrolled. Doctor reports the private `event_log` path and
+observed events, which can include manual calls. Confirm native agent acceptance
+in a fresh session by calling the tools and correlating the receipt with its
+event. No event means unknown use, not proven non-use.
+
+There is currently no single aggregate discovery-status command covering every
+project and native agent's acceptance. Inspect each project/target with `skills
+doctor` and retain native-session evidence separately. These are CLI commands
+and JSON reports; discovery has no dedicated terminal user interface (TUI).
+
+Check these independent limits even when preferences say enabled. Provider
+limits can preserve local ordering; logging limits affect the evidence recorded:
+
+| Gate | Scope and behavior |
+| --- | --- |
+| Host attempt ceiling | `--max-provider-calls` limits one host process. Restarting renews only this allowance; one-shot calls start separate hosts. |
+| Gateway request count | Shared policy can limit aggregate and per-project requests per day across processes and clients. |
+| Gateway spending allowance | Policy can limit aggregate total, aggregate daily and per-project daily spending. A reservation per request can consume allowance even when completion is uncertain. Accounting checks are not a provider billing hard cap. |
+| Policy expiry and access | The project grant, allowed data classes and policy expiry remain authoritative. Restarting or changing local preferences cannot renew an expired grant or raise shared limits. |
+| Local log capacity | A full or unwritable ledger can produce `log=failed` while discovery still succeeds; this is missing measurement, not a larger provider allowance. |
+
+Use your operator's authoritative policy and free gateway status for current
+amounts, counters, reset times and expiry; do not infer them from MetaCTL's host
+ceiling. Changes to shared budgets or expiry require operator authorization.
+After a denial or error, retain local discovery rather than retrying to bypass a
+limit. See [private trials](discovery-trials.md#storage-and-later-analysis) for
+ledger capacity and preservation.
+
 ## First-run workflow
 
 There are three separate steps: make a project catalog available, register the
@@ -406,7 +451,11 @@ unaffected and can still contribute catalog entries.
 The MCP tool list is constant-size and contains no catalog names, descriptions or
 per-skill enum. This is an implemented external discovery interface—not proof that
 your client stopped injecting its native catalog. When both remain installed,
-you may pay MORE context/tool-call overhead. Do not default this feature on yet.
+you may pay more context/tool-call overhead. Broad default-on distribution as a
+context-saving optimization still needs native prompt and task-outcome evidence.
+This is separate from an operator's explicit choice to enable advisory Jev
+preferences for enrolled projects, described above; that choice does not establish
+context savings or hide native skill catalogs.
 
 For context savings, a separate host integration must expose the small discovery
 interface while withholding eligible specialist descriptors *before* constructing
