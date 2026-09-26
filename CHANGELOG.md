@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Verify private projection protection against complete proposed native Git
+  rules before ignore migration, including preserved negations and nested rules.
+- Preserve protected private skills and resources during upgrades; refuse
+  exposed or tracked private destinations before publication instead of silently
+  dropping capabilities. Private path rules remain in local Git excludes.
+- Verify shared aggregate outputs and materializer-owned links from fresh
+  synthesis evidence so legitimate shared migrations can succeed.
+- Keep private pack identifiers out of shared runtime configuration and
+  instruction diagnostics.
+
 ## 0.1.24 - 2026-09-26
 
 ### Added

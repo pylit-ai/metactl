@@ -207,6 +207,13 @@ fn agent_sync_preview_bounds_generated_paths_unless_full_is_requested() {
     )
     .expect("updated config");
 
+    git_init_project(project.path());
+    assert!(run_cli(
+        project.path(),
+        &["ignore", "install", "--scope", "both", "--yes"]
+    )
+    .status
+    .success());
     let bounded = run_cli(project.path(), &["--agent", "sync", "--adopt", "preview"]);
     assert!(
         bounded.status.success(),

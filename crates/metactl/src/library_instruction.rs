@@ -159,11 +159,19 @@ pub(super) fn instruction_document(
             ));
         }
     }
-    for gap in &resolve_graph.capability_gaps {
+    for gap in resolve_graph.capability_gaps.iter().filter(|gap| {
+        gap.affected_refs
+            .iter()
+            .all(|reference| packs_in_plan(plan).contains(&reference.id.as_str()))
+    }) {
         lines.push(format!("|gap:{}={:?}", gap.feature, gap.reason_code));
     }
 
     budget_instruction_document(lines.join("\n"))
+}
+
+fn packs_in_plan(plan: &InstructionDocumentPlan) -> Vec<&str> {
+    plan.packs.iter().map(|p| p.pack_ref.id.as_str()).collect()
 }
 
 fn instruction_references_for_pack(
@@ -819,7 +827,7 @@ pub(super) fn expand_runtime_template(
     template_ref: &RuntimeTemplateRef,
     target: &TargetCapabilityMatrix,
     policy: &PolicyManifest,
-    resolve_graph: &ResolveGraph,
+    _resolve_graph: &ResolveGraph,
     packs: &[&DiscoveredPack],
 ) -> Result<(GeneratedOutputKind, Vec<u8>)> {
     let (tmpl_path, raw) = library_roots
@@ -856,10 +864,9 @@ pub(super) fn expand_runtime_template(
     ctx.insert(
         "active_packs_json_array".into(),
         serde_json::to_string(
-            &resolve_graph
-                .activated_pack_refs
+            &packs
                 .iter()
-                .map(|item| &item.id)
+                .map(|item| &item.manifest.id)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or_else(|_| "[]".into()),

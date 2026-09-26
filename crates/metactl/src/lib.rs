@@ -1,4 +1,5 @@
 pub mod fixture_kernel;
+pub mod git_privacy;
 pub mod jsonrpc;
 pub mod kernel;
 pub mod library_registry;

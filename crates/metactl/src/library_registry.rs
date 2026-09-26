@@ -10,6 +10,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::materializer::{self, StagedOutputInput};
+#[path = "library_privacy.rs"]
+mod library_privacy;
 use crate::suite_registry::selected_target_from_config;
 use crate::types::{
     ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, AutoSurfaceSelection, CapabilityGap,
@@ -25,6 +27,7 @@ use crate::types::{
     TargetCapabilityMatrix, ValidateParams, ValidationCheck, ValidationReport, ValidationStatus,
     VisibilityScope,
 };
+pub use library_privacy::ProjectionProof;
 
 #[path = "library_discovery.rs"]
 mod library_discovery;
@@ -865,6 +868,14 @@ impl LibraryRegistry {
         )?;
         degradations.extend(surface_degradations);
         dedupe_degradations(&mut degradations);
+        crate::git_privacy::require_private(
+            &project_root,
+            &library_privacy::private_paths(
+                &outputs,
+                &params.resolve_graph,
+                &params.target_capability,
+            ),
+        )?;
         let manifest = materializer::stage_outputs(
             &project_root,
             &params.target_capability.target_ref(),
@@ -999,6 +1010,7 @@ impl LibraryRegistry {
         manifest: &CompileManifest,
         apply_mode: &ApplyMode,
     ) -> Result<ApplyReport> {
+        self.protect_private_manifest(project_root, manifest)?;
         materializer::apply_manifest(project_root, manifest, apply_mode)
     }
 
@@ -1018,6 +1030,7 @@ impl LibraryRegistry {
         apply_mode: &ApplyMode,
         expected_plan_digest: &str,
     ) -> Result<ApplyReport> {
+        self.protect_private_manifest(project_root, manifest)?;
         materializer::apply_manifest_bound(
             project_root,
             manifest,
@@ -1363,34 +1376,9 @@ fn synthesize_outputs(
         .copied()
         .filter(|pack| pack.manifest.visibility_scope == VisibilityScope::Shared)
         .collect::<Vec<_>>();
-    let private_packs = packs
-        .iter()
-        .copied()
-        .filter(|pack| pack.manifest.visibility_scope == VisibilityScope::Private)
-        .collect::<Vec<_>>();
     let mut outputs = Vec::new();
     let mut surface_selection = Vec::new();
     let mut degradations = Vec::new();
-    if !private_packs.is_empty()
-        && (target.runtime_template.is_some()
-            || target.compile_targets.iter().any(|output| {
-                !matches!(
-                    output.output_kind,
-                    CompileTargetKind::AgentsMd
-                        | CompileTargetKind::ClaudeMd
-                        | CompileTargetKind::OpenclawMd
-                )
-            }))
-    {
-        degradations.push(CapabilityGap {
-            feature: "private_nonlocal_outputs_omitted".to_string(),
-            reason_code: ReasonCode::CapabilityGap,
-            affected_refs: private_packs
-                .iter()
-                .map(|pack| pack.manifest.pack_ref())
-                .collect(),
-        });
-    }
     let mut emitted_local_instruction_document = false;
     for compile_target in &target.compile_targets {
         match compile_target.output_kind {
@@ -1526,7 +1514,7 @@ fn synthesize_outputs(
                     compile_target,
                     surface_selection_override.clone(),
                 );
-                for pack in &shared_packs {
+                for pack in packs {
                     let surfaces = derive_skill_surfaces(pack)?;
                     let decisions = surface_selection_decisions_with_auto_selection(
                         pack,
@@ -1659,13 +1647,10 @@ fn synthesize_outputs(
                 }
             }
             CompileTargetKind::PackResource => {
-                outputs.extend(emit_pack_resource_outputs(compile_target, &shared_packs)?);
+                outputs.extend(emit_pack_resource_outputs(compile_target, packs)?);
             }
             CompileTargetKind::PackExtensionManifest => {
-                outputs.extend(emit_pack_extension_manifests(
-                    compile_target,
-                    &shared_packs,
-                )?);
+                outputs.extend(emit_pack_extension_manifests(compile_target, packs)?);
             }
             CompileTargetKind::HookConfig
             | CompileTargetKind::RuntimeJson

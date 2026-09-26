@@ -1,8 +1,6 @@
 use super::*;
 use std::path::Component;
 
-// These names remain private even after switching targets or before a tool
-// creates them. Keep this policy shared with the migration gate's exemptions.
 pub(super) const PRIVATE_LOCAL_DESTINATIONS: &[&str] = &[
     "CLAUDE.local.md",
     "GEMINI.local.md",
@@ -17,7 +15,7 @@ pub(super) const PRIVATE_LOCAL_DESTINATIONS: &[&str] = &[
 pub(super) fn resolve_git_exclude_path(
     project_root: &Path,
 ) -> std::result::Result<PathBuf, CliError> {
-    let output = Command::new("git")
+    let out = Command::new("git")
         .arg("-C")
         .arg(project_root)
         .args([
@@ -27,18 +25,17 @@ pub(super) fn resolve_git_exclude_path(
             "info/exclude",
         ])
         .output()
-        .map_err(|err| state_error(anyhow!("resolve Git exclude: {err}")))?;
-    if !output.status.success() {
-        return Err(CliError::new(EXIT_STATE, "Cannot resolve Git exclude path"));
+        .map_err(|e| state_error(e.into()))?;
+    if !out.status.success() {
+        return Err(state_error(anyhow!("Cannot resolve Git exclude path")));
     }
-    let raw = std::str::from_utf8(&output.stdout)
-        .map_err(|err| state_error(anyhow!("decode Git exclude path: {err}")))?;
-    let path = PathBuf::from(raw.trim_end_matches('\n'));
+    let path = PathBuf::from(
+        std::str::from_utf8(&out.stdout)
+            .map_err(|e| state_error(e.into()))?
+            .trim_end_matches('\n'),
+    );
     if !path.is_absolute() || !path.ends_with("info/exclude") {
-        return Err(CliError::new(
-            EXIT_STATE,
-            "Git returned an invalid exclude path",
-        ));
+        return Err(state_error(anyhow!("invalid Git exclude path")));
     }
     Ok(path)
 }
@@ -47,11 +44,8 @@ pub(super) fn managed_ignore_file_has_broad_roots(
     path: &Path,
 ) -> std::result::Result<bool, CliError> {
     let (bytes, _) = read_ignore_preimage(path)?;
-    let Some(bytes) = bytes else {
-        return Ok(false);
-    };
-    let text = std::str::from_utf8(&bytes)
-        .map_err(|err| state_error(anyhow!("{}: {err}", path.display())))?;
+    let Some(bytes) = bytes else { return Ok(false) };
+    let text = std::str::from_utf8(&bytes).map_err(|e| state_error(e.into()))?;
     let Some((start, end)) =
         marked_block_span(text, IGNORE_BLOCK_BEGIN, IGNORE_BLOCK_END).map_err(state_error)?
     else {
@@ -60,261 +54,323 @@ pub(super) fn managed_ignore_file_has_broad_roots(
     Ok(text[start..end]
         .lines()
         .map(str::trim)
-        .filter(|line| !line.starts_with('#') && !line.starts_with('!'))
-        .filter(|line| !PRIVATE_LOCAL_DESTINATIONS.contains(&line.trim_start_matches('/')))
-        .any(|line| {
+        .filter(|l| !l.starts_with('#') && !l.starts_with('!'))
+        .any(|l| {
             [".agents", ".codex", ".claude", ".cursor", ".gemini"]
                 .iter()
-                .any(|root| line.contains(root))
+                .any(|r| l.trim_start_matches('/').trim_end_matches('/') == *r)
         }))
 }
 
-pub(super) fn managed_ignore_has_broad_roots(project_root: &Path) -> bool {
+pub(super) fn managed_ignore_has_broad_roots(root: &Path) -> bool {
     [
-        project_root.join(".gitignore"),
-        git_local_exclude_path(project_root)
-            .unwrap_or_else(|_| project_root.join(".git/info/exclude")),
+        root.join(".gitignore"),
+        git_local_exclude_path(root).unwrap_or_else(|_| root.join(".git/info/exclude")),
     ]
     .iter()
-    .any(|path| managed_ignore_file_has_broad_roots(path).unwrap_or(true))
+    .any(|p| managed_ignore_file_has_broad_roots(p).unwrap_or(true))
 }
 
-pub(super) fn tracked_generated_roots_json(
-    project_root: &Path,
-    targets: &[String],
-) -> Result<Vec<Value>> {
-    let roots = generated_roots_for_targets(targets);
-    if roots.is_empty() || !project_root.join(".git").exists() {
-        return Ok(Vec::new());
-    }
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .arg("ls-files")
-        .arg("-z")
-        .arg("--")
-        .args(&roots)
-        .output()
-        .with_context(|| format!("run git ls-files in {}", project_root.display()))?;
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-    let files = String::from_utf8_lossy(&output.stdout)
-        .split('\0')
-        .filter(|item| !item.is_empty())
-        .map(|item| item.replace('\\', "/"))
-        .collect::<Vec<_>>();
-    let mut by_root = BTreeMap::<String, Vec<String>>::new();
-    for file in files {
-        for root in &roots {
-            if file == *root || file.starts_with(&format!("{root}/")) {
-                by_root.entry(root.clone()).or_default().push(file.clone());
-            }
-        }
-    }
-    Ok(by_root
-        .into_iter()
-        .map(|(root, files)| {
-            json!({
-                "root": root,
-                "classification": "tracked-agent-root-ownership-unverified",
-                "file_count": files.len(),
-                "tracked_files": files,
-            })
+pub(super) fn tracked_generated_roots_json(root: &Path, targets: &[String]) -> Result<Vec<Value>> {
+    let roots: BTreeSet<&str> = targets
+        .iter()
+        .flat_map(|t| match t.as_str() {
+            "codex-cli" => vec![".agents", ".codex"],
+            "claude-code" => vec![".claude"],
+            "cursor" => vec![".cursor"],
+            "gemini-cli" => vec![".gemini"],
+            _ => vec![],
         })
-        .collect())
-}
-
-fn generated_roots_for_targets(targets: &[String]) -> Vec<String> {
-    let mut roots = BTreeSet::new();
-    for target in targets {
-        match target.as_str() {
-            "codex-cli" => {
-                roots.insert(".codex".to_string());
-                roots.insert(".agents".to_string());
-            }
-            "claude-code" => {
-                roots.insert(".claude".to_string());
-            }
-            "cursor" => {
-                roots.insert(".cursor".to_string());
-            }
-            "gemini-cli" => {
-                roots.insert(".gemini".to_string());
-            }
-            _ => {}
-        }
+        .collect();
+    if roots.is_empty() {
+        return Ok(vec![]);
     }
-    roots.into_iter().collect()
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z", "--"])
+        .args(&roots)
+        .output()?;
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
+    let files = String::from_utf8(out.stdout)?;
+    Ok(roots.iter().filter_map(|root| {
+        let files: Vec<_> = files.split('\0').filter(|f| *f == *root || f.starts_with(&format!("{root}/"))).collect();
+        (!files.is_empty()).then(|| json!({"root": root, "classification": "tracked-agent-root-ownership-unverified", "file_count": files.len(), "tracked_files": files}))
+    }).collect())
 }
 
-/// A read-only gate shared by plan, install, and fix. Refusal happens before
-/// recovery directories or ignore files can be created.
-pub(super) fn ensure_private_projection_safe_for_ignore_change(
+pub(super) fn planned_proofs(
     cli: &Cli,
-    project_root: &Path,
-    prepared: &[PreparedIgnoreWrite],
-) -> std::result::Result<(), CliError> {
-    let weakening = prepared.iter().any(|write| {
-        let Some(original) = write.original.as_deref() else {
-            return false;
-        };
-        if original == write.updated.as_slice() {
-            return false;
-        }
-        let Ok(original) = std::str::from_utf8(original) else {
-            return true;
-        };
-        let Ok(updated) = std::str::from_utf8(&write.updated) else {
-            return true;
-        };
-        let Ok(Some((start, end))) =
-            marked_block_span(original, IGNORE_BLOCK_BEGIN, IGNORE_BLOCK_END)
-        else {
-            return false;
-        };
-        original[start..end]
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with('!'))
-            .any(|line| {
-                !updated
-                    .lines()
-                    .any(|new| new.trim().trim_start_matches('/') == line.trim_start_matches('/'))
-            })
-    });
-    if !weakening {
-        return Ok(());
+    root: &Path,
+) -> std::result::Result<Vec<metactl::library_registry::ProjectionProof>, CliError> {
+    if !project_config_path(root, cli.config.as_deref()).exists() {
+        return Ok(vec![]);
     }
-
-    let config_path = project_config_path(project_root, cli.config.as_deref());
-    let context = if config_path.exists() {
-        Some(load_required_context(cli, project_root)?)
-    } else {
-        None
+    let context = load_required_context(cli, root)?;
+    let Some(registry) = context.registry.as_ref() else {
+        return Ok(vec![]);
     };
-    let registry = context.as_ref().and_then(|ctx| ctx.registry.as_ref());
-    let records = metactl::materializer::installed_projection_destinations(project_root)
-        .map_err(state_error)?;
-    let strict_inventory = context.is_some() || !records.is_empty();
-    let mut verified = BTreeSet::new();
-    for (destination, pack_ref, digest) in records {
-        validate_relative_destination(&destination).map_err(state_error)?;
-        // Only root instruction documents are constructed from shared packs.
-        // Every other missing pack reference is unknown provenance.
-        if pack_ref.is_none() && shared_root_instruction(&destination) {
-            continue;
-        }
-        let is_shared = pack_ref
-            .as_ref()
-            .and_then(|reference| {
-                registry?.pack_by_id(&reference.id).filter(|pack| {
-                    reference.version.as_deref() == Some(pack.manifest.version.as_str())
-                })
-            })
-            .is_some_and(|pack| pack.manifest.visibility_scope == metactl::VisibilityScope::Shared);
-        if is_shared && projection_bytes_match(project_root, &destination, digest.as_deref())? {
-            verified.insert(destination);
-            continue;
-        }
-        if retained_local_destination(&destination) {
-            checked_destination(project_root, &destination).map_err(state_error)?;
-            continue;
-        }
-        let path = checked_destination(project_root, &destination).map_err(state_error)?;
-        let present = match fs::symlink_metadata(&path) {
-            Ok(_) => true,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => false,
-            Err(err) => return Err(state_error(anyhow!("inspect {}: {err}", path.display()))),
-        };
-        if present || indexed_destination(project_root, &destination)? {
-            return Err(privacy_refusal(format!(
-                "installed private or unverified projection {} would lose Git protection",
-                destination
-            )));
-        }
-    }
-    refuse_uninventoried_generated_paths(project_root, prepared, &verified, strict_inventory)?;
-
-    if let Some(context) = context {
-        let targets = context
-            .selected_targets(&ConfigOverrides::default())
-            .map_err(state_error)?;
-        let kernel = kernel_from_context(&context).map_err(state_error)?;
-        for target in targets {
-            if !target.compile_targets.iter().any(|output| {
-                !matches!(
-                    output.output_kind,
-                    metactl::CompileTargetKind::AgentsMd
-                        | metactl::CompileTargetKind::ClaudeMd
-                        | metactl::CompileTargetKind::OpenclawMd
-                )
-            }) {
-                continue;
-            }
-            let overrides = ConfigOverrides {
+    let kernel = kernel_from_context(&context).map_err(state_error)?;
+    let mut proofs = Vec::new();
+    for target in context
+        .selected_targets(&ConfigOverrides::default())
+        .map_err(state_error)?
+    {
+        let config = context
+            .effective_config(&ConfigOverrides {
                 targets: vec![target.target_id.clone()],
                 ..Default::default()
-            };
-            let config = context.effective_config(&overrides).map_err(state_error)?;
-            let graph = kernel
-                .resolve(ResolveParams {
-                    config,
-                    overlay: context.overlay.clone(),
-                    available_targets: vec![target],
-                    provenance: None,
+            })
+            .map_err(state_error)?;
+        let surface_selection_mode = config
+            .defaults
+            .as_ref()
+            .and_then(|d| d.surface_selection_mode.clone());
+        let graph = kernel
+            .resolve(ResolveParams {
+                config,
+                overlay: context.overlay.clone(),
+                available_targets: vec![target.clone()],
+                provenance: None,
+            })
+            .map_err(state_error)?;
+        proofs.extend(
+            registry
+                .projection_proofs(&CompileParams {
+                    resolve_graph: graph,
+                    apply_mode: preferred_apply_mode_for_target(&target, None),
+                    target_capability: target,
+                    surface_selection_mode,
+                    emit_policy_report: false,
+                    durable_staging: false,
+                    project_root: Some(root.to_string_lossy().into()),
                 })
-                .map_err(state_error)?;
-            for reference in &graph.activated_pack_refs {
-                if graph.pack_visibility.get(&reference.id)
-                    != Some(&metactl::VisibilityScope::Shared)
-                {
-                    return Err(privacy_refusal(format!(
-                        "active private or unverified pack {} can reach a nonlocal target",
-                        reference.id
-                    )));
+                .map_err(state_error)?,
+        );
+    }
+    Ok(proofs)
+}
+
+/// Exact private paths supplement the managed rules. Authored negations remain
+/// in their original order and still have to pass effective-rule verification.
+pub(super) fn add_private_patterns(
+    cli: &Cli,
+    root: &Path,
+    specs: &mut [IgnoreBlockSpec],
+) -> std::result::Result<(), CliError> {
+    let paths: BTreeSet<_> = planned_proofs(cli, root)?
+        .into_iter()
+        .filter(|p| p.private)
+        .map(|p| p.destination)
+        .collect();
+    // Private pack identifiers must not enter the shareable .gitignore itself.
+    for spec in specs
+        .iter_mut()
+        .filter(|s| s.begin == IGNORE_BLOCK_BEGIN && s.path.ends_with("info/exclude"))
+    {
+        for path in &paths {
+            validate_relative_destination(path).map_err(state_error)?;
+            let escaped: String = path
+                .chars()
+                .flat_map(|c| {
+                    if "\\*?[]!# ".contains(c) {
+                        vec!['\\', c]
+                    } else {
+                        vec![c]
+                    }
+                })
+                .collect();
+            spec.lines.push(format!("/{escaped}"));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn ensure_private_projection_safe_for_ignore_change(
+    cli: &Cli,
+    root: &Path,
+    prepared: &[PreparedIgnoreWrite],
+) -> std::result::Result<(), CliError> {
+    let records =
+        metactl::materializer::installed_projection_destinations(root).map_err(state_error)?;
+    let configured = project_config_path(root, cli.config.as_deref()).exists();
+    let strict = configured || !records.is_empty();
+    let proofs = planned_proofs(cli, root)?;
+    let mut private: BTreeSet<String> = PRIVATE_LOCAL_DESTINATIONS
+        .iter()
+        .map(|s| (*s).into())
+        .collect();
+    private.extend([
+        ".metactl/".into(),
+        ".metactl/private-publication-probe".into(),
+        "metactl.local.yaml".into(),
+    ]);
+    private.extend(
+        proofs
+            .iter()
+            .filter(|p| p.private)
+            .map(|p| p.destination.clone()),
+    );
+    let shared: BTreeMap<_, _> = proofs
+        .iter()
+        .filter(|p| !p.private)
+        .map(|p| (p.destination.clone(), p))
+        .collect();
+    let mut verified = BTreeSet::new();
+    for (destination, reference, digest) in &records {
+        validate_relative_destination(destination).map_err(state_error)?;
+        if let Some(expected) = shared.get(destination) {
+            if digest.as_ref() == Some(&expected.digest)
+                && projection_bytes_match(
+                    root,
+                    destination,
+                    &expected.digest,
+                    Some(&expected.staged_path),
+                )?
+            {
+                verified.insert(destination.clone());
+            }
+        } else if reference.is_some() || private.contains(destination) {
+            private.insert(destination.clone());
+        }
+    }
+    if !ignore_recovery::git_worktree_present(root).map_err(state_error)? {
+        let weakening = prepared.iter().any(|w| {
+            let Some(original) = w
+                .original
+                .as_ref()
+                .and_then(|b| std::str::from_utf8(b).ok())
+            else {
+                return false;
+            };
+            let Some((start, end)) =
+                marked_block_span(original, IGNORE_BLOCK_BEGIN, IGNORE_BLOCK_END)
+                    .ok()
+                    .flatten()
+            else {
+                return false;
+            };
+            let updated = String::from_utf8_lossy(&w.updated);
+            original[start..end]
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with('!'))
+                .any(|l| !updated.lines().any(|n| n.trim() == l))
+        });
+        if strict && weakening {
+            return Err(privacy_refusal(
+                "a configured project needs a Git worktree before weakening protection".into(),
+            ));
+        }
+        if proofs.iter().any(|p| p.private) {
+            return Err(privacy_refusal(
+                "private projections require a Git worktree".into(),
+            ));
+        }
+        for dir in [
+            ".agents/skills",
+            ".codex/skills",
+            ".claude/skills",
+            ".cursor/skills",
+            ".gemini/skills",
+        ] {
+            if root.join(dir).exists() {
+                return Err(privacy_refusal(format!("generated-looking content under {dir} has no trustworthy projection inventory or Git worktree evidence")));
+            }
+        }
+        return Ok(());
+    }
+    let requested: Vec<_> = private
+        .iter()
+        .cloned()
+        .chain(records.iter().map(|r| r.0.clone()))
+        .collect();
+    let writes = prepared
+        .iter()
+        .map(|w| (w.path.clone(), w.updated.clone()))
+        .collect::<Vec<_>>();
+    let (git_root, evidence) = metactl::git_privacy::evaluate(root, &requested, &writes)
+        .map_err(|e| privacy_refusal(e.to_string()))?;
+    let canonical = fs::canonicalize(root).map_err(|e| state_error(e.into()))?;
+    let prefix = canonical
+        .strip_prefix(&git_root)
+        .map_err(|e| state_error(e.into()))?;
+    for (repository_path, proof) in evidence {
+        let destination = Path::new(&repository_path)
+            .strip_prefix(prefix)
+            .ok()
+            .and_then(Path::to_str);
+        let known_private =
+            destination.is_some_and(|d| private.contains(d) || retained_local_destination(d));
+        if known_private && (!proof.after || proof.tracked) {
+            return Err(privacy_refusal(format!("private destination {repository_path} must remain effectively ignored and untracked")));
+        }
+        // An already tracked, non-generated authored surface is an explicit
+        // publication choice. Inventory and generated paths still need byte
+        // proof; private classification always takes precedence above.
+        let authored_tracked = if proof.tracked {
+            if let Some(d) = destination
+                .filter(|d| !generated_destination(d) && !records.iter().any(|r| r.0 == *d))
+            {
+                let path = root.join(d);
+                if path.is_file() && !path.is_symlink() {
+                    let bytes = fs::read(path).map_err(|e| state_error(e.into()))?;
+                    projection_bytes_match(
+                        root,
+                        d,
+                        &format!("sha256:{}", hex::encode(Sha256::digest(&bytes))),
+                        None,
+                    )?
+                } else {
+                    false
                 }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        if proof.before
+            && !proof.after
+            && !authored_tracked
+            && !destination.is_some_and(|d| verified.contains(d))
+        {
+            if strict || destination.is_none() || destination.is_some_and(generated_destination) {
+                return Err(privacy_refusal(format!(
+                    "affected path {repository_path} has no verified public projection bytes"
+                )));
             }
         }
     }
     Ok(())
 }
 
-fn checked_destination(project_root: &Path, destination: &str) -> Result<PathBuf> {
-    validate_relative_destination(destination)?;
-    let relative = Path::new(destination);
-    let mut path = project_root.to_path_buf();
-    for part in relative.components() {
-        path.push(part);
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(anyhow!("symlinked projection destination: {destination}"));
-            }
-            Ok(_) => {}
-            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-            Err(err) => return Err(err.into()),
-        }
+pub(super) fn ensure_private_sync_safe(
+    cli: &Cli,
+    root: &Path,
+) -> std::result::Result<(), CliError> {
+    let mut paths: Vec<_> = planned_proofs(cli, root)?
+        .into_iter()
+        .filter(|p| p.private)
+        .map(|p| p.destination)
+        .collect();
+    if !paths.is_empty() {
+        paths.push(".metactl/".into());
     }
-    Ok(path)
+    metactl::git_privacy::require_private(root, &paths).map_err(state_error)
 }
 
 fn validate_relative_destination(destination: &str) -> Result<()> {
-    let relative = Path::new(destination);
     if destination.is_empty()
-        || !relative
+        || !Path::new(destination)
             .components()
-            .all(|part| matches!(part, Component::Normal(_)))
+            .all(|p| matches!(p, Component::Normal(_)))
     {
         return Err(anyhow!("unsafe projection destination: {destination}"));
     }
     Ok(())
-}
-
-fn shared_root_instruction(destination: &str) -> bool {
-    matches!(
-        destination,
-        "AGENTS.md" | "CLAUDE.md" | "GEMINI.md" | "OpenClaw.md"
-    )
 }
 
 fn generated_destination(destination: &str) -> bool {
@@ -329,269 +385,94 @@ fn generated_destination(destination: &str) -> bool {
         ".gemini/commands",
     ]
     .iter()
-    .any(|root| destination == *root || destination.starts_with(&format!("{root}/")))
+    .any(|r| destination == *r || destination.starts_with(&format!("{r}/")))
 }
 
-/// Inspect both working files (including ignored files) and index-only entries.
-/// Git identifies the original rule responsible for protection, so custom
-/// destinations and targets absent from the current selection are covered too.
-fn refuse_uninventoried_generated_paths(
-    project_root: &Path,
-    prepared: &[PreparedIgnoreWrite],
-    verified: &BTreeSet<String>,
-    strict_inventory: bool,
-) -> std::result::Result<(), CliError> {
-    if !ignore_recovery::git_worktree_present(project_root).map_err(state_error)? {
-        if strict_inventory {
-            return Err(privacy_refusal(
-                "a configured project needs a Git worktree to verify every affected path before weakening existing protection; initialize Git and retry".into(),
-            ));
-        }
-        for relative in [
-            ".agents/skills",
-            ".codex/skills",
-            ".codex/commands",
-            ".claude/skills",
-            ".claude/commands",
-            ".cursor/skills",
-            ".gemini/skills",
-            ".gemini/commands",
-        ] {
-            let path = checked_destination(project_root, relative).map_err(state_error)?;
-            match fs::symlink_metadata(path) {
-                Ok(_) => return Err(privacy_refusal(format!(
-                    "generated-looking content under {relative} has no trustworthy projection inventory or Git worktree evidence"
-                ))),
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                Err(err) => return Err(state_error(anyhow!("inspect {relative}: {err}"))),
-            }
-        }
-        return Ok(());
-    }
-    let root_output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .map_err(|err| state_error(anyhow!("inspect Git root: {err}")))?;
-    if !root_output.status.success() {
-        return Err(privacy_refusal("Git root cannot be verified".into()));
-    }
-    let root_text = std::str::from_utf8(&root_output.stdout)
-        .map_err(|_| privacy_refusal("non-UTF8 Git root cannot be verified".into()))?;
-    let git_root =
-        fs::canonicalize(root_text.trim_end_matches('\n')).map_err(|e| state_error(e.into()))?;
-    let project = fs::canonicalize(project_root).map_err(|e| state_error(e.into()))?;
-    let prefix = project
-        .strip_prefix(&git_root)
-        .map_err(|_| privacy_refusal("project is outside the Git worktree".into()))?;
-    let files = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["ls-files", "--cached", "--others", "--full-name", "-z"])
-        .output()
-        .map_err(|err| state_error(anyhow!("inspect affected paths: {err}")))?;
-    if !files.status.success() {
-        return Err(privacy_refusal("affected-path enumeration failed".into()));
-    }
-    let mut candidates = BTreeMap::new();
-    for raw in files
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|path| !path.is_empty())
-    {
-        let repository_path = std::str::from_utf8(raw)
-            .map_err(|_| privacy_refusal("non-UTF8 affected path cannot be verified".into()))?;
-        validate_relative_destination(repository_path).map_err(state_error)?;
-        let destination = Path::new(repository_path)
-            .strip_prefix(prefix)
-            .ok()
-            .and_then(Path::to_str)
-            .ok_or_else(|| privacy_refusal("affected path is outside the project".into()))?;
-        validate_relative_destination(destination).map_err(state_error)?;
-        if retained_local_destination(destination) || verified.contains(destination) {
-            continue;
-        }
-        // Preserve legacy configless authored surfaces. Generated-looking paths
-        // still need proof even when no MetaCTL project has been configured.
-        if !strict_inventory && !generated_destination(destination) {
-            continue;
-        }
-        candidates.insert(repository_path.to_string(), destination.to_string());
-    }
-    if candidates.is_empty() {
-        return Ok(());
-    }
-    let input = candidates
-        .keys()
-        .flat_map(|path| path.as_bytes().iter().copied().chain([0]))
-        .collect::<Vec<_>>();
-    // Drain output while feeding stdin: ignored trees can exceed both pipe
-    // buffers. One process handles all candidates, including unmatched paths.
-    let mut probe = Command::new("git")
-        .arg("-C")
-        .arg(&git_root)
-        .args([
-            "check-ignore",
-            "--no-index",
-            "--verbose",
-            "--non-matching",
-            "-z",
-            "--stdin",
-        ])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|err| state_error(anyhow!("inspect ignore rule: {err}")))?;
-    let mut stdin = probe
-        .stdin
-        .take()
-        .ok_or_else(|| state_error(anyhow!("missing ignore probe input")))?;
-    let writer = std::thread::spawn(move || stdin.write_all(&input));
-    let ignored = probe
-        .wait_with_output()
-        .map_err(|err| state_error(anyhow!("inspect ignore rule: {err}")));
-    writer
-        .join()
-        .map_err(|_| privacy_refusal("ignore input writer failed".into()))?
-        .map_err(|err| state_error(anyhow!("write ignore probe: {err}")))?;
-    let ignored = ignored?;
-    if !matches!(ignored.status.code(), Some(0 | 1)) {
-        return Err(privacy_refusal("affected-path ignore probe failed".into()));
-    }
-    if !ignored.stdout.ends_with(&[0]) {
-        return Err(privacy_refusal("unterminated ignore evidence".into()));
-    }
-    let fields = ignored.stdout[..ignored.stdout.len() - 1]
-        .split(|byte| *byte == 0)
-        .collect::<Vec<_>>();
-    if fields.len() != candidates.len() * 4 {
-        return Err(privacy_refusal(
-            "invalid affected-path ignore evidence".into(),
-        ));
-    }
-    for fields in fields.chunks_exact(4) {
-        let name = std::str::from_utf8(fields[3])
-            .map_err(|_| privacy_refusal("non-UTF8 ignore evidence".into()))?;
-        let destination = candidates
-            .remove(name)
-            .ok_or_else(|| privacy_refusal("unexpected or duplicate ignore evidence".into()))?;
-        if fields[..3].iter().all(|field| field.is_empty()) {
-            continue;
-        }
-        let source = PathBuf::from(
-            std::str::from_utf8(fields[0])
-                .map_err(|_| privacy_refusal("non-UTF8 ignore source".into()))?,
-        );
-        let source = if source.is_absolute() {
-            source
-        } else {
-            git_root.join(source)
-        };
-        let source = fs::canonicalize(source).map_err(|e| state_error(e.into()))?;
-        let line = std::str::from_utf8(fields[1])
-            .ok()
-            .and_then(|line| line.parse::<usize>().ok())
-            .filter(|line| *line > 0)
-            .ok_or_else(|| privacy_refusal("invalid ignore source line".into()))?;
-        for write in prepared {
-            if write.original.is_none()
-                || write.original.as_deref() == Some(write.updated.as_slice())
-            {
-                continue;
-            }
-            if source != fs::canonicalize(&write.path).map_err(|e| state_error(e.into()))? {
-                continue;
-            }
-            let original = std::str::from_utf8(write.original.as_deref().unwrap_or_default())
-                .map_err(|err| state_error(anyhow!("invalid ignore preimage: {err}")))?;
-            let mut in_block = false;
-            for (index, text) in original.lines().enumerate() {
-                if text.trim() == IGNORE_BLOCK_BEGIN {
-                    in_block = true;
-                }
-                if text.trim() == IGNORE_BLOCK_END {
-                    in_block = false;
-                }
-                if in_block && line == index + 1 && !fields[2].starts_with(b"!") {
-                    return Err(privacy_refusal(format!(
-                        "affected path {destination} has no verified public projection bytes"
-                    )));
-                }
-            }
-        }
-    }
-    Ok(())
+fn retained_local_destination(destination: &str) -> bool {
+    destination == ".metactl"
+        || destination.starts_with(".metactl/")
+        || PRIVATE_LOCAL_DESTINATIONS.contains(&destination)
 }
 
 fn projection_bytes_match(
-    project_root: &Path,
+    root: &Path,
     destination: &str,
-    digest: Option<&str>,
+    digest: &str,
+    expected_staged: Option<&str>,
 ) -> std::result::Result<bool, CliError> {
-    let Some(digest) = digest else {
-        return Ok(false);
+    let path = root.join(destination);
+    let mut parent = path.parent();
+    while let Some(p) = parent {
+        if p == root {
+            break;
+        }
+        if p.is_symlink() {
+            return Ok(false);
+        }
+        parent = p.parent();
+    }
+    let link = if path.is_symlink() {
+        let Some(expected) = expected_staged else {
+            return Ok(false);
+        };
+        let resolved = fs::canonicalize(&path).map_err(|e| state_error(e.into()))?;
+        if resolved != fs::canonicalize(root.join(expected)).map_err(|e| state_error(e.into()))? {
+            return Ok(false);
+        }
+        let generated =
+            fs::canonicalize(root.join(".metactl/generated")).map_err(|e| state_error(e.into()))?;
+        if !resolved.starts_with(generated) {
+            return Ok(false);
+        }
+        Some(fs::read_link(&path).map_err(|e| state_error(e.into()))?)
+    } else {
+        None
     };
-    let path = checked_destination(project_root, destination).map_err(state_error)?;
     match fs::read(&path) {
         Ok(bytes) if format!("sha256:{}", hex::encode(Sha256::digest(&bytes))) != digest => {
             return Ok(false)
         }
         Ok(_) => {}
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => return Err(state_error(anyhow!("inspect projection bytes: {err}"))),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(state_error(e.into())),
     }
-    if indexed_destination(project_root, destination)? {
-        let output = Command::new("git")
+    let index = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "--cached", "-z", "--", destination])
+        .output()
+        .map_err(|e| state_error(e.into()))?;
+    if !index.status.success() {
+        return Ok(false);
+    }
+    if !index.stdout.is_empty() {
+        let out = Command::new("git")
             .arg("-C")
-            .arg(project_root)
+            .arg(root)
             .args(["show", &format!(":./{destination}")])
             .output()
-            .map_err(|err| state_error(anyhow!("inspect indexed bytes: {err}")))?;
-        if !output.status.success()
-            || format!("sha256:{}", hex::encode(Sha256::digest(&output.stdout))) != digest
-        {
+            .map_err(|e| state_error(e.into()))?;
+        if !out.status.success() {
+            return Ok(false);
+        }
+        if let Some(link) = link {
+            if out.stdout != link.to_string_lossy().as_bytes() {
+                return Ok(false);
+            }
+        } else if format!("sha256:{}", hex::encode(Sha256::digest(&out.stdout))) != digest {
             return Ok(false);
         }
     }
     Ok(true)
 }
 
-fn retained_local_destination(destination: &str) -> bool {
-    destination.starts_with(".metactl/") || PRIVATE_LOCAL_DESTINATIONS.contains(&destination)
-}
-
-fn indexed_destination(
-    project_root: &Path,
-    destination: &str,
-) -> std::result::Result<bool, CliError> {
-    if !ignore_recovery::git_worktree_present(project_root).map_err(state_error)? {
-        return Ok(false);
-    }
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["ls-files", "--cached", "-z", "--", destination])
-        .output()
-        .map_err(|err| state_error(anyhow!("inspect Git index: {err}")))?;
-    if !output.status.success() {
-        return Err(privacy_refusal(format!(
-            "Git index probe failed for {destination}"
-        )));
-    }
-    Ok(!output.stdout.is_empty())
-}
-
 fn privacy_refusal(detail: String) -> CliError {
-    let mut error = CliError::new(EXIT_STATE, format!(
-        "Refusing ignore change: {detail}. Preserve the existing ignore rules or remove private projections through a separately reviewed migration."
-    ));
-    if let Some(object) = error.json.as_object_mut() {
+    let mut err = CliError::new(EXIT_STATE, format!("Refusing ignore change: {detail}. Preserve existing ignore rules and resolve private projection protection before retrying."));
+    if let Some(object) = err.json.as_object_mut() {
         object.insert(
             "code".into(),
             json!("private_projection_protection_unproven"),
         );
     }
-    error
+    err
 }

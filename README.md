@@ -350,12 +350,27 @@ untrack `.agents/`, `.codex/`, `.claude/`, `.cursor/`, or `.gemini/` files.
 Exact private local names remain ignored independently of the selected target:
 `CLAUDE.local.md`, `GEMINI.local.md`, `AGENTS.local.md`, `OPENCLAW.local.md`,
 `.cursor/rules/metactl-pack-index.local.mdc`, `.claude/settings.local.json`,
-`.cursor/mcp.json`, and `.gemini/.env`. Install these rules before using private
-native instruction outputs; a successful `sync` alone is not proof that Git
-ignores them. Ignore rules do not remove previously tracked private files.
-Migration checks normalize nested projects against the Git worktree root and
-batch working/index-only path checks in one NUL-delimited Git probe. Ambiguous
-path or ignore-source evidence refuses the migration before writes.
+`.cursor/mcp.json`, and `.gemini/.env`. Private skills, resources and local
+instruction documents require effective Git protection before publication.
+Select private packs with `metactl use <pack> --local --no-input` so their
+identifiers stay in `metactl.local.yaml`; `add` deliberately edits the shared
+project configuration. Run `metactl ignore install --scope both --yes` after
+selecting private packs (then retry sync if the first publication was refused);
+exact private capability paths go only into local `.git/info/exclude`, keeping
+private identifiers out of the shared `.gitignore`. Sync refuses exposed or
+already tracked private outputs before staging them. Ignore rules never untrack
+files; resolve an already tracked private file through a separate reviewed Git
+change.
+
+Migration uses a payload-free temporary Git repository and verifies original
+rule parity before evaluating all proposed rules together. Preserved suffix
+negations, child `.gitignore` files and global excludes retain native precedence.
+Checks batch working and index-only paths in a constant number of Git probes.
+Unknown files that would lose protection refuse migration. Review each such file
+before explicitly publishing it; tracked non-generated authored files remain
+untouched. Generated paths still require matching shared synthesis evidence.
+Ambiguous paths, symlink parents and incomplete rule evidence refuse before writes.
+Protection is checked at operation time; later external rule changes invalidate it.
 Replacing existing ignore files currently requires Linux or macOS atomic
 exchange support. On other platforms this mutation fails closed; source
 installation support does not imply support for ignore-file replacement.

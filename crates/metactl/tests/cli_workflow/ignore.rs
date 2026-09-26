@@ -3,6 +3,129 @@ use super::*;
 // Ignore and repository hygiene workflow tests.
 
 #[test]
+fn ignore_resolves_supported_git_config_environment_selectors() {
+    let project = TempDir::new().unwrap();
+    let configuration = TempDir::new().unwrap();
+    git_init_project(project.path());
+    init_project(project.path());
+    let excludes = configuration.path().join("global-ignore");
+    fs::write(&excludes, "*.secret\n").unwrap();
+    let global = configuration.path().join("gitconfig");
+    fs::write(
+        &global,
+        format!(
+            "[core]\n excludesFile = {}\n",
+            serde_json::to_string(excludes.to_str().unwrap()).unwrap()
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(project.path().join(".claude")).unwrap();
+    fs::write(
+        project.path().join(".claude/custom.secret"),
+        "private fixture\n",
+    )
+    .unwrap();
+    let broad = "# metactl:begin generated-agent-surfaces\n.metactl/\n.claude/\n# metactl:end generated-agent-surfaces\n";
+    fs::write(project.path().join(".gitignore"), broad).unwrap();
+    let env = [
+        ("GIT_CONFIG_NOSYSTEM", "1"),
+        ("GIT_CONFIG_GLOBAL", global.to_str().unwrap()),
+    ];
+    for flag in ["--plan", "--yes"] {
+        let result = run_cli_env(
+            project.path(),
+            &[
+                "ignore",
+                "fix",
+                "--scope",
+                "repo",
+                "--target",
+                "codex-cli",
+                flag,
+            ],
+            &env,
+        );
+        assert!(result.status.success(), "{}", stderr(&result));
+        if flag == "--plan" {
+            assert_eq!(
+                fs::read_to_string(project.path().join(".gitignore")).unwrap(),
+                broad
+            );
+        }
+    }
+    let ignored = Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .envs(env)
+        .args(["check-ignore", "-q", "--", ".claude/custom.secret"])
+        .status()
+        .unwrap();
+    assert!(ignored.success());
+}
+
+#[test]
+fn private_suffix_negations_refuse_before_mutation_in_every_scope() {
+    for name in [
+        "CLAUDE.local.md",
+        "GEMINI.local.md",
+        "AGENTS.local.md",
+        "OPENCLAW.local.md",
+        ".cursor/rules/metactl-pack-index.local.mdc",
+        ".claude/settings.local.json",
+        ".cursor/mcp.json",
+        ".gemini/.env",
+    ] {
+        for scope in ["repo", "local", "both"] {
+            let project = TempDir::new().unwrap();
+            git_init_project(project.path());
+            let file = project.path().join(name);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "SYNTHETIC_PRIVATE_PRECEDENCE\n").unwrap();
+            let broad = format!("# metactl:begin generated-agent-surfaces\n.metactl/\n.claude/\n.cursor/\n.gemini/\n{name}\n# metactl:end generated-agent-surfaces\n!{name}\n");
+            let ignore = if scope == "local" {
+                project.path().join(".git/info/exclude")
+            } else {
+                project.path().join(".gitignore")
+            };
+            fs::write(&ignore, &broad).unwrap();
+            let before_index = run_git(project.path(), &["ls-files", "--stage"]).stdout;
+            for action in ["plan", "install", "fix"] {
+                let mut args = vec![
+                    "ignore",
+                    if action == "plan" { "fix" } else { action },
+                    "--scope",
+                    scope,
+                    "--target",
+                    "codex-cli",
+                ];
+                if action == "plan" {
+                    args.push("--plan");
+                } else {
+                    args.push("--yes");
+                }
+                let result = run_cli(project.path(), &args);
+                assert!(!result.status.success(), "{name} {scope} {action} accepted");
+                assert!(
+                    stderr(&result).contains("effectively ignored"),
+                    "{}",
+                    stderr(&result)
+                );
+                assert_eq!(fs::read_to_string(&ignore).unwrap(), broad);
+                assert_eq!(
+                    fs::read_to_string(&file).unwrap(),
+                    "SYNTHETIC_PRIVATE_PRECEDENCE\n"
+                );
+                assert_eq!(
+                    run_git(project.path(), &["ls-files", "--stage"]).stdout,
+                    before_index
+                );
+                assert!(!project.path().join(".metactl/ignore-recovery").exists());
+            }
+        }
+    }
+}
+
+#[test]
 fn ignore_nested_coordinates_refuse_unknown_working_and_index_only_paths() {
     for configured in [false, true] {
         for index_only in [false, true] {
@@ -141,11 +264,21 @@ fn ignore_private_local_names_survive_target_change_and_future_creation() {
                         args.push("--yes");
                     }
                     let result = run_cli(&project, &args);
+                    if migration && index_only {
+                        assert!(!result.status.success(), "tracked private path accepted");
+                        assert!(stderr(&result).contains("untracked"), "{}", stderr(&result));
+                        assert_eq!(fs::read(project.join(".gitignore")).ok(), before);
+                        assert_eq!(run_git(repo.path(), &["ls-files", "--stage"]).stdout, index);
+                        continue;
+                    }
                     assert!(result.status.success(), "{action}: {}", stderr(&result));
                     assert_eq!(run_git(repo.path(), &["ls-files", "--stage"]).stdout, index);
                     if action == "plan" {
                         assert_eq!(fs::read(project.join(".gitignore")).ok(), before);
                     }
+                }
+                if migration && index_only {
+                    continue;
                 }
                 for name in private {
                     let file = project.join(name);
@@ -178,7 +311,7 @@ fn ignore_private_local_names_survive_target_change_and_future_creation() {
 
 #[cfg(unix)]
 #[test]
-fn ignore_large_ignored_tree_uses_one_batched_probe() {
+fn ignore_large_ignored_tree_uses_constant_batched_probes() {
     use std::os::unix::fs::PermissionsExt;
     let project = TempDir::new().unwrap();
     git_init_project(project.path());
@@ -223,7 +356,8 @@ fn ignore_large_ignored_tree_uses_one_batched_probe() {
         ],
     );
     assert!(result.status.success(), "{}", stderr(&result));
-    assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 1);
+    // Original source, original shadow, proposed shadow, source revalidation.
+    assert_eq!(fs::read_to_string(log).unwrap().lines().count(), 4);
     assert!(start.elapsed() < std::time::Duration::from_secs(30));
 }
 
@@ -688,20 +822,27 @@ fn unknown_non_skill_projection_refuses_migration() {
 }
 
 #[test]
-fn configured_private_pack_cannot_synthesize_exposed_codex_skill() {
+fn configured_private_pack_requires_protection_before_skill_publication() {
     let project = TempDir::new().expect("tempdir");
     git_init_project(project.path());
-    init_project(project.path());
+    assert!(run_cli(
+        project.path(),
+        &["init", "--target", "claude-code", "--no-input"]
+    )
+    .status
+    .success());
     let add = run_cli(project.path(), &["add", "local-only-example"]);
     assert!(add.status.success(), "{}", stderr(&add));
     let sync = run_cli(project.path(), &["--json", "sync", "--yes"]);
-    assert!(sync.status.success(), "{}", stderr(&sync));
-    assert!(stdout(&sync).contains("private_nonlocal_outputs_omitted"));
+    assert!(
+        !sync.status.success(),
+        "private skill published without protection"
+    );
     assert!(!project
         .path()
-        .join(".agents/skills/local-only-example")
+        .join(".claude/skills/local-only-example")
         .exists());
-    let broad = b"# metactl:begin generated-agent-surfaces\n.agents/\n# metactl:end generated-agent-surfaces\n";
+    let broad = b"# metactl:begin generated-agent-surfaces\n.claude/\n# metactl:end generated-agent-surfaces\n";
     fs::write(project.path().join(".gitignore"), broad).expect("ignore");
     let plan = run_cli(
         project.path(),
@@ -712,7 +853,7 @@ fn configured_private_pack_cannot_synthesize_exposed_codex_skill() {
             "--scope",
             "repo",
             "--target",
-            "codex-cli",
+            "claude-code",
         ],
     );
     assert!(
@@ -807,12 +948,13 @@ fn ignore_fix_does_not_follow_symlinked_agent_or_state_ancestors() {
         project.path(),
         &["ignore", "fix", "--plan", "--target", "codex-cli"],
     );
-    assert!(plan.status.success(), "{}", stderr(&plan));
+    assert!(!plan.status.success(), "symlinked inventory accepted");
     let fix = run_cli(
         project.path(),
         &["ignore", "fix", "--target", "codex-cli", "--yes"],
     );
-    assert!(fix.status.success(), "{}", stderr(&fix));
+    assert!(!fix.status.success(), "symlinked inventory accepted");
+    assert!(!project.path().join(".gitignore").exists());
     assert!(project.path().join(".codex").is_symlink());
     assert_eq!(
         fs::read_to_string(outside.join("authored.md")).expect("outside"),
@@ -1493,7 +1635,11 @@ fn symlinked_private_recovery_root_is_refused_before_ignore_write() {
         !result.status.success(),
         "symlinked private root was accepted"
     );
-    assert!(stderr(&result).contains("not a real directory"));
+    assert!(
+        stderr(&result).contains("unsafe inventory directory"),
+        "{}",
+        stderr(&result)
+    );
     assert!(!project.path().join(".gitignore").exists());
     assert!(!outside.path().join("ignore-recovery").exists());
 }
@@ -1518,7 +1664,7 @@ fn explicit_unignore_of_recovery_directory_cannot_report_success() {
     );
     assert!(!result.status.success(), "stageable recovery was accepted");
     assert!(
-        stderr(&result).contains("recovery copy"),
+        stderr(&result).contains("private destination"),
         "{}",
         stderr(&result)
     );

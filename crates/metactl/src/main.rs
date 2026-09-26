@@ -7165,6 +7165,8 @@ fn cmd_compile_with_durable_writes(
         return Err(discoverability_error(&discoverability));
     }
 
+    ignore_privacy::ensure_private_sync_safe(cli, &project_root)?;
+
     let shared_surface_rules = shared_surface_rules(context.registry.as_ref(), &target_overrides);
 
     let kernel = kernel_from_context(&context).map_err(internal_error)?;
@@ -7413,6 +7415,7 @@ fn cmd_apply(cli: &Cli, args: &ApplyArgs) -> std::result::Result<CommandOutput, 
     if lock_is_stale_checked(&context)? {
         return Err(stale_lock_error());
     }
+    ignore_privacy::ensure_private_sync_safe(cli, &project_root)?;
     let kernel = kernel_from_context(&context).map_err(internal_error)?;
     let targets = select_locked_targets(&context.lock, args.target.clone())?;
     if args.plan_digest.is_some() && targets.len() != 1 {
@@ -11038,6 +11041,7 @@ fn rollback_ignore_writes(
 }
 
 fn apply_prepared_ignore_writes(
+    cli: &Cli,
     project_root: &Path,
     prepared: &[PreparedIgnoreWrite],
 ) -> std::result::Result<Vec<Value>, CliError> {
@@ -11099,6 +11103,17 @@ fn apply_prepared_ignore_writes(
             EXIT_STATE,
             format!(
                 "Ignore recovery staging check failed: {err}; rollback outcomes: {}",
+                outcomes.join("; ")
+            ),
+        ));
+    }
+    if let Err(err) = ensure_private_projection_safe_for_ignore_change(cli, project_root, &[]) {
+        let outcomes = rollback_ignore_writes(prepared, &written);
+        return Err(CliError::new(
+            EXIT_STATE,
+            format!(
+                "Ignore post-publication protection changed: {}; rollback outcomes: {}",
+                err.message,
                 outcomes.join("; ")
             ),
         ));
@@ -11173,19 +11188,20 @@ fn apply_ignore_scope(
         ));
     }
     ensure_no_broad_untouched_scope(project_root, scope)?;
-    let specs = ignore_block_specs(
+    let mut specs = ignore_block_specs(
         project_root,
         targets,
         scope,
         include_lock,
         include_private_sources,
     );
+    ignore_privacy::add_private_patterns(cli, project_root, &mut specs)?;
     let prepared = specs
         .iter()
         .map(prepare_ignore_write)
         .collect::<std::result::Result<Vec<_>, _>>()?;
     ensure_private_projection_safe_for_ignore_change(cli, project_root, &prepared)?;
-    apply_prepared_ignore_writes(project_root, &prepared)
+    apply_prepared_ignore_writes(cli, project_root, &prepared)
 }
 
 fn planned_ignore_actions(
@@ -11208,13 +11224,14 @@ fn planned_ignore_actions(
         ));
     }
     ensure_no_broad_untouched_scope(project_root, scope)?;
-    let specs = ignore_block_specs(
+    let mut specs = ignore_block_specs(
         project_root,
         targets,
         scope,
         include_lock,
         include_private_sources,
     );
+    ignore_privacy::add_private_patterns(cli, project_root, &mut specs)?;
     let prepared = specs
         .iter()
         .map(prepare_ignore_write)

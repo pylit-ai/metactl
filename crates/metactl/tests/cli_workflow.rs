@@ -2015,6 +2015,7 @@ fn init_claude_code_project(project: &Path) {
 #[test]
 fn private_pack_excluded_from_committed_claude_md() {
     let project = TempDir::new().expect("tempdir");
+    git_init_project(project.path());
     init_claude_code_project(project.path());
 
     // Add both a shared pack and the private pack
@@ -2022,6 +2023,12 @@ fn private_pack_excluded_from_committed_claude_md() {
     assert!(add_shared.status.success(), "{}", stderr(&add_shared));
     let add_private = run_cli(project.path(), &["add", "local-only-example"]);
     assert!(add_private.status.success(), "{}", stderr(&add_private));
+    assert!(run_cli(
+        project.path(),
+        &["ignore", "install", "--scope", "both", "--yes"]
+    )
+    .status
+    .success());
 
     // Compile
     let compile = run_cli(project.path(), &["--json", "compile"]);
@@ -2053,10 +2060,18 @@ fn private_pack_excluded_from_committed_claude_md() {
 #[test]
 fn private_pack_emitted_to_local_surface() {
     let project = TempDir::new().expect("tempdir");
+    git_init_project(project.path());
     init_claude_code_project(project.path());
 
     let add = run_cli(project.path(), &["add", "local-only-example"]);
     assert!(add.status.success(), "{}", stderr(&add));
+
+    assert!(run_cli(
+        project.path(),
+        &["ignore", "install", "--scope", "both", "--yes"]
+    )
+    .status
+    .success());
 
     let compile = run_cli(project.path(), &["--json", "compile"]);
     assert!(compile.status.success(), "{}", stderr(&compile));
@@ -2108,12 +2123,20 @@ fn shared_pack_backward_compat_appears_in_committed_index() {
 #[test]
 fn private_pack_degradation_when_target_lacks_local_surface() {
     let project = TempDir::new().expect("tempdir");
+    git_init_project(project.path());
 
     // codex-cli has degraded local_projection support
     init_project(project.path());
 
     let add = run_cli(project.path(), &["add", "local-only-example"]);
     assert!(add.status.success(), "{}", stderr(&add));
+
+    assert!(run_cli(
+        project.path(),
+        &["ignore", "install", "--scope", "both", "--yes"]
+    )
+    .status
+    .success());
 
     let compile = run_cli(project.path(), &["--json", "compile"]);
     assert!(compile.status.success(), "{}", stderr(&compile));
