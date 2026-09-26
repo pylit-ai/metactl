@@ -2,6 +2,141 @@ use super::*;
 
 // Ignore and repository hygiene workflow tests.
 
+#[test]
+fn ignore_partial_inventory_covers_omitted_custom_and_index_only_paths() {
+    for destination in [
+        ".agents/skills/leftover/SKILL.md",
+        ".codex/custom/data.txt",
+        ".claude/commands/leftover.md",
+        ".cursor/rules/leftover.mdc",
+        ".gemini/custom/data.txt",
+        "custom-resources/leftover.txt",
+    ] {
+        for index_only in [false, true] {
+            let project = TempDir::new().expect("tempdir");
+            git_init_project(project.path());
+            init_project(project.path());
+            let sync = run_cli(project.path(), &["sync", "--yes"]);
+            assert!(sync.status.success(), "{}", stderr(&sync));
+            let file = project.path().join(destination);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(&file, "SYNTHETIC_PRIVATE_CANARY\n").unwrap();
+            if index_only {
+                git_add_forced(project.path(), &[destination]);
+                fs::remove_file(&file).unwrap();
+            }
+            let broad = if destination.starts_with("custom-resources/") {
+                "# metactl:begin generated-agent-surfaces\n.metactl/\ncustom-resources/\n# metactl:end generated-agent-surfaces\n"
+            } else {
+                "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n.codex/\n.claude/\n.cursor/\n.gemini/\n# metactl:end generated-agent-surfaces\n"
+            };
+            for path in [".gitignore", ".git/info/exclude"] {
+                fs::write(project.path().join(path), broad).unwrap();
+            }
+            let before = run_git(project.path(), &["ls-files", "--stage"]).stdout;
+            for action in ["plan", "fix", "install"] {
+                let mut args = vec![
+                    "ignore",
+                    if action == "plan" { "fix" } else { action },
+                    "--scope",
+                    "both",
+                    "--target",
+                    "codex-cli",
+                ];
+                if action == "plan" {
+                    args.push("--plan");
+                }
+                if action == "fix" {
+                    args.push("--yes");
+                }
+                let result = run_cli(project.path(), &args);
+                assert!(
+                    !result.status.success(),
+                    "{destination} index_only={index_only}: {}",
+                    stdout(&result)
+                );
+                for path in [".gitignore", ".git/info/exclude"] {
+                    assert_eq!(
+                        fs::read_to_string(project.path().join(path)).unwrap(),
+                        broad
+                    );
+                }
+                assert_eq!(
+                    run_git(project.path(), &["ls-files", "--stage"]).stdout,
+                    before
+                );
+            }
+            if !index_only {
+                assert!(run_git(project.path(), &["add", "--all"]).status.success());
+                assert!(
+                    !run_git(project.path(), &["show", &format!(":{destination}")])
+                        .status
+                        .success()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn ignore_shared_inventory_requires_matching_worktree_and_index_bytes() {
+    for mode in ["unchanged", "working", "index-only", "different-index"] {
+        let project = TempDir::new().expect("tempdir");
+        git_init_project(project.path());
+        init_project(project.path());
+        let sync = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(sync.status.success(), "{}", stderr(&sync));
+        let destination = ".agents/skills/python-refactor/python-refactor/SKILL.md";
+        let file = project.path().join(destination);
+        let original = fs::read(&file).unwrap();
+        if mode != "unchanged" {
+            fs::write(&file, "SYNTHETIC_PRIVATE_CANARY\n").unwrap();
+            if mode != "working" {
+                git_add_forced(project.path(), &[destination]);
+                if mode == "index-only" {
+                    fs::remove_file(&file).unwrap();
+                } else {
+                    fs::write(&file, &original).unwrap();
+                }
+            }
+        }
+        let broad = "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n.codex/\n# metactl:end generated-agent-surfaces\n";
+        fs::write(project.path().join(".gitignore"), broad).unwrap();
+        let before = run_git(project.path(), &["ls-files", "--stage"]).stdout;
+        let result = run_cli(
+            project.path(),
+            &[
+                "ignore",
+                "fix",
+                "--scope",
+                "repo",
+                "--target",
+                "codex-cli",
+                "--yes",
+            ],
+        );
+        assert_eq!(
+            result.status.success(),
+            mode == "unchanged",
+            "{mode}: {} {}",
+            stdout(&result),
+            stderr(&result)
+        );
+        assert_eq!(
+            run_git(project.path(), &["ls-files", "--stage"]).stdout,
+            before
+        );
+        if mode != "unchanged" {
+            assert_eq!(
+                fs::read_to_string(project.path().join(".gitignore")).unwrap(),
+                broad
+            );
+        } else {
+            assert!(!agent_path_is_ignored(project.path(), destination));
+        }
+    }
+}
+
 fn agent_path_is_ignored(project: &Path, path: &str) -> bool {
     Command::new("git")
         .arg("-C")

@@ -1974,7 +1974,7 @@ fn load_state(path: &Path) -> Result<Option<ManagedState>> {
 /// A malformed or symlinked inventory must never be treated as an empty inventory.
 pub fn installed_projection_destinations(
     project_root: &Path,
-) -> Result<Vec<(String, Option<Ref>)>> {
+) -> Result<Vec<(String, Option<Ref>, Option<String>)>> {
     let root = project_root.join(".metactl");
     if !safe_inventory_directory(&root)? {
         return Ok(Vec::new());
@@ -1998,12 +1998,13 @@ pub fn installed_projection_destinations(
                 }
                 safe_inventory_file(&path)?;
                 if let Some(state) = load_state(&path)? {
-                    records.extend(
-                        state
-                            .outputs
-                            .into_iter()
-                            .map(|output| (output.destination_path, output.pack_ref)),
-                    );
+                    records.extend(state.outputs.into_iter().map(|output| {
+                        (
+                            output.destination_path,
+                            output.pack_ref,
+                            Some(output.applied_digest),
+                        )
+                    }));
                 }
             } else {
                 if !safe_inventory_directory(&path)? {
@@ -2026,6 +2027,7 @@ pub fn installed_projection_destinations(
                                     )
                                 })?,
                                 output.pack_ref,
+                                output.digest,
                             ));
                         }
                     }
