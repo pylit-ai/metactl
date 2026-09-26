@@ -75,6 +75,47 @@ fn ledger_path(root: &Path) -> Result<PathBuf, CliError> {
         .join(format!("{}.jsonl", &digest[..16])))
 }
 
+fn resolved_python(python: &Path) -> Result<PathBuf, CliError> {
+    if python.is_absolute() {
+        return Ok(python.to_path_buf());
+    }
+    if python.components().count() != 1 {
+        return Err(CliError::new(
+            EXIT_VALIDATION,
+            "Use an absolute --python path or an executable name on PATH.",
+        ));
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|directory| directory.join(python))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| CliError::new(EXIT_STATE,
+            format!("Python interpreter '{}' was not found on PATH. Pass --python /absolute/path/to/python3.", python.display())))
+}
+
+fn canonicalize_missing_tail(path: &Path) -> Result<PathBuf, CliError> {
+    let mut absent = Vec::new();
+    let mut prefix = path;
+    while !prefix.exists() {
+        absent.push(
+            prefix
+                .file_name()
+                .ok_or_else(|| {
+                    CliError::new(EXIT_VALIDATION, "Use an absolute project path for removal.")
+                })?
+                .to_os_string(),
+        );
+        prefix = prefix.parent().ok_or_else(|| {
+            CliError::new(EXIT_VALIDATION, "Use an absolute project path for removal.")
+        })?;
+    }
+    let mut resolved = prefix.canonicalize().map_err(internal_error)?;
+    for component in absent.into_iter().rev() {
+        resolved.push(component);
+    }
+    Ok(resolved)
+}
+
 fn host_command(
     cli: &Cli,
     root: &Path,
@@ -364,6 +405,9 @@ fn git_visibility(root: &Path, path: &Path, scope: DiscoveryScopeArg) -> &'stati
     if scope == DiscoveryScopeArg::User {
         return "user_config";
     }
+    if tracked(root, path) {
+        return "tracked";
+    }
     if !Command::new("git")
         .arg("-C")
         .arg(root)
@@ -427,8 +471,11 @@ fn write_private(path: &Path, body: &str) -> Result<(), CliError> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(path)
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+            .unwrap_or(0o600);
         temp.as_file()
-            .set_permissions(fs::Permissions::from_mode(0o600))
+            .set_permissions(fs::Permissions::from_mode(mode))
             .map_err(internal_error)?;
     }
     temp.persist(path).map_err(internal_error)?;
@@ -626,14 +673,24 @@ fn connection(
     target: &str,
     scope: DiscoveryScopeArg,
     python: &Path,
+    removing: bool,
 ) -> Result<(PathBuf, PathBuf, PathBuf, String, Vec<String>), CliError> {
-    let root = project_root(cli)
-        .map_err(internal_error)?
-        .canonicalize()
-        .map_err(internal_error)?;
+    let supplied = project_root(cli).map_err(internal_error)?;
+    let root = match supplied.canonicalize() {
+        Ok(path) => path,
+        Err(_) if removing && scope == DiscoveryScopeArg::User && supplied.is_absolute() => {
+            canonicalize_missing_tail(&supplied)?
+        }
+        Err(error) => return Err(internal_error(error)),
+    };
     let path = target_path(&root, target, scope)?;
     let ledger = ledger_path(&root)?;
-    let (command, args) = host_command(cli, &root, target, &ledger, python)?;
+    let python = if removing {
+        python.to_path_buf()
+    } else {
+        resolved_python(python)?
+    };
+    let (command, args) = host_command(cli, &root, target, &ledger, &python)?;
     Ok((root, path, ledger, command, args))
 }
 
@@ -688,8 +745,13 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
 }
 
 pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandOutput, CliError> {
-    let (root, path, ledger, command, args) =
-        connection(cli, &options.target, options.scope, &options.python)?;
+    let (root, path, ledger, command, args) = connection(
+        cli,
+        &options.target,
+        options.scope,
+        &options.python,
+        options.remove,
+    )?;
     if !options.remove {
         let (host, count) = offline_status(&command, &args);
         if host != "ready" || count.as_u64().unwrap_or(0) == 0 {
@@ -764,8 +826,9 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         None
     };
     let rollback = format!(
-        "{}metactl --project {} skills connect --target {} --scope {} --remove",
+        "{}{} --project {} skills connect --target {} --scope {} --remove",
         codex_home.unwrap_or_default(),
+        shell_quote(&command),
         shell_quote(&root.to_string_lossy()),
         shell_quote(&options.target),
         if options.scope == DiscoveryScopeArg::User {
@@ -777,6 +840,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
     let visibility = git_visibility(&root, &path, options.scope);
     let git_note = if visibility == "unignored" {
         "Machine-specific config is not ignored by Git. Add this path to .git/info/exclude or a reviewed .gitignore before committing."
+    } else if visibility == "tracked" {
+        "This config is tracked by Git, so --apply will refuse. Review a portable registration or move machine-specific settings to a local config."
     } else {
         ""
     };
@@ -802,7 +867,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
 
 pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOutput, CliError> {
     let (root, path, ledger, command, args) =
-        connection(cli, &options.target, options.scope, &options.python)?;
+        connection(cli, &options.target, options.scope, &options.python, false)?;
     let config = read_config(&path)?.unwrap_or_default();
     let (registration, registered) = if options.target == "codex-cli" {
         match parse_codex_toml(&config) {
@@ -839,8 +904,34 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     let matches_requested = registered
         .as_ref()
         .is_some_and(|entry| entry.command == command && entry.args == args);
+    let catalog = cli_skills::cmd_skill_discovery(cli, &SkillsCommand::Catalog)
+        .ok()
+        .and_then(|output| {
+            output
+                .json
+                .get("result")?
+                .get("skills")?
+                .as_array()
+                .map(|skills| json!(skills.len()))
+        })
+        .unwrap_or(Value::Null);
+    let registered_command = registered.as_ref().map(|entry| entry.command.as_str());
+    let registered_log = registered
+        .as_ref()
+        .and_then(|entry| entry.args.last().map(String::as_str));
+    let drift = registered.as_ref().and_then(|entry| {
+        if entry.command != command {
+            Some("command_differs")
+        } else if entry.args.last() != args.last() {
+            Some("event_log_differs")
+        } else if entry.args != args {
+            Some("options_differ")
+        } else {
+            None
+        }
+    });
     // A project-controlled client config is data for doctor, never a command to execute.
-    let (host, catalog) = if registered.is_some() && !matches_requested {
+    let (host, host_catalog) = if registered.is_some() && !matches_requested {
         ("unknown_registration_drift".into(), Value::Null)
     } else {
         offline_status(&command, &args)
@@ -894,8 +985,8 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     } else {
         "unknown_log_error"
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills\nRegistration: {} ({})\nRequested options match registration: {}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events, including manual calls)\nEvent log: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), matches_requested, host, routing, observed, log_status, ledger.display());
+    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills (local)\nRegistration: {} ({})\nRegistered command: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events, including manual calls)\nEvent log checked: {} ({})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason})")).unwrap_or_default(), host, routing, observed, log_status, ledger.display());
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -904,7 +995,9 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
             json!({
                 "target": options.target, "config_path": path, "catalog_eligible_skills": catalog,
                 "registration": registration, "registration_matches_requested_options": matches_requested,
-                "registered_command": registered.as_ref().map(|entry| &entry.command), "host": host, "agent_tools": "unknown",
+                "registered_command": registered_command, "registered_event_log": registered_log,
+                "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_catalog,
+                "agent_tools": "unknown",
                 "routing": routing, "matching_discoveries": observed, "latest_discovery": latest,
                 "event_log": ledger, "log_status": log_status, "benefit": "unknown", "check_provider_calls": 0
             }),

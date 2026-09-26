@@ -50,7 +50,7 @@ registered command.
 `doctor` displays a compact state ladder, with unknown as a first-class
 state:
 
-1. **Catalog:** configured project and eligible count from offline status.
+1. **Catalog:** configured project and eligible count from local Rust discovery.
 2. **Registration:** target config entry found, missing, or conflicting.
 3. **Host:** offline readiness checked in the current shell when registration
    matches the requested options, without a provider call.

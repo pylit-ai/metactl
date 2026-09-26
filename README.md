@@ -168,7 +168,7 @@ metactl --project /path/to/project skills doctor --target codex-cli
 ```
 
 The first command checks the project's catalog and local readiness without a
-provider call. `connect` previews then writes one target-native server entry;
+provider call. `connect` previews one target-native server entry; `--apply` writes it;
 `doctor` separates configuration, local health, observed use and unknown states.
 The connector starts in deterministic baseline mode with zero Jev calls.
 `skills host --client-config` remains available for custom/manual adapters.

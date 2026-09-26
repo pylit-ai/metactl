@@ -7,7 +7,7 @@ map any host-disabled skills to repeatable `--exclude-skill` arguments. The
 [skill-discovery guide](skill-discovery.md) explains eligibility, digest checks,
 and provider proof.
 
-For the five verified project configuration formats below, preview and apply
+For the five documented project configuration formats below, preview and apply
 the baseline connection directly:
 
 ```sh

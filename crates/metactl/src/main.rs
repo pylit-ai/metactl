@@ -2165,7 +2165,10 @@ fn validate_explicit_project_root(cli: &Cli) -> std::result::Result<(), CliError
     let Some(project_root) = cli.project.as_deref() else {
         return Ok(());
     };
-    if project_root.is_dir() || command_can_initialize_project_root(&cli.command) {
+    if project_root.is_dir()
+        || command_can_initialize_project_root(&cli.command)
+        || missing_project_user_discovery_remove(cli)
+    {
         return Ok(());
     }
     let message = if project_root.exists() {
@@ -2190,11 +2193,25 @@ fn validate_explicit_project_root(cli: &Cli) -> std::result::Result<(), CliError
     Err(err)
 }
 
+fn missing_project_user_discovery_remove(cli: &Cli) -> bool {
+    cli.project
+        .as_deref()
+        .is_some_and(|path| path.is_absolute() && !path.exists())
+        && matches!(&cli.command,
+            Commands::Skills(SkillsArgs { command: SkillsCommand::Connect(args) })
+                if args.remove && args.scope == DiscoveryScopeArg::User)
+}
+
 fn command_can_initialize_project_root(command: &Commands) -> bool {
     matches!(command, Commands::Init(_) | Commands::Setup(_))
 }
 
 fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
+    // Emergency removal of a user-wide server cannot create an operation lock
+    // under a deleted project; the config update itself remains atomic.
+    if missing_project_user_discovery_remove(cli) {
+        return None;
+    }
     match &cli.command {
         Commands::Init(_) => Some("init"),
         Commands::Setup(args) => {

@@ -20,7 +20,8 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    `metactl --project /absolute/path/to/project --no-profile skills host --status --ranker deterministic --trial-mode baseline`.
 2. Preview and apply a target-native registration with the same project and
    profile choice. The preview names the exact file, mode, log and rollback;
-   it changes nothing. Apply writes only the `metactl-skills` server entry:
+   it changes nothing. Apply adds the `metactl-skills` server entry and prepares
+   a private state directory for its event log:
 
    ```sh
    metactl --project /absolute/path/to/project skills connect --target codex-cli
@@ -37,16 +38,23 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    baseline with `provider_calls=0`; it does not turn on Jev. A private event
    log under the user's state directory is prepared on apply. If status needed
    `--no-profile`, pass it before `skills connect` so the registration retains it.
-   If Python is outside `PATH`, add `--python /absolute/path/to/python3` to
-   `connect`; the path must remain available to the agent. The printed rollback
+   `connect` resolves `python3` to an absolute path from the current `PATH` so
+   GUI clients do not silently choose a different interpreter. If Python is
+   outside `PATH`, add `--python /absolute/path/to/python3` to `connect`; the
+   path must remain available to the agent. The printed rollback
    command recognizes the managed baseline entry even when the executable or
    Python path later changes. `doctor` compares the registration with the
    current invocation. It checks host readiness only when they match, using
-   the current shell environment; otherwise readiness is unknown.
+   the current shell environment; otherwise readiness is unknown. The local
+   catalog count is checked separately, so it can remain known when host
+   readiness is unknown.
    A user-wide Codex registration shares this one project's skill catalog and
    event metadata across Codex sessions in other repositories; choose project
    scope when catalogs or visibility should remain separate. The baseline
    ledger does not store query text or skill bodies.
+   Existing JSON client files are parsed and re-serialized, so formatting may
+   change; existing file permissions are preserved. Removing the managed entry
+   leaves the private event log and may leave an empty client config object.
    Reapplying with a different profile, config, overlay or log destination
    requires an explicit preview with `--replace`, followed by `--apply --replace`.
    Changing only the installed binary or Python path updates the managed entry.

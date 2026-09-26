@@ -139,7 +139,7 @@ pub(super) fn run_discovery_trials(args: &SkillsTrialsArgs) -> ExitCode {
     }
 }
 
-fn cmd_skill_discovery(
+pub(super) fn cmd_skill_discovery(
     cli: &Cli,
     command: &SkillsCommand,
 ) -> std::result::Result<CommandOutput, CliError> {

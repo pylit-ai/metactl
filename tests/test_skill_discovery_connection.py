@@ -4,6 +4,8 @@ import json
 import os
 import pathlib
 import shlex
+import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -48,6 +50,8 @@ class ConnectionFirstRun(unittest.TestCase):
                 self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
                 self.assertEqual(path.read_text(), original)
                 self.assertEqual(json.loads(preview.stdout)["provider_calls"], 0)
+                preview_args = json.loads(preview.stdout)["args"]
+                self.assertTrue(pathlib.Path(preview_args[preview_args.index("--python") + 1]).is_absolute())
                 apply = self.run_cli("skills", "connect", "--target", target, "--apply", "--json")
                 self.assertEqual(apply.returncode, 0, apply.stdout + apply.stderr)
                 connected = path.read_text()
@@ -130,7 +134,7 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(matched.returncode, 0, matched.stdout + matched.stderr)
         self.assertEqual(json.loads(matched.stdout)["host"], "ready")
         rollback = shlex.split(receipt["rollback"])
-        self.assertEqual(rollback.pop(0), "metactl")
+        self.assertEqual(rollback.pop(0), str(BINARY))
         removed = subprocess.run([str(BINARY), *rollback], env=self.env, text=True,
                                  capture_output=True, timeout=25)
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
@@ -140,16 +144,20 @@ class ConnectionFirstRun(unittest.TestCase):
         for target in ("codex-cli", "cursor"):
             with self.subTest(target=target):
                 path = self.project / PATHS[target]
-                applied = self.run_cli("skills", "connect", "--target", target, "--apply")
+                applied = self.run_cli("skills", "connect", "--target", target, "--apply", "--json")
                 self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+                applied_args = json.loads(applied.stdout)["args"]
+                python_path = applied_args[applied_args.index("--python") + 1]
                 content = path.read_text().replace(str(BINARY), "/old/metactl")
-                content = content.replace('"python3"', '"/old/python3"')
+                content = content.replace(json.dumps(python_path), '"/old/python3"')
                 path.write_text(content)
                 doctor = self.run_cli("skills", "doctor", "--target", target, "--json")
                 self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
                 state = json.loads(doctor.stdout)
                 self.assertEqual(state["registration"], "configured")
                 self.assertEqual(state["host"], "unknown_registration_drift")
+                self.assertGreater(state["catalog_eligible_skills"], 0)
+                self.assertEqual(state["registration_drift"], "command_differs")
                 updated = self.run_cli("skills", "connect", "--target", target, "--apply", "--json")
                 self.assertEqual(updated.returncode, 0, updated.stdout + updated.stderr)
                 self.assertEqual(json.loads(updated.stdout)["action"], "updated")
@@ -256,6 +264,28 @@ class ConnectionFirstRun(unittest.TestCase):
                                  capture_output=True, timeout=25)
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertNotIn("metactl-skills", (codex_home / "config.toml").read_text())
+
+    def test_user_scope_rollback_after_project_is_deleted(self):
+        codex_home = self.base / "codex-home"
+        self.env["CODEX_HOME"] = str(codex_home)
+        applied = self.run_cli("skills", "connect", "--target", "codex-cli",
+                               "--scope", "user", "--apply", "--json")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        rollback = json.loads(applied.stdout)["rollback"]
+        shutil.rmtree(self.project)
+        removed = subprocess.run(rollback, shell=True, env=self.env, text=True,
+                                 capture_output=True, timeout=25)
+        self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
+        self.assertNotIn("metactl-skills", (codex_home / "config.toml").read_text())
+
+    def test_existing_config_permissions_are_preserved(self):
+        path = self.project / ".cursor/mcp.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"other":{"kept":true}}\n')
+        path.chmod(0o640)
+        applied = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
 
     def test_preview_does_not_create_client_or_state_files(self):
         preview = self.run_cli("skills", "connect", "--target", "codex-cli")
