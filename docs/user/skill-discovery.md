@@ -54,11 +54,19 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    scope when catalogs or visibility should remain separate. The baseline
    ledger does not store query text or skill bodies.
    Existing JSON client files are parsed and re-serialized, so formatting may
-   change; existing file permissions are preserved. Removing the managed entry
+   and key order may change; integers larger than unsigned 64-bit may
+   be normalized, so review a preview before applying to such a file. JSONC
+   comments are not edited automatically. OpenCode's `opencode.jsonc` is
+   detected to avoid creating a second config file. Existing file permissions
+   are preserved. Removing the managed entry
    is immediate with `--remove` (no `--apply` needed). It leaves the private
    event log and may leave an empty client config object. The printed rollback
    uses the installed binary's absolute path; if that binary is later removed,
    run the same command with a currently installed `metactl` binary.
+   Package managers may replace that binary during an upgrade. Rerun
+   `skills connect --target <target> --apply` afterward, then `skills doctor`,
+   to refresh the client registration; a versioned executable path can stop
+   launching after its old version is removed.
    Reapplying with a different profile, config, overlay or log destination
    requires an explicit preview with `--replace`, followed by `--apply --replace`.
    Changing only the installed binary or Python path updates the managed entry.

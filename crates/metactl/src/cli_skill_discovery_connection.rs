@@ -312,7 +312,10 @@ fn managed_entry(
     target: &str,
 ) -> Option<ManagedEntry> {
     if !Path::new(&command).is_absolute()
-        || Path::new(&command).file_name()?.to_str()? != "metactl"
+        || !matches!(
+            Path::new(&command).file_name()?.to_str()?,
+            "metactl" | "metactl.exe"
+        )
         || args.len() < 12
         || args.first()? != "--project"
         || args.get(1)? != &root.to_string_lossy()
@@ -418,27 +421,35 @@ fn ensure_safe_destination(path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn tracked(root: &Path, path: &Path) -> bool {
+fn tracked(root: &Path, path: &Path) -> Result<bool, CliError> {
     let Ok(relative) = path.strip_prefix(root) else {
-        return false;
+        return Ok(false);
     };
-    Command::new("git")
+    let status = Command::new("git")
         .arg("-C")
         .arg(root)
         .args(["ls-files", "--error-unmatch", "--"])
         .arg(relative)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(true),
+        Ok(status) if status.code() == Some(1) => Ok(false),
+        _ if !root.ancestors().any(|parent| parent.join(".git").exists()) => Ok(false),
+        _ => Err(CliError::new(EXIT_STATE,
+            "Cannot verify whether the target config is tracked by Git; no change was made. Restore Git or review the config manually.")),
+    }
 }
 
 fn git_visibility(root: &Path, path: &Path, scope: DiscoveryScopeArg) -> &'static str {
     if scope == DiscoveryScopeArg::User {
         return "user_config";
     }
-    if tracked(root, path) {
-        return "tracked";
+    match tracked(root, path) {
+        Ok(true) => return "tracked",
+        Err(_) => return "unknown",
+        Ok(false) => {}
     }
     if !Command::new("git")
         .arg("-C")
@@ -738,7 +749,7 @@ fn edit_json(
         serde_json::from_str(old).map_err(|_| {
             CliError::new(
                 EXIT_STATE,
-                "Target configuration is not valid JSON; refusing to edit it.",
+                "Target configuration is not strict JSON; JSONC comments are not edited automatically. Review the config manually.",
             )
         })?
     };
@@ -903,6 +914,14 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         options.remove,
         false,
     )?;
+    if options.target == "opencode"
+        && !options.remove
+        && !path.exists()
+        && root.join("opencode.jsonc").exists()
+    {
+        return Err(CliError::new(EXIT_STATE,
+            "An opencode.jsonc configuration already exists. MetaCTL will not create a second OpenCode config; add the server entry manually."));
+    }
     if !options.remove {
         let (host, count) = offline_status(&command, &args);
         if host != "ready" || count.as_u64().unwrap_or(0) == 0 {
@@ -939,7 +958,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         )?
     };
     if options.apply || options.remove {
-        if tracked(&root, &path) {
+        if tracked(&root, &path)? {
             return Err(CliError::new(EXIT_STATE, format!("{} is tracked by Git; choose user scope or untrack the machine-specific configuration first.", path.display())));
         }
         if old != new {
@@ -993,6 +1012,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         "Machine-specific config is not ignored by Git. Add this path to .git/info/exclude or a reviewed .gitignore before committing."
     } else if visibility == "tracked" {
         "This config is tracked by Git, so --apply will refuse. Review a portable registration or move machine-specific settings to a local config."
+    } else if visibility == "unknown" {
+        "Git visibility could not be checked, so --apply will refuse until Git works."
     } else {
         ""
     };
@@ -1153,7 +1174,8 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                                 });
                             }
                         }
-                        _ => {
+                        Ok(_) => {}
+                        Err(_) => {
                             invalid_lines += 1;
                         }
                     }
@@ -1173,7 +1195,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     } else {
         "unknown_log_error"
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} eligible skills (local)\nRegistration: {} ({})\nRegistered command: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
+    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {}\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
         options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason})")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
     Ok(CommandOutput {
         human,

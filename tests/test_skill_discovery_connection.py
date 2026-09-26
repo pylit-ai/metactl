@@ -8,6 +8,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -145,6 +146,10 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertNotIn("Review a small CLI user workflow", ledger)
         self.assertTrue(all("query" not in record and "instructions" not in record
                             for record in map(json.loads, ledger.splitlines())))
+        if os.name == "posix":
+            log_path = pathlib.Path(settings["event_log"])
+            self.assertEqual(stat.S_IMODE(log_path.parent.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(log_path.stat().st_mode), 0o600)
         doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
         observed = json.loads(doctor.stdout)
@@ -331,6 +336,10 @@ class ConnectionFirstRun(unittest.TestCase):
         receipt = json.loads(applied.stdout)
         self.assertIn("metactl-skills", (codex_home / "config.toml").read_text())
         self.assertIn("CODEX_HOME=", receipt["rollback"])
+        doctor = self.run_cli("skills", "doctor", "--target", "codex-cli",
+                              "--scope", "user", "--json")
+        self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
+        self.assertEqual(json.loads(doctor.stdout)["registration"], "configured")
         env = dict(self.env, PATH=f"{BINARY.parent}:{self.env.get('PATH', '')}")
         removed = subprocess.run(receipt["rollback"], shell=True, env=env, text=True,
                                  capture_output=True, timeout=25)
@@ -387,6 +396,42 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(json.loads(result)["a"]["large"], number)
         self.assertEqual(json.loads(result)["mcpServers"]["other"]["command"], "other")
 
+    def test_jsonc_configs_refuse_with_manual_guidance(self):
+        gemini = self.project / ".gemini/settings.json"
+        gemini.parent.mkdir(parents=True, exist_ok=True)
+        gemini.write_text('{"mcpServers": {}} // retained comment\n')
+        refused = self.run_cli("skills", "connect", "--target", "gemini-cli", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("JSONC comments", refused.stderr)
+        self.assertIn("retained comment", gemini.read_text())
+        opencode = self.project / "opencode.jsonc"
+        opencode.write_text('{"mcp": {}} // retained comment\n')
+        refused = self.run_cli("skills", "connect", "--target", "opencode", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("opencode.jsonc", refused.stderr)
+        self.assertFalse((self.project / "opencode.json").exists())
+
+    @unittest.skipUnless(os.name == "posix", "directory symlink setup requires POSIX")
+    def test_symlinked_client_directory_is_refused(self):
+        elsewhere = self.base / "elsewhere"
+        elsewhere.mkdir()
+        (self.project / ".cursor").symlink_to(elsewhere, target_is_directory=True)
+        refused = self.run_cli("skills", "connect", "--target", "cursor", "--apply")
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("directory is a symlink", refused.stderr)
+        self.assertFalse((elsewhere / "mcp.json").exists())
+
+    def test_git_unavailable_refuses_project_config_write(self):
+        subprocess.run(["git", "init", "-q", str(self.project)], check=True)
+        empty_path = self.base / "empty-path"
+        empty_path.mkdir()
+        self.env["PATH"] = str(empty_path)
+        refused = self.run_cli("skills", "connect", "--target", "cursor", "--apply",
+                               "--python", sys.executable)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("Cannot verify whether the target config is tracked", refused.stderr)
+        self.assertFalse((self.project / ".cursor/mcp.json").exists())
+
     def test_doctor_reports_states_when_python_or_config_is_unavailable(self):
         path = self.project / ".codex/config.toml"
         applied = self.run_cli("skills", "connect", "--target", "codex-cli", "--apply")
@@ -412,7 +457,9 @@ class ConnectionFirstRun(unittest.TestCase):
         event = {"schema": "metactl.discovery_trial.v1", "runtime": "codex-cli",
                  "kind": "discover", "arm": "baseline", "provider_calls": 0,
                  "session_id": "recent-session", "run_id": "recent-run"}
-        ledger.write_text("x" * (2 * 1024 * 1024 + 100) + "\n" + json.dumps(event) + "\npartial\n")
+        ledger.write_text("x" * (2 * 1024 * 1024 + 100) + "\n" +
+                          json.dumps({"schema": "other.v1"}) + "\n" +
+                          json.dumps(event) + "\npartial\n")
         doctor = self.run_cli("skills", "doctor", "--target", "codex-cli", "--json")
         self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
         state = json.loads(doctor.stdout)
@@ -420,7 +467,7 @@ class ConnectionFirstRun(unittest.TestCase):
         self.assertEqual(state["routing"], "observed")
         self.assertEqual(state["latest_discovery"]["run_id"], "recent-run")
         self.assertTrue(state["log_window_truncated"])
-        self.assertGreaterEqual(state["invalid_log_lines"], 1)
+        self.assertEqual(state["invalid_log_lines"], 1)
 
     def test_preview_does_not_create_client_or_state_files(self):
         preview = self.run_cli("skills", "connect", "--target", "codex-cli")
