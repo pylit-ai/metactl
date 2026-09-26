@@ -143,6 +143,11 @@ fn assert_index_is_public(repo: &Repo) {
     for path in indexed.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()) {
         let path = std::str::from_utf8(path).unwrap();
         assert!(!path.contains(PRIVATE_ID), "private path staged: {path}");
+        assert!(!path.contains("ignore-recovery"), "recovery staged: {path}");
+        assert!(
+            !path.ends_with(".private"),
+            "private fixture staged: {path}"
+        );
         let blob = repo.git(&["show", &format!(":{path}")]);
         assert_ok(&blob);
         let text = String::from_utf8_lossy(&blob.stdout);
@@ -176,16 +181,22 @@ fn cli_private_compile_apply_sync_repeat_keeps_git_index_public() {
 }
 
 #[test]
-fn cli_symlink_repository_probe_has_explicit_platform_contract() {
+fn cli_symlink_repository_probe_preserves_native_ignore_behavior() {
     let repo = Repo::new();
     fs::write(repo.root.join("payload.private"), "synthetic private bytes").unwrap();
     let link = repo.root.join("linked.private");
     #[cfg(unix)]
     std::os::unix::fs::symlink("payload.private", &link).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("missing-target", repo.root.join("dangling.private")).unwrap();
     #[cfg(windows)]
     std::os::windows::fs::symlink_file("payload.private", &link)
         .expect("Windows runner must permit symlink fixture creation; test cannot silently skip");
-    let before = payloads(&repo.root);
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file("missing-target", repo.root.join("dangling.private"))
+        .expect("Windows runner must permit dangling symlink fixture creation");
+    let before = repo.git(&["check-ignore", "--no-index", "--verbose", "linked.private"]);
+    assert_ok(&before);
     let output = repo.cli(&[
         "ignore",
         "install",
@@ -195,18 +206,111 @@ fn cli_symlink_repository_probe_has_explicit_platform_contract() {
         "claude-code",
         "--yes",
     ]);
-    #[cfg(unix)]
     assert_ok(&output);
-    #[cfg(windows)]
-    {
-        assert!(!output.status.success());
-        assert!(
-            String::from_utf8_lossy(&output.stderr).contains("symlink privacy probe unsupported")
+    assert_ok(&repo.cli(&[
+        "ignore",
+        "fix",
+        "--scope",
+        "both",
+        "--target",
+        "claude-code",
+        "--yes",
+    ]));
+    let after = repo.git(&["check-ignore", "--no-index", "--verbose", "linked.private"]);
+    assert_ok(&after);
+    assert_eq!(before.stdout, after.stdout);
+    assert_index_is_public(&repo);
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_private_workflow_with_symlink_keeps_git_index_public() {
+    let repo = private_project();
+    fs::write(repo.root.join("payload.private"), PRIVATE_PAYLOAD).unwrap();
+    std::os::windows::fs::symlink_file("payload.private", repo.root.join("linked.private"))
+        .expect("Windows runner must permit symlink fixture creation; test cannot silently skip");
+    for args in [
+        &["ignore", "install", "--scope", "both", "--yes"][..],
+        &["ignore", "fix", "--scope", "both", "--yes"],
+        &["compile"],
+        &["apply"],
+        &["sync"],
+        &["sync"],
+    ] {
+        assert_ok(&repo.cli(args));
+        assert_ok(&repo.git(&["check-ignore", "--quiet", "linked.private"]));
+        assert_eq!(
+            fs::read_to_string(repo.root.join("linked.private")).unwrap(),
+            PRIVATE_PAYLOAD
         );
-        assert_eq!(before, payloads(&repo.root));
+        assert_index_is_public(&repo);
     }
-    #[cfg(unix)]
-    let _ = before;
+    assert!(fs::read_to_string(
+        repo.root
+            .join(".metactl/generated/claude-code/CLAUDE.local.md")
+    )
+    .unwrap()
+    .contains(PRIVATE_ID));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_ignored_directory_junction_preserves_native_git_parity() {
+    let repo = private_project();
+    let target = repo._temp.path().join("junction-target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("payload.txt"), PRIVATE_PAYLOAD).unwrap();
+    fs::create_dir(repo.root.join("node_modules")).unwrap();
+    let junction = repo.root.join("node_modules/fixture");
+    let output = repo
+        .command("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&target)
+        .output()
+        .unwrap();
+    assert_ok(&output);
+    let ignore = repo.root.join(".gitignore");
+    fs::write(
+        &ignore,
+        format!("node_modules/\n{}", fs::read_to_string(&ignore).unwrap()),
+    )
+    .unwrap();
+    let native = repo.git(&[
+        "check-ignore",
+        "--no-index",
+        "--verbose",
+        "node_modules/fixture",
+    ]);
+    assert_ok(&native);
+    let listed = repo.git(&["ls-files", "--cached", "--others", "--full-name", "-z"]);
+    assert_ok(&listed);
+    eprintln!(
+        "junction Git enumeration: {:?}; symlink_metadata: {:?}",
+        String::from_utf8_lossy(&listed.stdout),
+        fs::symlink_metadata(&junction).unwrap().file_type()
+    );
+    for args in [
+        &["ignore", "install", "--scope", "both", "--yes"][..],
+        &["ignore", "fix", "--scope", "both", "--yes"],
+        &["sync"],
+        &["sync"],
+    ] {
+        assert_ok(&repo.cli(args));
+        let after = repo.git(&[
+            "check-ignore",
+            "--no-index",
+            "--verbose",
+            "node_modules/fixture",
+        ]);
+        assert_ok(&after);
+        assert_eq!(native.stdout, after.stdout);
+        assert_eq!(
+            fs::read_to_string(junction.join("payload.txt")).unwrap(),
+            PRIVATE_PAYLOAD
+        );
+        assert_index_is_public(&repo);
+    }
 }
 
 #[cfg(target_os = "linux")]

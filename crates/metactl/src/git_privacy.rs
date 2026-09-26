@@ -380,7 +380,10 @@ pub fn evaluate(
                     #[cfg(unix)]
                     std::os::unix::fs::symlink("__metactl_payload_not_copied__", &dst)?;
                     #[cfg(not(unix))]
-                    bail!("symlink privacy probe unsupported on this platform");
+                    // Git matches a symlink leaf as a non-directory. Preserve
+                    // that shape without needing symlink privileges or copying
+                    // its target; original-state parity below remains required.
+                    fs::write(&dst, [])?;
                 }
             }
             // Git check-ignore treats an absent regular leaf as a regular
@@ -500,6 +503,86 @@ pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_link_leaf_proposals_match_native_directory_only_rules() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("repo");
+        let external = temp.path().join("external");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&external).unwrap();
+        output(&root, &["init", "-q"]).unwrap();
+        fs::write(external.join("payload"), "must stay outside probe").unwrap();
+        fs::write(root.join("ordinary"), "ordinary payload").unwrap();
+        fs::create_dir(root.join("directory")).unwrap();
+        std::os::windows::fs::symlink_file(external.join("payload"), root.join("file-link"))
+            .unwrap();
+        std::os::windows::fs::symlink_file(external.join("missing"), root.join("dangling-link"))
+            .unwrap();
+        std::os::windows::fs::symlink_dir(&external, root.join("directory-link")).unwrap();
+        let junction = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("junction"))
+            .arg(&external)
+            .output()
+            .unwrap();
+        assert!(
+            junction.status.success(),
+            "{}",
+            String::from_utf8_lossy(&junction.stderr)
+        );
+        let names: Vec<String> = [
+            "ordinary",
+            "directory",
+            "file-link",
+            "dangling-link",
+            "directory-link",
+            "junction",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        let ignore = root.join(".gitignore");
+        for proposed in [
+            names
+                .iter()
+                .map(|name| format!("{name}/\n"))
+                .collect::<String>(),
+            format!(
+                "*\n{}",
+                names
+                    .iter()
+                    .map(|name| format!("!{name}/\n"))
+                    .collect::<String>()
+            ),
+        ] {
+            fs::write(&ignore, []).unwrap();
+            let (_, predicted) = evaluate(
+                &root,
+                &names,
+                &[(ignore.clone(), proposed.as_bytes().to_vec())],
+            )
+            .unwrap();
+            fs::write(&ignore, &proposed).unwrap();
+            for name in &names {
+                let native = git(&root)
+                    .args(["check-ignore", "--no-index", "--quiet", name])
+                    .status()
+                    .unwrap();
+                assert!(matches!(native.code(), Some(0 | 1)));
+                assert_eq!(
+                    predicted[name].after,
+                    native.success(),
+                    "{name}: {proposed}"
+                );
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(external.join("payload")).unwrap(),
+            "must stay outside probe"
+        );
+    }
 
     #[test]
     fn git_name_decoder_rejects_non_utf8_with_path_diagnostic() {

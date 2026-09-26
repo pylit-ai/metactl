@@ -20,6 +20,8 @@ jobs:
         run: cargo check --locked -p metactl -p metactld
       - name: Exercise Windows private workflows, ignore publication, and refusal paths
         run: cargo test --locked -p metactl --test ignore_platform -- --nocapture
+      - name: Compare Windows link and junction proposals with native Git
+        run: cargo test --locked -p metactl --lib windows_link_leaf_proposals_match_native_directory_only_rules -- --nocapture
   test:
     runs-on: ubuntu-latest
     steps:
