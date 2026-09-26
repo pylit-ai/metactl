@@ -133,11 +133,12 @@ If an installed private projection, unknown provenance, or an active private
 pack would lose protection, plan/install/fix refuse before writing. Keep the
 old ignore rules while inspecting the exact managed destination and its Git
 index entry. A missing or malformed inventory is not evidence that a generated
-skill is public. Sync may still produce shared outputs and a protected native
-local instruction document; private skills, resources, and other nonlocal
-outputs are omitted with `private_nonlocal_outputs_omitted` degradation until
-an exact protected routing is available. This is a deliberate privacy limit,
-not a migration or automatic untracking step.
+skill is public. Sync preserves private skills, resources, hooks and runtime
+contributions when their destinations are ignored and untracked. Compilation
+checks that protection before staging; apply independently replays current
+synthesis evidence. Unsafe or unknown private destinations refuse publication
+instead of silently dropping capabilities. See
+[private projection protection](private-projection-protection.md).
 For configured folders that are not yet Git worktrees, weakening an existing
 managed block is refused: initialize Git and retry so affected working and
 indexed paths can be checked. MetaCTL does not initialize Git on your behalf.
