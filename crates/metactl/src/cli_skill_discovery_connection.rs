@@ -112,6 +112,16 @@ fn executable_file(path: &Path) -> bool {
     }
 }
 
+fn executable_state(path: &Path) -> &'static str {
+    if executable_file(path) {
+        "present"
+    } else if path.exists() {
+        "not_executable"
+    } else {
+        "missing"
+    }
+}
+
 fn canonicalize_missing_tail(path: &Path) -> Result<PathBuf, CliError> {
     let mut absent = Vec::new();
     let mut prefix = path;
@@ -141,6 +151,8 @@ fn host_command(
     target: &str,
     ledger: &Path,
     python: &Path,
+    routing: &DiscoveryRoutingArgs,
+    allow_unavailable_command: bool,
 ) -> Result<(String, Vec<String>), CliError> {
     let exe = std::env::current_exe().map_err(internal_error)?;
     if python.components().count() > 1 && !python.is_absolute() {
@@ -162,20 +174,98 @@ fn host_command(
             args.extend([flag.into(), absolute.to_string_lossy().into_owned()]);
         }
     }
+    let provider = routing.trial_mode != "baseline";
+    if !provider
+        && (routing.allow_provider_data
+            || routing.gateway_project.is_some()
+            || routing.gateway_data_class.is_some())
+    {
+        return Err(CliError::new(EXIT_VALIDATION,
+            "Baseline makes no provider calls; remove gateway options or select --trial-mode shadow/advisory."));
+    }
+    if provider && routing.gateway_data_class.as_deref() == Some("synthetic") {
+        return Err(CliError::new(EXIT_VALIDATION,
+            "Persistent discovery cannot classify real agent queries as synthetic; use an approved public-nonsensitive project or `skills host --check` for a synthetic probe."));
+    }
+    if provider
+        && (!routing.allow_provider_data
+            || routing.gateway_project.is_none()
+            || routing.gateway_data_class.is_none())
+    {
+        return Err(CliError::new(EXIT_VALIDATION,
+            "Shadow/advisory requires --allow-provider-data, --gateway-project and --gateway-data-class."));
+    }
+    if provider
+        && (routing.max_provider_calls == 0
+            || routing.max_provider_calls > 10
+            || !routing.provider_deadline.is_finite()
+            || routing.provider_deadline <= 0.0
+            || routing.provider_deadline > 5.0)
+    {
+        return Err(CliError::new(EXIT_VALIDATION,
+            "Use 1-10 --max-provider-calls and a positive --provider-deadline no greater than 5 seconds."));
+    }
+    if let Some(project) = &routing.gateway_project {
+        if !valid_gateway_project(project) {
+            return Err(CliError::new(
+                EXIT_VALIDATION,
+                "Use a lowercase gateway project ID with letters, digits or hyphens.",
+            ));
+        }
+    }
     args.extend([
         "skills".into(),
         "host".into(),
         "--python".into(),
         python.to_string_lossy().into_owned(),
         "--ranker".into(),
-        "deterministic".into(),
+        if provider { "jev" } else { "deterministic" }.into(),
         "--runtime".into(),
         target.into(),
         "--trial-mode".into(),
-        "baseline".into(),
-        "--event-log".into(),
-        ledger.to_string_lossy().into_owned(),
+        routing.trial_mode.clone(),
     ]);
+    if provider {
+        if routing.gateway_command.components().count() > 1
+            && !routing.gateway_command.is_absolute()
+        {
+            return Err(CliError::new(
+                EXIT_VALIDATION,
+                "Use an absolute --gateway-command path or an executable name on PATH.",
+            ));
+        }
+        let gateway = if allow_unavailable_command {
+            resolved_python(&routing.gateway_command)
+                .unwrap_or_else(|_| routing.gateway_command.clone())
+        } else {
+            resolved_python(&routing.gateway_command).map_err(|_| CliError::new(EXIT_STATE,
+                "Gateway client was not found as an executable. Pass --gateway-command /absolute/path/to/jev."))?
+        };
+        if !allow_unavailable_command && !gateway.is_absolute() {
+            return Err(CliError::new(EXIT_STATE,
+                "Gateway client did not resolve to an absolute executable path. Pass --gateway-command /absolute/path/to/jev."));
+        }
+        if !allow_unavailable_command && !executable_file(&gateway) {
+            return Err(CliError::new(EXIT_STATE,
+                "Gateway client is not an executable file. Pass --gateway-command /absolute/path/to/jev."));
+        }
+        args.extend([
+            "--jev-transport".into(),
+            "gateway".into(),
+            "--gateway-command".into(),
+            gateway.to_string_lossy().into_owned(),
+            "--gateway-project".into(),
+            routing.gateway_project.as_ref().unwrap().clone(),
+            "--gateway-data-class".into(),
+            routing.gateway_data_class.as_ref().unwrap().clone(),
+            "--allow-provider-data".into(),
+            "--max-provider-calls".into(),
+            routing.max_provider_calls.to_string(),
+            "--provider-deadline".into(),
+            routing.provider_deadline.to_string(),
+        ]);
+    }
+    args.extend(["--event-log".into(), ledger.to_string_lossy().into_owned()]);
     Ok((exe.to_string_lossy().into_owned(), args))
 }
 
@@ -199,6 +289,15 @@ fn entry_key(target: &str) -> &'static str {
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn valid_gateway_project(project: &str) -> bool {
+    !project.is_empty()
+        && project.len() <= 80
+        && (project.as_bytes()[0].is_ascii_lowercase() || project.as_bytes()[0].is_ascii_digit())
+        && project
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
 fn parse_codex_toml(body: &str) -> Result<toml::Value, CliError> {
@@ -288,7 +387,7 @@ fn require_policy_match(
 ) -> Result<(), CliError> {
     if policy_args(&existing.args) != policy_args(&desired.args) && !replace {
         return Err(CliError::new(EXIT_STATE,
-            "The managed registration uses different profile, config, overlay or event-log options. Review the new entry with --replace, then use --apply --replace to change it. --remove still works without matching those options."));
+            "The managed registration uses different profile, config, overlay, routing or event-log options. Review the new entry with --replace, then use --apply --replace to change it. --remove still works without matching those options."));
     }
     Ok(())
 }
@@ -350,15 +449,46 @@ fn managed_entry(
         }
         i += 2;
     }
-    if args.get(i..i + 2)? != ["--ranker", "deterministic"]
+    if args.get(i)?.as_str() != "--ranker"
         || args.get(i + 2..i + 4)? != ["--runtime", target]
-        || args.get(i + 4..i + 6)? != ["--trial-mode", "baseline"]
-        || args.get(i + 6)?.as_str() != "--event-log"
-        || args.len() != i + 8
+        || args.get(i + 4)?.as_str() != "--trial-mode"
     {
         return None;
     }
-    let event_log = PathBuf::from(args.get(i + 7)?);
+    let ranker = args.get(i + 1)?.as_str();
+    let mode = args.get(i + 5)?.as_str();
+    let mut j = i + 6;
+    if mode == "baseline" {
+        if ranker != "deterministic" {
+            return None;
+        }
+    } else if matches!(mode, "shadow" | "advisory") && ranker == "jev" {
+        if args.get(j..j + 2)? != ["--jev-transport", "gateway"]
+            || args.get(j + 2)?.as_str() != "--gateway-command"
+            || !Path::new(args.get(j + 3)?).is_absolute()
+            || args.get(j + 4)?.as_str() != "--gateway-project"
+            || !valid_gateway_project(args.get(j + 5)?)
+            || args.get(j + 6)?.as_str() != "--gateway-data-class"
+            || args.get(j + 7)?.as_str() != "public-nonsensitive"
+            || args.get(j + 8)?.as_str() != "--allow-provider-data"
+            || args.get(j + 9)?.as_str() != "--max-provider-calls"
+            || !(1..=10).contains(&args.get(j + 10)?.parse::<u32>().ok()?)
+            || args.get(j + 11)?.as_str() != "--provider-deadline"
+        {
+            return None;
+        }
+        let deadline = args.get(j + 12)?.parse::<f64>().ok()?;
+        if !deadline.is_finite() || !(0.0..=5.0).contains(&deadline) || deadline == 0.0 {
+            return None;
+        }
+        j += 13;
+    } else {
+        return None;
+    }
+    if args.get(j)?.as_str() != "--event-log" || args.len() != j + 2 {
+        return None;
+    }
+    let event_log = PathBuf::from(args.get(j + 1)?);
     if !event_log.is_absolute() {
         return None;
     }
@@ -866,6 +996,7 @@ fn connection(
     target: &str,
     scope: DiscoveryScopeArg,
     python: &Path,
+    routing: &DiscoveryRoutingArgs,
     removing: bool,
     allow_unavailable_python: bool,
 ) -> Result<(PathBuf, PathBuf, PathBuf, String, Vec<String>), CliError> {
@@ -886,7 +1017,15 @@ fn connection(
     } else {
         resolved_python(python)?
     };
-    let (command, args) = host_command(cli, &root, target, &ledger, &python)?;
+    let (command, args) = host_command(
+        cli,
+        &root,
+        target,
+        &ledger,
+        &python,
+        routing,
+        allow_unavailable_python || removing,
+    )?;
     Ok((root, path, ledger, command, args))
 }
 
@@ -976,6 +1115,7 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
         &options.target,
         options.scope,
         &options.python,
+        &options.routing,
         options.remove,
         false,
     )?;
@@ -1102,8 +1242,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
     } else {
         ""
     };
-    let human = format!("Discovery {phase} for {}\nConfig: {}\nServer: {}\nMode: baseline (deterministic; provider calls 0)\nPrivate event log: {}\nChange: {}\nEntry:\n{}\nRollback: {}\nNext: {}\n{}\nNative acceptance and benefit remain unknown until observed.",
-        options.target, path.display(), SERVER, ledger.display(), if old == new { "none" } else if options.remove { "remove server entry" } else if action == "updated" { "update managed server entry" } else { "add server entry" }, entry, rollback, acceptance_note(&options.target, options.scope), git_note);
+    let human = format!("Discovery {phase} for {}\nConfig: {}\nServer: {}\nMode: {} (provider calls on this check: 0)\nPrivate event log: {}\nChange: {}\nEntry:\n{}\nRollback: {}\nNext: {}\n{}\nNative acceptance, gateway response and benefit remain unknown until observed.",
+        options.target, path.display(), SERVER, options.routing.trial_mode, ledger.display(), if old == new { "none" } else if options.remove { "remove server entry" } else if action == "updated" { "update managed server entry" } else { "add server entry" }, entry, rollback, acceptance_note(&options.target, options.scope), git_note);
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -1112,7 +1252,8 @@ pub(super) fn connect(cli: &Cli, options: &SkillsConnectArgs) -> Result<CommandO
             json!({
                 "action": phase, "target": options.target, "scope": format!("{:?}", options.scope).to_lowercase(),
                 "config_path": path, "server": SERVER, "command": command, "args": args,
-                "mode": "baseline", "provider_calls": 0, "event_log": ledger,
+                "mode": options.routing.trial_mode, "provider_calls_this_check": 0,
+                "gateway_response": if options.routing.trial_mode == "baseline" { "not_applicable" } else { "unknown_not_called" }, "event_log": ledger,
                 "entry_preview": entry,
                 "git_visibility": visibility, "allow_unignored": options.allow_unignored,
                 "native_acceptance_note": acceptance_note(&options.target, options.scope),
@@ -1129,6 +1270,7 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         &options.target,
         options.scope,
         &options.python,
+        &options.routing,
         false,
         true,
     )?;
@@ -1238,11 +1380,39 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     let registered_log = registered
         .as_ref()
         .and_then(|entry| entry.args.last().map(String::as_str));
+    let registered_mode = registered.as_ref().and_then(|entry| {
+        entry
+            .args
+            .iter()
+            .position(|arg| arg == "--trial-mode")
+            .and_then(|index| entry.args.get(index + 1))
+            .map(String::as_str)
+    });
+    let registered_gateway_command = registered.as_ref().and_then(|entry| {
+        entry
+            .args
+            .iter()
+            .position(|arg| arg == "--gateway-command")
+            .and_then(|index| entry.args.get(index + 1))
+            .map(String::as_str)
+    });
+    let registered_gateway_command_state = if registered_mode == Some("baseline") {
+        "not_applicable"
+    } else {
+        registered_gateway_command
+            .map(|path| executable_state(Path::new(path)))
+            .unwrap_or("unknown")
+    };
     let drift = registered.as_ref().and_then(|entry| {
         if registered_command_state == "missing" {
             Some("registered_command_missing")
         } else if registered_python_state == "missing" {
             Some("registered_python_missing")
+        } else if matches!(
+            registered_gateway_command_state,
+            "missing" | "not_executable"
+        ) {
+            Some("registered_gateway_command_unavailable")
         } else if entry.command != command {
             Some("command_differs")
         } else if entry.args.last() != args.last() {
@@ -1317,11 +1487,19 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
         Some("options_differ" | "event_log_differs") => {
             "rerun doctor with the registration's profile/config and state-home settings; if changing policy intentionally, preview with --replace before --apply --replace"
         }
+        Some("registered_gateway_command_unavailable") => {
+            "restore the registered gateway executable or preview and apply an updated provider connection with --replace"
+        }
         Some(_) => "rerun skills connect --apply after an upgrade",
         None => "",
     };
-    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nMode: baseline; provider calls on this check: 0",
-        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; {drift_hint})")).unwrap_or_default(), host, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
+    let gateway_response = if registered_mode == Some("baseline") {
+        "not_applicable"
+    } else {
+        "unknown_not_called"
+    };
+    let human = format!("Discovery doctor for {}\nCatalog: {} skills listed (local)\nRegistration: {} ({})\nRegistered command: {} ({})\nRegistered Python: {} ({})\nRegistered mode: {}\nRegistered gateway command: {} ({})\nRegistered event log: {}\nRequested options match registration: {}{}\nLocal host: {} (offline check in this shell only; no provider call; on failure check Python 3.10+ and project readiness)\nGateway response: {}\nAgent tools in a fresh session: unknown; inspect the native client\nRouting: {} ({} matching discovery events in the recent log window, including manual calls)\nEvent log checked: {} ({}; {} invalid lines; tail window: {})\nBenefit: unknown until task outcomes are compared\nProvider calls on this check: 0",
+        options.target, catalog.as_u64().map(|n| n.to_string()).unwrap_or_else(|| "unknown".into()), registration, path.display(), registered_command.unwrap_or("unknown"), registered_command_state, registered_python.unwrap_or("unknown"), registered_python_state, registered_mode.unwrap_or("unknown"), registered_gateway_command.unwrap_or("unknown"), registered_gateway_command_state, registered_log.unwrap_or("unknown"), matches_requested, drift.map(|reason| format!(" ({reason}; {drift_hint})")).unwrap_or_default(), host, gateway_response, routing, observed, ledger.display(), log_status, invalid_lines, log_window_truncated);
     Ok(CommandOutput {
         human,
         json: success_json(
@@ -1332,6 +1510,10 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                 "registration": registration, "registration_matches_requested_options": matches_requested,
                 "registered_command": registered_command, "registered_command_state": registered_command_state,
                 "registered_python": registered_python, "registered_python_state": registered_python_state,
+                "registered_mode": registered_mode,
+                "registered_gateway_command": registered_gateway_command,
+                "registered_gateway_command_state": registered_gateway_command_state,
+                "gateway_response": gateway_response,
                 "registered_event_log": registered_log,
                 "registration_drift": drift, "host": host, "host_catalog_eligible_skills": host_catalog,
                 "agent_tools": "unknown",

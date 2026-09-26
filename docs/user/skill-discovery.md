@@ -78,11 +78,52 @@ instructions are useful. Jev is an optional fourth step for authorized ranking.
    Reapplying with a different profile, config, overlay or log destination
    requires an explicit preview with `--replace`, followed by `--apply --replace`.
    Changing only the installed binary or Python path updates the managed entry.
-   For `--exclude-skill` or an approved Jev gateway mode, use
-   `skills host --client-config` and the manual adapter guide; `connect` currently
-   installs baseline without exclusions.
-   The older `skills host --client-config` command remains available for custom
-   clients and explicitly approved gateway evaluation.
+   For `--exclude-skill` or a custom client, use `skills host --client-config`
+   and the manual adapter guide.
+
+   **Approved public data only:** `connect` can also register gateway-backed
+   `shadow` or `advisory` mode when the project and query are authorized for
+   `public-nonsensitive` data. Use the project's scoped gateway client, an
+   explicit data-transfer opt-in, and bounded attempts:
+
+   ```sh
+   metactl --project /absolute/path/to/public-project skills connect \
+     --target codex-cli --trial-mode advisory --allow-provider-data \
+     --gateway-project approved-project-id \
+     --gateway-data-class public-nonsensitive \
+     --gateway-command /absolute/path/to/jev \
+     --max-provider-calls 2 --provider-deadline 1
+   # Review the preview, then repeat with --apply.
+   ```
+
+   **Data sent to the gateway:** each discovery request can send the task query,
+   candidate skill names and descriptions, the gateway project ID, and the data
+   class. The query may contain text the agent copied from your project. Do not
+   enable this option for private projects, secrets, or restricted customer and
+   third-party work under the current public-data authorization. This opt-in path does
+   not authorize private-project traffic or a fleet-wide, default-on rollout.
+   MetaCTL cannot verify that a project or query is public; the data class is
+   your attestation.
+
+   `--max-provider-calls` permits 1-10 attempts per host process, not per
+   discovery request; `--provider-deadline` must be positive and no more than
+   5 seconds per attempt. The example uses 2 attempts and 1 second. `shadow`
+   records Jev's proposed order without changing the returned order;
+   `advisory` may apply a validated proposal. Connect and doctor call only the
+   local host's offline status path, never the provider. A later discovery call
+   may contact the gateway. On unavailable, rejected, timed-out or over-budget
+   responses, the host returns deterministic ordering and records whether the
+   provider attempt or billing state is unknown. Policy changes require
+   `--replace`. Synthetic classification is reserved for `skills host --check`.
+   To check actual use, run `skills doctor` with the same routing flags and
+   inspect `registered_mode`, `registered_gateway_command_state`, and `routing`.
+   The gateway command state detects a missing or non-executable client without
+   calling it. For a specific discovery request,
+   inspect its `routing_receipt` for `reason` and `provider_calls`, then match
+   its session/run ID in the private event log. A configured registration or
+   healthy host alone does not prove that the agent called Jev. Use `--json
+   --full` when copying the complete generated argument array; ordinary JSON
+   output marks long arrays as truncated.
 3. Restart or open a fresh agent session. Confirm both `discover_skills` and
    `load_skill` are available, then request one harmless ambiguous discovery
    and load a returned ID with its digest. The `routing_receipt` should say
