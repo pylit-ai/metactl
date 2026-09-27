@@ -1,4 +1,5 @@
 //! Native Git evaluation of a proposed ignore state, without copying payloads.
+mod index_scope;
 use anyhow::{anyhow, bail, Context, Result};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -87,13 +88,94 @@ fn git(root: &Path) -> Command {
     cmd
 }
 
+fn supported_source_variable(name: &str) -> bool {
+    matches!(
+        name,
+        "GIT_CONFIG_GLOBAL"
+            | "GIT_CONFIG_SYSTEM"
+            | "GIT_CONFIG_NOSYSTEM"
+            | "GIT_CONFIG_PARAMETERS"
+            | "GIT_CONFIG_COUNT"
+            | "GIT_CEILING_DIRECTORIES"
+            | "GIT_DISCOVERY_ACROSS_FILESYSTEM"
+    ) || ["GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_"]
+        .iter()
+        .any(|prefix| {
+            name.strip_prefix(prefix).is_some_and(|suffix| {
+                !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit())
+            })
+        })
+}
+
+fn source_environment() -> BTreeMap<std::ffi::OsString, std::ffi::OsString> {
+    std::env::vars_os()
+        .filter(|(name, _)| {
+            let name = name.to_string_lossy();
+            supported_source_variable(&name) || name == "GIT_DIR"
+        })
+        .collect()
+}
+
+fn source_git(root: &Path) -> Command {
+    let mut command = git(root);
+    for (name, value) in source_environment() {
+        // An inherited Git directory is validated independently, then omitted:
+        // -C discovers the same trusted repository without carrying redirection.
+        if name != "GIT_DIR" {
+            command.env(name, value);
+        }
+    }
+    command
+}
+
+fn git_failure(stderr: &[u8]) -> String {
+    if source_environment().keys().any(|key| {
+        let key = key.to_string_lossy();
+        key == "GIT_CONFIG_PARAMETERS"
+            || key == "GIT_CONFIG_COUNT"
+            || key.starts_with("GIT_CONFIG_KEY_")
+            || key.starts_with("GIT_CONFIG_VALUE_")
+    }) {
+        "inherited Git configuration could not be applied".into()
+    } else {
+        String::from_utf8_lossy(stderr).into_owned()
+    }
+}
+
+fn validate_repository_context(project: &Path) -> Result<()> {
+    if let Some(inherited) = std::env::var_os("GIT_DIR") {
+        let trusted = git(project)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()?;
+        let selected = git(project)
+            .env("GIT_DIR", inherited)
+            .args(["rev-parse", "--absolute-git-dir"])
+            .output()?;
+        if !trusted.status.success() || !selected.status.success() {
+            bail!("unsupported Git environment override GIT_DIR; cannot establish repository identity");
+        }
+        let trusted = fs::canonicalize(String::from_utf8(trusted.stdout)?.trim_end_matches('\n'))?;
+        let selected =
+            fs::canonicalize(String::from_utf8(selected.stdout)?.trim_end_matches('\n'))?;
+        if trusted != selected {
+            bail!("unsupported Git environment override GIT_DIR; selected repository differs from project");
+        }
+    }
+    Ok(())
+}
+
 fn output(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let out = git(root).args(args).output()?;
+    command_output(source_git(root).args(args))
+}
+
+fn shadow_output(root: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    command_output(git(root).args(args))
+}
+
+fn command_output(command: &mut Command) -> Result<Vec<u8>> {
+    let out = command.output()?;
     if !out.status.success() {
-        bail!(
-            "Git privacy probe failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        );
+        bail!("Git privacy probe failed: {}", git_failure(&out.stderr));
     }
     Ok(out.stdout)
 }
@@ -295,7 +377,7 @@ impl SelectedIndex {
     }
 
     fn resolve(project: &Path, inherited: Option<&std::ffi::OsStr>) -> Result<PathBuf> {
-        let mut command = git(project);
+        let mut command = source_git(project);
         if let Some(value) = inherited {
             command.env("GIT_INDEX_FILE", value);
         }
@@ -305,7 +387,7 @@ impl SelectedIndex {
         if !result.status.success() {
             bail!(
                 "cannot resolve selected Git index: {}",
-                String::from_utf8_lossy(&result.stderr)
+                git_failure(&result.stderr)
             );
         }
         Ok(PathBuf::from(
@@ -314,14 +396,14 @@ impl SelectedIndex {
     }
 
     fn output(&self, root: &Path, args: &[&str]) -> Result<Vec<u8>> {
-        let result = git(root)
+        let result = source_git(root)
             .env("GIT_INDEX_FILE", git_path_argument(&self.path))
             .args(args)
             .output()?;
         if !result.status.success() {
             bail!(
                 "selected Git index enumeration failed: {}",
-                String::from_utf8_lossy(&result.stderr)
+                git_failure(&result.stderr)
             );
         }
         Ok(result.stdout)
@@ -339,7 +421,7 @@ impl SelectedIndex {
 }
 
 fn config(root: &Path, key: &str) -> Result<Option<String>> {
-    let out = git(root)
+    let out = source_git(root)
         .args(["config", "--path", "--get", key])
         .output()?;
     match out.status.code() {
@@ -348,6 +430,17 @@ fn config(root: &Path, key: &str) -> Result<Option<String>> {
         )),
         Some(1) => Ok(None),
         _ => bail!("cannot resolve effective Git configuration {key}"),
+    }
+}
+
+fn ignore_case(root: &Path) -> Result<bool> {
+    let output = source_git(root)
+        .args(["config", "--bool", "--get", "core.ignoreCase"])
+        .output()?;
+    match output.status.code() {
+        Some(0) => Ok(output.stdout == b"true\n"),
+        Some(1) => Ok(false),
+        _ => bail!("cannot resolve effective Git core.ignoreCase"),
     }
 }
 
@@ -381,12 +474,14 @@ fn probe(
     paths: &BTreeSet<String>,
     exclude: &Path,
     global: Option<&Path>,
+    source: bool,
 ) -> Result<BTreeMap<String, Match>> {
     if paths.is_empty() {
         return Ok(BTreeMap::new());
     }
     let input: Vec<u8> = paths.iter().flat_map(|p| p.bytes().chain([0])).collect();
-    let mut child = git(root)
+    let mut command = if source { source_git(root) } else { git(root) };
+    let mut child = command
         .args([
             "check-ignore",
             "--no-index",
@@ -412,7 +507,7 @@ fn probe(
     if !matches!(result.status.code(), Some(0 | 1)) {
         bail!(
             "Git ignore evaluation failed: {}",
-            String::from_utf8_lossy(&result.stderr)
+            git_failure(&result.stderr)
         );
     }
     if !result.stdout.ends_with(&[0]) {
@@ -466,32 +561,33 @@ pub fn evaluate(
     requested: &[String],
     writes: &[(PathBuf, Vec<u8>)],
 ) -> Result<(PathBuf, BTreeMap<String, Protection>)> {
-    // High-priority inline overrides outrank the shadow's snapshotted local
-    // configuration. Refuse those and repository/index redirection explicitly.
-    // Ordinary global/system selectors are resolved by config() in the source.
+    evaluate_scoped(project, requested, writes, false)
+}
+
+fn evaluate_scoped(
+    project: &Path,
+    requested: &[String],
+    writes: &[(PathBuf, Vec<u8>)],
+    publication_only: bool,
+) -> Result<(PathBuf, BTreeMap<String, Protection>)> {
+    let environment = source_environment();
     for (name, _) in std::env::vars_os() {
         let name = name.to_string_lossy();
-        if (name.starts_with("GIT_CONFIG")
-            && !matches!(
-                name.as_ref(),
-                "GIT_CONFIG_GLOBAL" | "GIT_CONFIG_SYSTEM" | "GIT_CONFIG_NOSYSTEM"
-            ))
-            || matches!(
-                name.as_ref(),
-                "GIT_DIR"
-                    | "GIT_WORK_TREE"
-                    | "GIT_COMMON_DIR"
-                    | "GIT_CEILING_DIRECTORIES"
-                    | "GIT_DISCOVERY_ACROSS_FILESYSTEM"
-            )
+        if (name.starts_with("GIT_CONFIG") && !supported_source_variable(&name))
+            || matches!(name.as_ref(), "GIT_WORK_TREE" | "GIT_COMMON_DIR")
         {
             bail!("unsupported Git environment override {name}; retry privacy preflight in the normal repository context");
         }
     }
+    validate_repository_context(project)?;
     let root = fs::canonicalize(
         String::from_utf8(output(project, &["rev-parse", "--show-toplevel"])?)?
             .trim_end_matches('\n'),
     )?;
+    let trusted = command_output(git(project).args(["rev-parse", "--show-toplevel"]))?;
+    if fs::canonicalize(String::from_utf8(trusted)?.trim_end_matches('\n'))? != root {
+        bail!("effective Git worktree differs from independently discovered project");
+    }
     let project = fs::canonicalize(project)?;
     let prefix = project.strip_prefix(&root)?;
     // Reading an ignore source may follow Git's source-specific link rules;
@@ -524,12 +620,43 @@ pub fn evaluate(
         .trim_end_matches('\n'),
     );
     let index = SelectedIndex::capture(&project)?;
-    let tracked = names(&index.output(&root, &["ls-files", "--cached", "--full-name", "-z"])?)?;
-    let mut paths = names(&index.output(
-        &root,
-        &["ls-files", "--cached", "--others", "--full-name", "-z"],
-    )?)?;
+    let ignore_case = ignore_case(&root)?;
+    let mut scopes = Vec::new();
+    for path in requested {
+        relative(path)?;
+        scopes.push(git_relative(&prefix.join(path))?);
+    }
+    let private_state = git_relative(&prefix.join(".metactl"))?;
+    let mut identities = index_scope::Identities::new();
+    let cached = index.output(&root, &["ls-files", "--cached", "--full-name", "-z"])?;
+    let tracked = if publication_only {
+        let mut tracked = BTreeSet::new();
+        for name in cached.split(|b| *b == 0).filter(|name| !name.is_empty()) {
+            for scope in scopes.iter().chain(std::iter::once(&private_state)) {
+                if index_scope::overlaps(&root, name, scope, &mut identities)? {
+                    tracked.extend(names(name)?);
+                    break;
+                }
+            }
+        }
+        tracked
+    } else {
+        names(&cached)?
+    };
+    let mut paths = if publication_only {
+        tracked.clone()
+    } else {
+        names(&index.output(
+            &root,
+            &["ls-files", "--cached", "--others", "--full-name", "-z"],
+        )?)?
+    };
     index.revalidate()?;
+    if publication_only {
+        if let Some(path) = tracked.iter().next() {
+            bail!("private destination or state path {path} is already tracked and must be untracked before private publication; resolve the index");
+        }
+    }
     let observed_paths = paths.clone();
     let requested_paths: Vec<PathBuf> = requested.iter().map(|path| project.join(path)).collect();
     for path in requested {
@@ -561,7 +688,7 @@ pub fn evaluate(
                 "false".into()
             }
         });
-        output(&shadow, &["config", key, &value])?;
+        shadow_output(&shadow, &["config", key, &value])?;
     }
     let configured_global = config(&root, "core.excludesFile")?;
     let global_path = configured_global.clone().map(PathBuf::from).or_else(|| {
@@ -574,7 +701,10 @@ pub fn evaluate(
     let shadow_global = temp.path().join("global-ignore");
     let global_source = global_path
         .as_ref()
-        .map(|p| read_global_ignore(p))
+        .map(|p| {
+            read_global_ignore(p)
+                .map_err(|_| anyhow!("cannot snapshot effective global excludes source"))
+        })
         .transpose()?;
     fs::write(
         &shadow_global,
@@ -583,7 +713,7 @@ pub fn evaluate(
             .and_then(IgnoreSource::bytes)
             .unwrap_or_default(),
     )?;
-    output(
+    shadow_output(
         &shadow,
         &[
             "config",
@@ -698,8 +828,14 @@ pub fn evaluate(
             fs::write(shadow.join(path.strip_prefix(&root)?), bytes)?;
         }
     }
-    let before = probe(&root, &paths, &exclude, global_path.as_deref())?;
-    let shadow_before = probe(&shadow, &paths, &shadow_exclude, Some(&shadow_global))?;
+    let before = probe(&root, &paths, &exclude, global_path.as_deref(), true)?;
+    let shadow_before = probe(
+        &shadow,
+        &paths,
+        &shadow_exclude,
+        Some(&shadow_global),
+        false,
+    )?;
     if before != shadow_before {
         bail!("original Git ignore context parity could not be established");
     }
@@ -718,7 +854,13 @@ pub fn evaluate(
         };
         fs::write(destination, bytes)?;
     }
-    let after = probe(&shadow, &paths, &shadow_exclude, Some(&shadow_global))?;
+    let after = probe(
+        &shadow,
+        &paths,
+        &shadow_exclude,
+        Some(&shadow_global),
+        false,
+    )?;
     // An editor or config change during the proof invalidates the result.
     for (key, value) in settings {
         if config(&root, key)? != value {
@@ -742,10 +884,22 @@ pub fn evaluate(
             bail!("Git ignore context changed during privacy preflight");
         }
     }
-    if probe(&root, &paths, &exclude, global_path.as_deref())? != before {
+    if probe(&root, &paths, &exclude, global_path.as_deref(), true)? != before {
         bail!("Git ignore decisions changed during privacy preflight");
     }
     index.revalidate()?;
+    if source_environment() != environment || self::ignore_case(&root)? != ignore_case {
+        bail!("effective Git input context changed during privacy preflight");
+    }
+    validate_repository_context(&project)?;
+    if fs::canonicalize(
+        String::from_utf8(output(&project, &["rev-parse", "--show-toplevel"])?)?
+            .trim_end_matches('\n'),
+    )? != root
+    {
+        bail!("effective Git worktree changed during privacy preflight");
+    }
+    index_scope::revalidate(&identities)?;
     for (path, snapshot) in junctions {
         if namespace_junction(&path)? != Some(snapshot) {
             bail!("junction changed during privacy preflight");
@@ -837,7 +991,7 @@ pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
     if paths.is_empty() {
         return Ok(());
     }
-    let (root, evidence) = evaluate(project, paths, &[])?;
+    let (root, evidence) = evaluate_scoped(project, paths, &[], true)?;
     let project = fs::canonicalize(project)?;
     let prefix = project.strip_prefix(root)?;
     for path in paths {
@@ -863,6 +1017,92 @@ pub fn require_private(project: &Path, paths: &[String]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn publication_scope_rejects_tracked_directories_and_native_aliases() {
+        for (stored, requested) in [
+            ("state", "state"),
+            ("STATE", "state"),
+            ("ſtate", "state"),
+            ("Kelvin", "kelvin"),
+            ("ÄREA", "ärea"),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            output(root, &["init", "-q"]).unwrap();
+            output(root, &["config", "core.ignoreCase", "false"]).unwrap();
+            fs::create_dir(root.join(stored)).unwrap();
+            fs::write(root.join(stored).join("private.txt"), "synthetic private").unwrap();
+            fs::write(
+                root.join(".gitignore"),
+                format!("{stored}/\n{requested}/\n"),
+            )
+            .unwrap();
+            output(root, &["add", "--force", &format!("{stored}/private.txt")]).unwrap();
+            let aliases = root.join(requested).join("private.txt").exists();
+            if !aliases {
+                fs::create_dir(root.join(requested)).unwrap();
+            }
+            let result = require_private(root, &[format!("{requested}/")]);
+            if aliases {
+                assert!(result.unwrap_err().to_string().contains("tracked"));
+            } else {
+                result.unwrap();
+            }
+            fs::remove_file(root.join(stored).join("private.txt")).unwrap();
+            let result = require_private(root, &[format!("{requested}/private.txt")]);
+            if aliases {
+                assert!(result.unwrap_err().to_string().contains("tracked"));
+            } else {
+                result.unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn publication_scope_respects_literal_prefixes_nested_ignores_and_tracked_ancestors() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        output(root, &["init", "-q"]).unwrap();
+        for path in [
+            "nested/private[1]",
+            "nested/private1",
+            "nested/.metactl-other",
+        ] {
+            fs::create_dir_all(root.join(path)).unwrap();
+        }
+        fs::write(root.join(".gitignore"), "nested/private*/\n").unwrap();
+        fs::write(root.join("nested/private1/file"), "unrelated").unwrap();
+        fs::write(root.join("nested/.metactl-other/file"), "unrelated").unwrap();
+        output(
+            root,
+            &[
+                "add",
+                "--force",
+                "nested/private1/file",
+                "nested/.metactl-other/file",
+            ],
+        )
+        .unwrap();
+        require_private(&root.join("nested"), &["private[1]/".into()]).unwrap();
+        fs::write(root.join("nested/.gitignore"), "!private[[]1]/\n").unwrap();
+        assert!(
+            require_private(&root.join("nested"), &["private[1]/".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("effectively Git ignored")
+        );
+        fs::remove_file(root.join("nested/.gitignore")).unwrap();
+        fs::write(root.join("ancestor"), "tracked file replaced by directory").unwrap();
+        output(root, &["add", "ancestor"]).unwrap();
+        fs::remove_file(root.join("ancestor")).unwrap();
+        fs::create_dir(root.join("ancestor")).unwrap();
+        fs::write(root.join(".gitignore"), "ancestor/\n").unwrap();
+        assert!(require_private(root, &["ancestor/private.txt".into()])
+            .unwrap_err()
+            .to_string()
+            .contains("tracked"));
+    }
 
     #[cfg(unix)]
     #[test]

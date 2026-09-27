@@ -920,18 +920,34 @@ description: Skill with an executable script fixture.
     let executable_import = run_cli(
         project.path(),
         &[
+            "--json",
             "pack",
             "import-skill",
             executable_skill.to_str().expect("skill path"),
         ],
     );
-    assert!(!executable_import.status.success(), "import should fail");
-    assert!(
-        stderr(&executable_import)
-            .contains("executable script requires --allow-executable-scripts"),
-        "stderr: {}",
-        stderr(&executable_import)
-    );
+    if cfg!(unix) {
+        assert!(!executable_import.status.success(), "import should fail");
+        assert!(
+            stdout(&executable_import)
+                .contains("executable script requires --allow-executable-scripts"),
+            "response: {}",
+            stdout(&executable_import)
+        );
+    } else {
+        assert!(
+            executable_import.status.success(),
+            "{}",
+            stderr(&executable_import)
+        );
+        let imported = json_output(&executable_import);
+        assert_eq!(imported["provenance"]["script_execution_granted"], false);
+        assert_eq!(imported["script_classification"][0]["executable"], false);
+        assert_eq!(
+            imported["script_classification"][0]["execution_granted"],
+            false
+        );
+    }
 
     let secret_skill = project.path().join("secret-skill");
     fs::create_dir_all(&secret_skill).expect("secret dir");

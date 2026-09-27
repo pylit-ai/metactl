@@ -262,6 +262,171 @@ fn cli_private_compile_apply_sync_repeat_keeps_git_index_public() {
 }
 
 #[test]
+fn cli_private_sync_accepts_inherited_inline_config_and_discovery_limits() {
+    let repo = private_project();
+    for parameters in [false, true] {
+        let mut command = repo.command(env!("CARGO_BIN_EXE_metactl"));
+        if parameters {
+            command.env("GIT_CONFIG_PARAMETERS", "'user.useConfigOnly'='true'");
+        } else {
+            command
+                .env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "user.useConfigOnly")
+                .env("GIT_CONFIG_VALUE_0", "true");
+        }
+        command
+            .env("GIT_CEILING_DIRECTORIES", &repo.home)
+            .env("GIT_DISCOVERY_ACROSS_FILESYSTEM", "1")
+            .env("GIT_DIR", repo.root.join(".git"));
+        assert_ok(&command.arg("sync").output().unwrap());
+        assert_index_is_public(&repo);
+    }
+}
+
+#[test]
+fn cli_inline_configuration_errors_do_not_echo_values_or_redirect_worktrees() {
+    let repo = private_project();
+    let sentinel = "SYNTHETIC_CONFIG_VALUE_NOT_FOR_DIAGNOSTICS";
+    let output = repo
+        .command(env!("CARGO_BIN_EXE_metactl"))
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "core.ignoreCase")
+        .env("GIT_CONFIG_VALUE_0", sentinel)
+        .arg("sync")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains(sentinel));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(sentinel));
+    for (key, value) in [
+        ("core.worktree", repo.home.as_os_str()),
+        ("core.bare", std::ffi::OsStr::new("true")),
+    ] {
+        let native = repo
+            .command("git")
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", key)
+            .env("GIT_CONFIG_VALUE_0", value)
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .unwrap();
+        let same_worktree = native.status.success()
+            && fs::canonicalize(String::from_utf8(native.stdout).unwrap().trim())
+                .is_ok_and(|root| root == fs::canonicalize(&repo.root).unwrap());
+        let before = payloads(&repo.root);
+        let redirected = repo
+            .command(env!("CARGO_BIN_EXE_metactl"))
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", key)
+            .env("GIT_CONFIG_VALUE_0", value)
+            .arg("sync")
+            .output()
+            .unwrap();
+        // Git versions may ignore these configuration keys during discovery.
+        // Only a real native redirection should require refusal.
+        if same_worktree {
+            assert_ok(&redirected);
+            assert_index_is_public(&repo);
+        } else {
+            assert!(
+                !redirected.status.success(),
+                "{key}: stdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&redirected.stdout),
+                String::from_utf8_lossy(&redirected.stderr)
+            );
+            assert!(
+                before == payloads(&repo.root),
+                "effective worktree redirection mutated files"
+            );
+        }
+    }
+}
+
+#[test]
+fn cli_private_sync_uses_effective_inline_global_excludes() {
+    let repo = private_project();
+    fs::write(repo.root.join(".gitignore"), "").unwrap();
+    fs::write(repo.root.join(".git/info/exclude"), "").unwrap();
+    let global = repo.home.join("inline-global-ignore");
+    fs::write(&global, "*\n").unwrap();
+    let run = || {
+        repo.command(env!("CARGO_BIN_EXE_metactl"))
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.excludesFile")
+            .env(
+                "GIT_CONFIG_VALUE_0",
+                metactl::git_privacy::git_path_argument(&global),
+            )
+            .arg("sync")
+            .output()
+            .unwrap()
+    };
+    assert_ok(&run());
+    fs::write(&global, "").unwrap();
+    let before = payloads(&repo.root);
+    let refused = run();
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("must be effectively Git ignored"),
+        "{}",
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    assert!(
+        before == payloads(&repo.root),
+        "effective config refusal mutated files"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cli_private_sync_does_not_decode_unrelated_non_utf8_but_migration_and_private_index_refuse() {
+    use std::os::unix::ffi::OsStringExt;
+    let repo = private_project();
+    fs::create_dir(repo.root.join("node_modules")).unwrap();
+    let name = std::ffi::OsString::from_vec(b"bad-\xff.private".to_vec());
+    fs::write(
+        repo.root.join("node_modules").join(&name),
+        "unrelated ignored payload",
+    )
+    .unwrap();
+    let ignore = repo.root.join(".gitignore");
+    fs::write(
+        &ignore,
+        format!("node_modules/\n{}", fs::read_to_string(&ignore).unwrap()),
+    )
+    .unwrap();
+    for operation in ["sync", "compile", "apply", "sync"] {
+        assert_ok(&repo.cli(&[operation]));
+    }
+    let before = payloads(&repo.root);
+    let migration = repo.cli(&["ignore", "fix", "--scope", "both", "--yes"]);
+    assert!(!migration.status.success());
+    assert!(String::from_utf8_lossy(&migration.stderr).contains("non-UTF8 Git path"));
+    assert!(
+        before == payloads(&repo.root),
+        "migration refusal mutated files"
+    );
+    let private = repo.root.join(".metactl").join(&name);
+    fs::write(&private, PRIVATE_PAYLOAD).unwrap();
+    assert_ok(
+        &repo
+            .command("git")
+            .args(["add", "--force"])
+            .arg(&private)
+            .output()
+            .unwrap(),
+    );
+    let before = payloads(&repo.root);
+    let refused = repo.cli(&["sync"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("non-UTF8 Git path"));
+    assert!(
+        before == payloads(&repo.root),
+        "relevant index refusal mutated files"
+    );
+}
+
+#[test]
 fn cli_symlink_repository_probe_preserves_native_ignore_behavior() {
     let repo = Repo::new();
     fs::write(repo.root.join("payload.private"), "synthetic private bytes").unwrap();
@@ -426,7 +591,16 @@ fn cli_scoped_git_context_refuses_without_file_mutation() {
     for key in ["GIT_DIR", "GIT_WORK_TREE"] {
         let repo = Repo::new();
         let value = if key == "GIT_DIR" {
-            repo.root.join(".git")
+            let foreign = repo.home.join("foreign");
+            assert_ok(
+                &repo
+                    .command("git")
+                    .args(["init", "-q"])
+                    .arg(&foreign)
+                    .output()
+                    .unwrap(),
+            );
+            foreign.join(".git")
         } else {
             repo.root.clone()
         };

@@ -11,7 +11,7 @@ env:
 
 jobs:
   windows-ignore:
-    name: Windows CLI and ignore safety
+    name: Windows ignore safety
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +26,9 @@ jobs:
       - name: Compare Windows link and junction proposals with native Git
         if: always()
         run: cargo test --locked -p metactl --lib windows_link_leaf_proposals_match_native_directory_only_rules -- --nocapture
+      - name: Exercise native Windows Git privacy unit contracts
+        if: always()
+        run: cargo test --locked -p metactl --lib git_privacy:: -- --nocapture
       - name: Exercise native Windows CLI workflows
         if: always()
         timeout-minutes: 30

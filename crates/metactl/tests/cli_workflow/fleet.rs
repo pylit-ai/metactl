@@ -164,7 +164,12 @@ fn fleet_controller_init_creates_default_xdg_controller_and_selects_it() {
     );
     assert!(init.status.success(), "{}", stderr(&init));
     let json = json_output(&init);
-    let controller = home.path().join(".config/metactl/fleet/personal");
+    let controller = home
+        .path()
+        .join(".config")
+        .join("metactl")
+        .join("fleet")
+        .join("personal");
     assert_eq!(json["action"], "controller-init");
     assert_eq!(
         json["controller"]["path"],

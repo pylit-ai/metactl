@@ -132,11 +132,19 @@ fn ignore_nested_coordinates_refuse_unknown_working_and_index_only_paths() {
             for scope in ["repo", "local"] {
                 let repo = TempDir::new().unwrap();
                 git_init_project(repo.path());
-                assert!(
-                    run_git(repo.path(), &["config", "core.excludesFile", "/dev/null"])
-                        .status
-                        .success()
-                );
+                let configuration = TempDir::new().unwrap();
+                let empty_excludes = configuration.path().join("empty-excludes");
+                fs::write(&empty_excludes, []).unwrap();
+                assert!(run_git(
+                    repo.path(),
+                    &[
+                        "config",
+                        "core.excludesFile",
+                        empty_excludes.to_str().unwrap()
+                    ]
+                )
+                .status
+                .success());
                 let project = repo.path().join("nested project");
                 fs::create_dir(&project).unwrap();
                 if configured {
@@ -197,7 +205,12 @@ fn ignore_nested_coordinates_refuse_unknown_working_and_index_only_paths() {
                     assert!(!project.join(".metactl/ignore-recovery").exists());
                 }
                 if !index_only {
-                    assert!(run_git(repo.path(), &["add", "--all"]).status.success());
+                    let add = run_git(repo.path(), &["add", "--all"]);
+                    assert!(
+                        add.status.success(),
+                        "configured={configured} scope={scope}: {}",
+                        stderr(&add)
+                    );
                     assert!(!run_git(&project, &["show", &format!(":./{destination}")])
                         .status
                         .success());
@@ -1337,17 +1350,31 @@ fn concurrent_authored_ignore_edit_is_preserved_or_reported_in_recovery_copy() {
     let status = output.status;
     assert!(injected, "did not observe staging file, status {status}");
     let destination = fs::read(&ignore).expect("destination");
-    let backups: Vec<_> = fs::read_dir(&recovery_dir)
-        .expect("recovery directory")
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(".tmp"))
+    fn retained_files(dir: &Path, files: &mut Vec<PathBuf>) {
+        for entry in fs::read_dir(dir).expect("recovery directory") {
+            let entry = entry.expect("recovery entry");
+            let kind = entry.file_type().expect("recovery file type");
+            if kind.is_dir() {
+                retained_files(&entry.path(), files);
+            } else if kind.is_file() {
+                files.push(entry.path());
+            }
+        }
+    }
+    // Unix exchanges into the staging name; Windows retains the displaced
+    // live file under a separately reserved .replace-*/displaced namespace.
+    let mut backups = Vec::new();
+    retained_files(&recovery_dir, &mut backups);
+    let matching_backups: Vec<_> = backups
+        .iter()
+        .filter(|path| {
+            fs::read(path)
+                .expect("backup")
+                .windows(b"authored-concurrent-rule\n".len())
+                .any(|window| window == b"authored-concurrent-rule\n")
+        })
         .collect();
-    let in_backup = backups.iter().any(|entry| {
-        fs::read(entry.path())
-            .expect("backup")
-            .windows(b"authored-concurrent-rule\n".len())
-            .any(|window| window == b"authored-concurrent-rule\n")
-    });
+    let in_backup = !matching_backups.is_empty();
     let in_destination = destination
         .windows(b"authored-concurrent-rule\n".len())
         .any(|window| window == b"authored-concurrent-rule\n");
@@ -1359,9 +1386,11 @@ fn concurrent_authored_ignore_edit_is_preserved_or_reported_in_recovery_copy() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(
-            backups
-                .iter()
-                .any(|entry| response.contains(entry.path().to_str().expect("backup path"))),
+            matching_backups.iter().any(|path| {
+                let path = path.to_str().expect("backup path");
+                let encoded = serde_json::to_string(path).expect("JSON backup path");
+                response.contains(path) || response.contains(&encoded[1..encoded.len() - 1])
+            }),
             "displaced edit not reported: {response}"
         );
     }
@@ -1768,6 +1797,8 @@ fn ignore_fix_accepts_legal_resource_names_without_hiding_them() {
         ".agents/skills/demo/assets/test[1].json",
         ".agents/skills/demo/assets/#note.md",
         ".agents/skills/demo/assets/!note.md",
+        ".agents/skills/demo/assets/trailing space.txt",
+        #[cfg(not(windows))]
         ".agents/skills/demo/assets/trailing ",
     ];
     for path in paths {

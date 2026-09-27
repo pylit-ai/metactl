@@ -1317,7 +1317,7 @@ fn cli_sync_all_targets_no_double_path_segments() {
         let mut files = Vec::new();
         walk_project_files(project.path(), &mut files);
         for path in &files {
-            let p = path.to_string_lossy().to_string();
+            let p = path.to_string_lossy().replace('\\', "/");
             for seg in ["commands", "rules", "scripts", "plugins", "hooks", "skills"] {
                 let needle = format!("/{seg}/");
                 if let Some(first) = p.find(&needle) {

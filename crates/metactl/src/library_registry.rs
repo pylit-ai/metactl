@@ -32,8 +32,8 @@ pub use library_privacy::ProjectionProof;
 #[path = "library_discovery.rs"]
 mod library_discovery;
 use library_discovery::{
-    normalize_candidate, provenance_ref_for, query_terms, relevance_score, search_match_evidence,
-    why_string,
+    normalize_candidate, provenance_ref_for, query_terms, relevance_score, routing_terms,
+    score_routing_field, search_match_evidence, why_string,
 };
 
 #[path = "library_instruction_format.rs"]
@@ -1948,32 +1948,6 @@ fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<
             .unwrap_or_else(|| "No bundled instruction resource was available.".to_string())
     )
     .into_bytes())
-}
-
-fn routing_terms(query: &str) -> BTreeSet<String> {
-    query
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|term| !term.is_empty())
-        .map(|term| term.to_ascii_lowercase())
-        .collect()
-}
-
-fn score_routing_field(
-    terms: &BTreeSet<String>,
-    field: &str,
-    weight: i64,
-    field_name: &str,
-    matched_fields: &mut Vec<String>,
-) -> i64 {
-    let field_terms = routing_terms(field);
-    if !terms.is_disjoint(&field_terms) {
-        if !matched_fields.iter().any(|item| item == field_name) {
-            matched_fields.push(field_name.to_string());
-        }
-        weight
-    } else {
-        0
-    }
 }
 
 fn read_cached_pack_resource(path: &Path) -> Result<Vec<u8>> {

@@ -12,6 +12,15 @@ and matching installed bytes. Shared aggregate outputs and materializer-owned
 links can migrate. Protected private skills and their resources remain supported.
 No private payloads enter the isolated Git probe repository.
 
+Routine sync, compile and apply check the requested private destinations and
+their relevant ignore sources. They inspect the cached Git index, including
+native filesystem aliases, but do not walk unrelated ignored dependency or
+build trees. Ignore migration retains full-worktree enumeration because changing
+rules can affect previously hidden content anywhere in the repository. Migration
+planning therefore has a broader cost than routine private publication.
+If a tracked Unicode path is absent from the working tree and could alias a
+private destination, publication refuses until the ambiguity is resolved.
+
 ## Verification sequence
 
 1. Capture effective Git excludes, nested ignore files, path shapes and index.
@@ -83,13 +92,23 @@ them.
 
 The source index is the index Git actually selects, including the normal index,
 the temporary index used by `git commit -a`, and an alternate `GIT_INDEX_FILE`.
-Both source enumerations use that selection; probe commands use an isolated
+Source enumerations use that selection; probe commands use an isolated
 context. The selected path, resolved context, file type, and contents are
 rechecked after enumeration and before accepting the proof. Symlink, reparse, or
-nonregular index files refuse, as do foreign repository-context overrides such
-as `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, and inline Git configuration
-overrides. Linux filenames that are not valid UTF-8 still refuse. These refusals
-publish no private content; early bootstrap may create empty directories.
+nonregular index files refuse. An inherited `GIT_DIR` is accepted only when it
+resolves to the repository independently discovered from the project, including
+an operational linked worktree. Foreign redirection and unsupported
+`GIT_WORK_TREE` or `GIT_COMMON_DIR` overrides refuse.
+
+Inherited inline Git configuration, including `git -c` and the
+`GIT_CONFIG_COUNT` family, is resolved in the source repository. The effective
+ignore settings are captured for the isolated probe and rechecked before proof
+acceptance. Privacy-probe Git command errors do not echo inline configuration
+values. Unrelated non-UTF-8 names do not prevent routine private publication;
+unsupported names that affect the proof, and full migrations containing such
+names, still refuse. These refusals publish no private content; early bootstrap
+may create empty directories. Installed Git hooks remain best-effort sync and
+do not turn a privacy refusal into a failed Git commit.
 
 Shared diagnostic names come from known target capabilities and the enforced
 policy; arbitrary supplied graph strings remain local. MCP policy metadata names

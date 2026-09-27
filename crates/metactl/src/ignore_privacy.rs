@@ -452,7 +452,7 @@ fn projection_bytes_match(
     }
     let index = Command::new("git")
         .arg("-C")
-        .arg(root)
+        .arg(metactl::git_privacy::git_path_argument(root))
         .args(["ls-files", "--cached", "-z", "--", destination])
         .output()
         .map_err(|e| state_error(e.into()))?;
@@ -462,7 +462,7 @@ fn projection_bytes_match(
     if !index.stdout.is_empty() {
         let out = Command::new("git")
             .arg("-C")
-            .arg(root)
+            .arg(metactl::git_privacy::git_path_argument(root))
             .args(["show", &format!(":./{destination}")])
             .output()
             .map_err(|e| state_error(e.into()))?;
