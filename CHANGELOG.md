@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased
+
+## 0.1.25 - 2026-09-26
+
+### Fixed
+
+- Preserve historical Codex commands as no-op entries bound to protected prior
+  evidence, including edited installed bytes and links; refuse altered receipts
+  or unprotected private retention before staging.
+- Verify private projection protection against complete proposed native Git
+  rules before ignore migration, including preserved negations and nested rules.
+- Preserve protected private skills and resources during upgrades; refuse
+  exposed or tracked private destinations before publication instead of silently
+  dropping capabilities. Private path rules remain in local Git excludes.
+- Verify shared aggregate outputs and materializer-owned links from fresh
+  synthesis evidence so legitimate shared migrations can succeed.
+- Keep private pack identifiers out of shared runtime configuration and
+  instruction diagnostics.
+- Preserve private hooks and mixed runtime configuration behind verified local
+  Git protection; reject stale or altered synthesis evidence before apply.
+- Bind replayed outputs to their complete materialization metadata, including
+  patch marker identifiers and behavior flags, before apply.
+- Require protected destinations for every legacy output lacking replay inputs;
+  shared application requires recompilation with current synthesis evidence.
+- Retain displaced ignore files and independent recovery snapshots on macOS,
+  Linux and Windows, including failed multi-file publication and rollback.
+- Scope routine private publication to relevant destinations and cached index
+  entries, preserving native alias checks without walking unrelated ignored
+  build trees. Ignore migration retains its complete repository proof.
+- Preserve inherited Git configuration, selected indexes and operational linked
+  worktree hooks. Refuse foreign repository redirection and unsafe index files.
+- Permit unrelated non-UTF-8 filenames during routine private publication while
+  retaining conservative refusals for affected paths and full migration.
+
+### Verification
+
+- Add native Windows CLI and ignore-safety CI and clean-project smoke checks of assembled
+  macOS/Linux release archives before provenance attestation.
+
 ## 0.1.24 - 2026-09-26
 
 ### Added

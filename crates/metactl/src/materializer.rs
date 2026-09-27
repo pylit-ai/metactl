@@ -16,6 +16,9 @@ use crate::types::{
 };
 
 mod access_preflight;
+mod retained_commands;
+pub(crate) use retained_commands::candidates as retained_command_candidates;
+pub(crate) use retained_commands::validate as validate_retained_command;
 
 #[derive(Debug, Clone)]
 pub(crate) struct StagedOutputInput {
@@ -34,8 +37,37 @@ pub(crate) struct StagedOutputInput {
     pub materialize_as_regular_file: bool,
 }
 
+impl StagedOutputInput {
+    /// The canonical, pure descriptor used by staging and replay validation.
+    pub(crate) fn generated_output(&self, target: &Ref) -> GeneratedOutput {
+        GeneratedOutput {
+            id: self.id.clone(),
+            path: normalize_relative(
+                &Path::new(".metactl")
+                    .join("generated")
+                    .join(&target.id)
+                    .join(&self.destination_path),
+            ),
+            destination_path: Some(self.destination_path.clone()),
+            kind: self.kind.clone(),
+            digest: Some(sha256_bytes(&self.contents)),
+            instruction_mode: self.instruction_mode.clone(),
+            pack_ref: self.pack_ref.clone(),
+            surface_id: self.surface_id.clone(),
+            surface_slug: self.surface_slug.clone(),
+            source_resource_paths: self.source_resource_paths.clone(),
+            merge_status: self.merge_status.clone(),
+            degradation_codes: self.degradation_codes.clone(),
+            ownership_token: self.ownership_token.clone(),
+            materialize_as_regular_file: self.materialize_as_regular_file,
+            managed: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StageOutputsParams {
+    pub resolve_graph: Option<crate::types::ResolveGraph>,
     pub inputs: Vec<StagedOutputInput>,
     pub surface_selection_mode: Option<crate::types::SurfaceSelectionMode>,
     pub surface_selection: Vec<crate::types::SurfaceSelectionDecision>,
@@ -162,6 +194,8 @@ pub(crate) fn stage_outputs(
     params: StageOutputsParams,
 ) -> Result<CompileManifest> {
     validate_relative_output_path("target id", &target.id)?;
+    let retained = retained_command_candidates(project_root, target)?;
+    retained_commands::preserve_receipt(project_root, target, &retained)?;
     let stage_root = project_root
         .join(".metactl")
         .join("generated")
@@ -192,10 +226,8 @@ pub(crate) fn stage_outputs(
     for input in params.inputs {
         validate_relative_output_path("generated destination", &input.destination_path)?;
         ensure_platform_unique_path(&mut seen_destinations, &input.destination_path)?;
-        let relative_stage_path = Path::new(".metactl")
-            .join("generated")
-            .join(&target.id)
-            .join(&input.destination_path);
+        let output = input.generated_output(target);
+        let relative_stage_path = Path::new(&output.path);
         let stage_path = project_root.join(&relative_stage_path);
         ensure_contained_regular_path(project_root, &relative_stage_path, true)?;
         if let Some(parent) = stage_path.parent() {
@@ -203,32 +235,17 @@ pub(crate) fn stage_outputs(
         }
         write_staged_if_changed(&stage_path, &input.contents, params.durable)
             .with_context(|| format!("write {}", stage_path.display()))?;
-        outputs.push(GeneratedOutput {
-            id: input.id,
-            path: normalize_relative(&relative_stage_path),
-            destination_path: Some(input.destination_path),
-            kind: input.kind,
-            digest: Some(sha256_bytes(&input.contents)),
-            instruction_mode: input.instruction_mode,
-            pack_ref: input.pack_ref,
-            surface_id: input.surface_id,
-            surface_slug: input.surface_slug,
-            source_resource_paths: input.source_resource_paths,
-            merge_status: input.merge_status,
-            degradation_codes: input.degradation_codes,
-            ownership_token: input.ownership_token,
-            materialize_as_regular_file: input.materialize_as_regular_file,
-            managed: true,
-        });
+        outputs.push(output);
     }
 
-    retain_installed_codex_commands(
-        project_root,
-        &stage_root,
-        target,
-        previous_manifest.as_ref(),
-        &mut outputs,
-    )?;
+    for output in retained {
+        if outputs.iter().any(|current| {
+            current.path == output.path || current.destination_path == output.destination_path
+        }) {
+            return Err(anyhow!("retained command collides with current synthesis"));
+        }
+        outputs.push(output);
+    }
 
     let expected_paths = outputs
         .iter()
@@ -242,6 +259,7 @@ pub(crate) fn stage_outputs(
     )?;
 
     let manifest = CompileManifest {
+        resolve_graph: params.resolve_graph,
         api_version: crate::types::API_VERSION.to_string(),
         target: target.clone(),
         generated_outputs: outputs,
@@ -260,70 +278,6 @@ pub(crate) fn stage_outputs(
     .with_context(|| format!("write {}", manifest_path.display()))?;
 
     Ok(manifest)
-}
-
-fn retain_installed_codex_commands(
-    project_root: &Path,
-    stage_root: &Path,
-    target: &Ref,
-    previous_manifest: Option<&CompileManifest>,
-    outputs: &mut Vec<GeneratedOutput>,
-) -> Result<()> {
-    if target.id != "codex-cli" {
-        return Ok(());
-    }
-    let Some(previous_manifest) = previous_manifest else {
-        return Ok(());
-    };
-    for previous in &previous_manifest.generated_outputs {
-        let Some(destination) = previous.destination_path.as_deref() else {
-            continue;
-        };
-        if !destination.starts_with(".codex/commands/")
-            || outputs.iter().any(|output| output.path == previous.path)
-        {
-            continue;
-        }
-        validate_relative_output_path("legacy Codex command destination", destination)?;
-        ensure_contained_regular_path(project_root, Path::new(destination), true)?;
-        if outputs
-            .iter()
-            .any(|output| output.destination_path.as_deref() == Some(destination))
-        {
-            return Err(anyhow!(
-                "legacy Codex command destination collides with a new output: {destination}"
-            ));
-        }
-        let installed = project_root.join(destination);
-        match fs::symlink_metadata(&installed) {
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(err).with_context(|| format!("stat {}", installed.display())),
-            Ok(metadata) if !metadata.is_file() && !metadata.file_type().is_symlink() => {
-                return Err(anyhow!(
-                    "legacy Codex command destination is not a file or symlink: {}",
-                    installed.display()
-                ));
-            }
-            Ok(_) => {}
-        }
-        let staged = safe_staged_output_path(project_root, stage_root, &previous.path)?;
-        ensure_contained_regular_path(project_root, Path::new(&previous.path), false)?;
-        let staged_digest = sha256_path(&staged)
-            .with_context(|| format!("verify retained Codex command {}", staged.display()))?;
-        if previous.digest.as_deref() != Some(staged_digest.as_str()) {
-            return Err(anyhow!(
-                "retained Codex command staged bytes changed: {}; preserve and reconcile before recompiling",
-                staged.display()
-            ));
-        }
-        let mut retained = previous.clone();
-        let reason = "unsupported_codex_command_retained_for_compatibility";
-        if !retained.degradation_codes.iter().any(|code| code == reason) {
-            retained.degradation_codes.push(reason.to_string());
-        }
-        outputs.push(retained);
-    }
-    Ok(())
 }
 
 fn load_compile_manifest_if_present(path: &Path) -> Result<Option<CompileManifest>> {
@@ -1970,6 +1924,93 @@ fn load_state(path: &Path) -> Result<Option<ManagedState>> {
     Ok(Some(state))
 }
 
+/// Read persisted destinations across every target without staging or applying outputs.
+/// A malformed or symlinked inventory must never be treated as an empty inventory.
+pub fn installed_projection_destinations(
+    project_root: &Path,
+) -> Result<Vec<(String, Option<Ref>, Option<String>)>> {
+    let root = project_root.join(".metactl");
+    if !safe_inventory_directory(&root)? {
+        return Ok(Vec::new());
+    }
+    let mut records = Vec::new();
+    for directory in [root.join("state"), root.join("generated")] {
+        if !safe_inventory_directory(&directory)? {
+            continue;
+        }
+        let is_state = directory.ends_with("state");
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            if is_state {
+                if path.extension().is_none_or(|ext| ext != "json")
+                    || path
+                        .file_name()
+                        .is_some_and(|name| name == "managed_files.json")
+                {
+                    continue;
+                }
+                safe_inventory_file(&path)?;
+                if let Some(state) = load_state(&path)? {
+                    records.extend(state.outputs.into_iter().map(|output| {
+                        (
+                            output.destination_path,
+                            output.pack_ref,
+                            Some(output.applied_digest),
+                        )
+                    }));
+                }
+            } else {
+                if !safe_inventory_directory(&path)? {
+                    return Err(anyhow!(
+                        "invalid generated target inventory: {}",
+                        path.display()
+                    ));
+                }
+                let manifest_path = path.join("compile.manifest.json");
+                match fs::symlink_metadata(&manifest_path) {
+                    Ok(_) => {
+                        safe_inventory_file(&manifest_path)?;
+                        let manifest = crate::project::load_compile_manifest(&manifest_path)?;
+                        for output in manifest.generated_outputs {
+                            records.push((
+                                output.destination_path.ok_or_else(|| {
+                                    anyhow!(
+                                        "missing generated destination in {}",
+                                        manifest_path.display()
+                                    )
+                                })?,
+                                output.pack_ref,
+                                output.digest,
+                            ));
+                        }
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(err) => return Err(err.into()),
+                }
+            }
+        }
+    }
+    Ok(records)
+}
+
+fn safe_inventory_directory(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => Ok(true),
+        Ok(_) => Err(anyhow!("unsafe inventory directory: {}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn safe_inventory_file(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(anyhow!("unsafe inventory file: {}", path.display()));
+    }
+    Ok(())
+}
+
 fn state_path(project_root: &Path, target: &Ref) -> PathBuf {
     project_root
         .join(".metactl")
@@ -2421,6 +2462,7 @@ mod tests {
         fs::create_dir_all(staged.parent().expect("staged parent")).expect("staged directory");
         fs::write(&staged, "---\nname: demo\n---\n\n# Demo\n").expect("staged skill");
         CompileManifest {
+            resolve_graph: None,
             api_version: "metactl/v2alpha1".to_string(),
             target: Ref {
                 kind: RefKind::Target,
@@ -2685,7 +2727,9 @@ mod tests {
         for unsafe_path in ["../outside", "/tmp/outside", "a//b", "é/SKILL.md"] {
             assert!(validate_relative_output_path("fixture", unsafe_path).is_err());
         }
+        #[cfg(unix)]
         let project = tempfile::tempdir().expect("project");
+        #[cfg(unix)]
         let outside = tempfile::tempdir().expect("outside");
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), project.path().join(".agents"))
@@ -2748,6 +2792,7 @@ mod tests {
             });
         }
         let manifest = CompileManifest {
+            resolve_graph: None,
             api_version: "metactl/v2alpha1".to_string(),
             target: target.clone(),
             generated_outputs: outputs,
@@ -2864,6 +2909,7 @@ mod tests {
             materialize_as_regular_file: false,
         };
         let params = |inputs| StageOutputsParams {
+            resolve_graph: None,
             inputs,
             surface_selection_mode: None,
             surface_selection: Vec::new(),
@@ -2930,6 +2976,7 @@ mod tests {
             materialize_as_regular_file: false,
         };
         let params = |inputs| StageOutputsParams {
+            resolve_graph: None,
             inputs,
             surface_selection_mode: None,
             surface_selection: Vec::new(),
@@ -2984,6 +3031,7 @@ mod tests {
             version: None,
         };
         let manifest = CompileManifest {
+            resolve_graph: None,
             api_version: "metactl/v2alpha1".to_string(),
             target: target.clone(),
             generated_outputs: vec![output],
