@@ -11,11 +11,14 @@ env:
 
 jobs:
   windows-ignore:
-    name: Windows ignore safety
+    name: Windows CLI and ignore safety
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Check Windows source build
         run: cargo check --locked -p metactl -p metactld
       - name: Exercise Windows private workflows, ignore publication, and refusal paths
@@ -23,6 +26,12 @@ jobs:
       - name: Compare Windows link and junction proposals with native Git
         if: always()
         run: cargo test --locked -p metactl --lib windows_link_leaf_proposals_match_native_directory_only_rules -- --nocapture
+      - name: Exercise native Windows CLI workflows
+        if: always()
+        timeout-minutes: 30
+        run: |
+          python3 --version
+          cargo test --locked -p metactl --test cli_workflow -- --nocapture
   test:
     runs-on: ubuntu-latest
     steps:
