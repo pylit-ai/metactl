@@ -1031,6 +1031,9 @@ mod tests {
             let root = temp.path();
             output(root, &["init", "-q"]).unwrap();
             output(root, &["config", "core.ignoreCase", "false"]).unwrap();
+            // Keep the independently protected state root concrete so this
+            // fixture isolates aliases of the requested destination.
+            fs::create_dir(root.join(".metactl")).unwrap();
             fs::create_dir(root.join(stored)).unwrap();
             fs::write(root.join(stored).join("private.txt"), "synthetic private").unwrap();
             fs::write(
@@ -1057,6 +1060,24 @@ mod tests {
                 result.unwrap();
             }
         }
+    }
+
+    #[test]
+    fn publication_scope_refuses_uncertain_unicode_overlap_with_missing_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        output(root, &["init", "-q"]).unwrap();
+        fs::create_dir(root.join("ſtate")).unwrap();
+        fs::create_dir(root.join("private")).unwrap();
+        fs::write(root.join("ſtate/tracked.txt"), "synthetic tracked").unwrap();
+        fs::write(root.join(".gitignore"), "private/\n.metactl/\n").unwrap();
+        output(root, &["add", "ſtate/tracked.txt"]).unwrap();
+        let result = require_private(root, &["private/".into()]);
+        assert!(result.unwrap_err().to_string().contains("tracked"));
+        // Both directory identities now establish that the tracked Unicode
+        // path is distinct from every protected scope.
+        fs::create_dir(root.join(".metactl")).unwrap();
+        require_private(root, &["private/".into()]).unwrap();
     }
 
     #[test]
