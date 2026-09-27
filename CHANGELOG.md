@@ -6,6 +6,9 @@
 
 ### Fixed
 
+- Preserve historical Codex commands as no-op entries bound to protected prior
+  evidence, including edited installed bytes and links; refuse altered receipts
+  or unprotected private retention before staging.
 - Verify private projection protection against complete proposed native Git
   rules before ignore migration, including preserved negations and nested rules.
 - Preserve protected private skills and resources during upgrades; refuse

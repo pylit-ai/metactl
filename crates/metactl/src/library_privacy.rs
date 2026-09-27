@@ -47,6 +47,25 @@ pub(super) fn private_paths(
 }
 
 impl LibraryRegistry {
+    /// Historical retention is no-op evidence, never shared synthesis proof.
+    pub fn retained_private_paths(&self, root: &Path, target: &Ref) -> Result<Vec<String>> {
+        let retained = materializer::retained_command_candidates(root, target)?;
+        let mut paths = Vec::new();
+        if !retained.is_empty() {
+            paths.push(".metactl/".into());
+        }
+        for output in retained {
+            if !output.pack_ref.as_ref().is_some_and(|reference| {
+                reference.kind == RefKind::Pack
+                    && self.find_pack(reference).is_some_and(|pack| {
+                        pack.manifest.visibility_scope == VisibilityScope::Shared
+                    })
+            }) {
+                paths.extend(output.destination_path);
+            }
+        }
+        Ok(paths)
+    }
     /// Every persisted graph reference must be registry-proven shared, including
     /// suppressed and unknown requests. Visibility of activated packs is not a
     /// complete provenance inventory. Opaque local fields fail closed as well.
@@ -239,6 +258,17 @@ impl LibraryRegistry {
                 if proof.private {
                     replay_private.insert(destination.clone());
                 }
+            } else if proofs.is_some()
+                && materializer::validate_retained_command(root, &manifest.target, output)?
+            {
+                if !output.pack_ref.as_ref().is_some_and(|reference| {
+                    reference.kind == RefKind::Pack
+                        && self.find_pack(reference).is_some_and(|pack| {
+                            pack.manifest.visibility_scope == VisibilityScope::Shared
+                        })
+                }) {
+                    replay_private.insert(destination.clone());
+                }
             } else if proofs.is_some() {
                 anyhow::bail!(
                     "output absent from current synthesis evidence; recompile before apply"
@@ -263,6 +293,7 @@ impl LibraryRegistry {
             })
             .filter_map(|o| o.destination_path.clone())
             .collect();
+        paths.extend(self.retained_private_paths(root, &manifest.target)?);
         if manifest.resolve_graph.is_none()
             || !paths.is_empty()
             || manifest

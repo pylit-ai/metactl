@@ -869,15 +869,16 @@ impl LibraryRegistry {
         )?;
         degradations.extend(surface_degradations);
         dedupe_degradations(&mut degradations);
-        crate::git_privacy::require_private(
-            &project_root,
-            &library_privacy::private_paths(
-                self,
-                &outputs,
-                &params.resolve_graph,
-                &params.target_capability,
-            ),
-        )?;
+        let mut private_paths = library_privacy::private_paths(
+            self,
+            &outputs,
+            &params.resolve_graph,
+            &params.target_capability,
+        );
+        private_paths.extend(
+            self.retained_private_paths(&project_root, &params.target_capability.target_ref())?,
+        );
+        crate::git_privacy::require_private(&project_root, &private_paths)?;
         let manifest = materializer::stage_outputs(
             &project_root,
             &params.target_capability.target_ref(),

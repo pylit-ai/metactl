@@ -62,6 +62,15 @@ including plans without generated outputs that still create local state records.
 Recompile before applying legacy shared outputs to establish synthesis evidence.
 A category or missing or edited attribution field cannot grant sharing.
 
+Historical Codex commands remain no-op compatibility entries: sync preserves
+their installed bytes and links, including user edits. A protected receipt of
+the previous manifest binds their metadata and staged digest; it is not fresh
+synthesis evidence and cannot authorize weaker ignore rules. Missing or altered
+receipts refuse before publication: preserve installed commands and restore or
+reconcile the previous-manifest evidence. Private or unknown command attribution
+also requires an ignored, untracked destination; receipt and state paths always
+require protection.
+
 Private selection uses `metactl use PACK --local`. Ignore rules belong in the
 local Git exclude file when their paths reveal private identifiers. A tracked
 mixed aggregate refuses publication; inspect and remove it from tracking while

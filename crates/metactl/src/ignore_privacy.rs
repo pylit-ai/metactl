@@ -108,18 +108,31 @@ pub(super) fn planned_proofs(
     overrides: &ConfigOverrides,
     surface_override: Option<SurfaceSelectionMode>,
     apply_override: Option<ApplyMode>,
-) -> std::result::Result<(Vec<metactl::library_registry::ProjectionProof>, bool), CliError> {
+) -> std::result::Result<
+    (
+        Vec<metactl::library_registry::ProjectionProof>,
+        bool,
+        Vec<String>,
+    ),
+    CliError,
+> {
     if !project_config_path(root, cli.config.as_deref()).exists() {
-        return Ok((vec![], false));
+        return Ok((vec![], false, vec![]));
     }
     let context = load_required_context(cli, root)?;
     let Some(registry) = context.registry.as_ref() else {
-        return Ok((vec![], false));
+        return Ok((vec![], false, vec![]));
     };
     let kernel = kernel_from_context(&context).map_err(state_error)?;
     let mut proofs = Vec::new();
     let mut private_state = false;
+    let mut retained_paths = Vec::new();
     for target in context.selected_targets(overrides).map_err(state_error)? {
+        retained_paths.extend(
+            registry
+                .retained_private_paths(root, &target.target_ref())
+                .map_err(state_error)?,
+        );
         let config = context
             .effective_config(&ConfigOverrides {
                 targets: vec![target.target_id.clone()],
@@ -157,7 +170,7 @@ pub(super) fn planned_proofs(
                 .map_err(state_error)?,
         );
     }
-    Ok((proofs, private_state))
+    Ok((proofs, private_state, retained_paths))
 }
 
 /// Exact private paths supplement the managed rules. Authored negations remain
@@ -167,11 +180,12 @@ pub(super) fn add_private_patterns(
     root: &Path,
     specs: &mut [IgnoreBlockSpec],
 ) -> std::result::Result<(), CliError> {
-    let paths: BTreeSet<_> = planned_proofs(cli, root, &ConfigOverrides::default(), None, None)?
-        .0
+    let (proofs, _, retained) = planned_proofs(cli, root, &ConfigOverrides::default(), None, None)?;
+    let paths: BTreeSet<_> = proofs
         .into_iter()
         .filter(|p| p.private)
         .map(|p| p.destination)
+        .chain(retained)
         .collect();
     // Private pack identifiers must not enter the shareable .gitignore itself.
     for spec in specs
@@ -205,12 +219,13 @@ pub(super) fn ensure_private_projection_safe_for_ignore_change(
         metactl::materializer::installed_projection_destinations(root).map_err(state_error)?;
     let configured = project_config_path(root, cli.config.as_deref()).exists();
     let strict = configured || !records.is_empty();
-    let (proofs, private_state) =
+    let (proofs, private_state, retained) =
         planned_proofs(cli, root, &ConfigOverrides::default(), None, None)?;
     let mut private: BTreeSet<String> = PRIVATE_LOCAL_DESTINATIONS
         .iter()
         .map(|s| (*s).into())
         .collect();
+    private.extend(retained);
     private.extend([
         ".metactl/".into(),
         ".metactl/private-publication-probe".into(),
@@ -363,12 +378,13 @@ pub(super) fn ensure_private_sync_safe(
     surface_override: Option<SurfaceSelectionMode>,
     apply_override: Option<ApplyMode>,
 ) -> std::result::Result<(), CliError> {
-    let (proofs, private_state) =
+    let (proofs, private_state, retained) =
         planned_proofs(cli, root, overrides, surface_override, apply_override)?;
     let mut paths: Vec<_> = proofs
         .into_iter()
         .filter(|p| p.private)
         .map(|p| p.destination)
+        .chain(retained)
         .collect();
     if private_state || !paths.is_empty() {
         paths.push(".metactl/".into());

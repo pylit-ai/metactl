@@ -2,6 +2,222 @@ use super::*;
 
 // Sync, apply, and generated-output workflow tests.
 
+fn retained_command_fixture() -> (TempDir, PathBuf, PathBuf) {
+    use sha2::{Digest, Sha256};
+    let project = TempDir::new().unwrap();
+    git_init_project(project.path());
+    // The synthetic HOME is fixture infrastructure, outside a real worktree.
+    fs::write(project.path().join(".git/info/exclude"), ".test-home/\n").unwrap();
+    init_project(project.path());
+    let initial = run_cli(project.path(), &["sync", "--yes"]);
+    assert!(initial.status.success(), "{}", stderr(&initial));
+    let manifest_path = project
+        .path()
+        .join(".metactl/generated/codex-cli/compile.manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    let destination = ".codex/commands/legacy-fixture.md";
+    let staged = format!(".metactl/generated/codex-cli/{destination}");
+    let bytes = b"# Synthetic retained command\n";
+    let staged_path = project.path().join(&staged);
+    let installed = project.path().join(destination);
+    fs::create_dir_all(staged_path.parent().unwrap()).unwrap();
+    fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    fs::write(&staged_path, bytes).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&staged_path, &installed).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&staged_path, &installed).unwrap();
+    manifest["generated_outputs"].as_array_mut().unwrap().push(json!({
+        "id":"legacy-fixture", "path":staged, "destination_path":destination,
+        "kind":"resource_file", "digest":format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
+        "pack_ref":{"kind":"pack","id":"unit-test-loop","version":"1.0.0"},
+        "managed":true
+    }));
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let state_path = project.path().join(".metactl/state/codex-cli.json");
+    let mut state: Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["outputs"].as_array_mut().unwrap().push(json!({
+        "id":"legacy-fixture", "staged_path":staged, "destination_path":destination,
+        "applied_digest":format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
+        "source_digest":format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
+        "backup_path":null, "patch_marker":null, "existed_before":false,
+        "pack_ref":{"kind":"pack","id":"unit-test-loop","version":"1.0.0"}
+    }));
+    fs::write(state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+    (project, installed, manifest_path)
+}
+
+#[test]
+fn cli_sync_replays_retained_previous_manifest_command_twice() {
+    let (project, installed, _) = retained_command_fixture();
+    let link = fs::read_link(&installed).unwrap();
+    let bytes = fs::read(&installed).unwrap();
+    for _ in 0..2 {
+        let result = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(result.status.success(), "{}", stderr(&result));
+        assert_eq!(fs::read(&installed).unwrap(), bytes);
+        assert_eq!(fs::read_link(&installed).unwrap(), link);
+    }
+}
+
+#[test]
+fn cli_retained_private_command_refuses_before_writes_then_preserves_protected_bytes() {
+    let (project, installed, manifest_path) = retained_command_fixture();
+    for path in [
+        &manifest_path,
+        &project.path().join(".metactl/state/codex-cli.json"),
+    ] {
+        let mut value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let entries = if value.get("generated_outputs").is_some() {
+            "generated_outputs"
+        } else {
+            "outputs"
+        };
+        value[entries].as_array_mut().unwrap().last_mut().unwrap()["pack_ref"]["id"] =
+            json!("local-only-example");
+        fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    let ignore = project.path().join(".gitignore");
+    let original = fs::read_to_string(&ignore).unwrap();
+    for exceptions in [
+        "!.metactl/\n!.metactl/**\n",
+        "!.codex/\n!.codex/commands/\n!.codex/commands/**\n",
+    ] {
+        fs::write(&ignore, format!("{original}\n{exceptions}")).unwrap();
+        let before = privacy_snapshot(project.path());
+        for args in [
+            vec!["sync", "--yes"],
+            vec!["compile"],
+            vec!["compile", "--apply"],
+            vec!["apply", "--mode", "symlink", "--no-input"],
+        ] {
+            let refused = run_cli(project.path(), &args);
+            assert!(!refused.status.success(), "{args:?}: {}", stdout(&refused));
+            assert_eq!(privacy_snapshot(project.path()), before, "{args:?}");
+        }
+    }
+    fs::write(
+        &ignore,
+        format!("{original}\n/.metactl/\n/.codex/commands/\n"),
+    )
+    .unwrap();
+    let bytes = fs::read(&installed).unwrap();
+    let link = fs::read_link(&installed).unwrap();
+    for _ in 0..2 {
+        let synced = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(synced.status.success(), "{}", stderr(&synced));
+        assert_eq!(fs::read(&installed).unwrap(), bytes);
+        assert_eq!(fs::read_link(&installed).unwrap(), link);
+    }
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["add", "--all"])
+        .status()
+        .unwrap()
+        .success());
+    let names = Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["ls-files", "-z"])
+        .output()
+        .unwrap();
+    for name in names
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|name| !name.is_empty())
+    {
+        let spec = format!(":{}", std::str::from_utf8(name).unwrap());
+        let blob = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["show", &spec])
+            .output()
+            .unwrap();
+        assert!(blob.status.success());
+        let text = String::from_utf8_lossy(&blob.stdout);
+        assert!(
+            !text.contains("Synthetic retained command") && !text.contains("local-only-example"),
+            "sensitive staged blob: {spec}"
+        );
+    }
+}
+
+#[test]
+fn cli_retained_command_receipt_and_metadata_tampering_refuse_unchanged() {
+    for change in ["manifest", "receipt", "missing", "staged"] {
+        let (project, installed, manifest_path) = retained_command_fixture();
+        let first = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(first.status.success(), "{}", stderr(&first));
+        let receipt = project.path().join(".metactl/retained-codex-commands.json");
+        match change {
+            "missing" => fs::remove_file(&receipt).unwrap(),
+            "staged" => {
+                fs::write(fs::read_link(&installed).unwrap(), "altered staged bytes").unwrap()
+            }
+            _ => {
+                let path = if change == "manifest" {
+                    &manifest_path
+                } else {
+                    &receipt
+                };
+                let mut value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+                let key = if change == "manifest" {
+                    "generated_outputs"
+                } else {
+                    "outputs"
+                };
+                value[key].as_array_mut().unwrap().last_mut().unwrap()["id"] =
+                    json!("altered-retained-marker");
+                fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+            }
+        }
+        let before = privacy_snapshot(project.path());
+        let refused = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(!refused.status.success(), "{change}: {}", stdout(&refused));
+        assert_eq!(privacy_snapshot(project.path()), before, "{change}");
+    }
+}
+
+#[test]
+fn cli_old_retained_manifest_direct_apply_then_sync_preserves_customized_copy() {
+    let (project, installed, manifest_path) = retained_command_fixture();
+    fs::remove_file(&installed).unwrap();
+    fs::write(&installed, "# User customized historical command\n").unwrap();
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.as_object_mut().unwrap().remove("resolve_graph");
+    manifest["generated_outputs"]
+        .as_array_mut()
+        .unwrap()
+        .last_mut()
+        .unwrap()["degradation_codes"] =
+        json!(["unsupported_codex_command_retained_for_compatibility"]);
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::write(project.path().join(".git/info/exclude"), "*\n").unwrap();
+    let applied = run_cli(
+        project.path(),
+        &["apply", "--mode", "symlink", "--no-input"],
+    );
+    assert!(applied.status.success(), "{}", stderr(&applied));
+    for _ in 0..2 {
+        let synced = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(synced.status.success(), "{}", stderr(&synced));
+        assert_eq!(
+            fs::read_to_string(&installed).unwrap(),
+            "# User customized historical command\n"
+        );
+        assert!(!installed.is_symlink());
+    }
+}
+
 pub(super) fn copy_directory(source: &Path, destination: &Path) {
     fs::create_dir_all(destination).expect("create copy destination");
     for entry in fs::read_dir(source).expect("read copy source") {

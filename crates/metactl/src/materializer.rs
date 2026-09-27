@@ -16,6 +16,9 @@ use crate::types::{
 };
 
 mod access_preflight;
+mod retained_commands;
+pub(crate) use retained_commands::candidates as retained_command_candidates;
+pub(crate) use retained_commands::validate as validate_retained_command;
 
 #[derive(Debug, Clone)]
 pub(crate) struct StagedOutputInput {
@@ -191,6 +194,8 @@ pub(crate) fn stage_outputs(
     params: StageOutputsParams,
 ) -> Result<CompileManifest> {
     validate_relative_output_path("target id", &target.id)?;
+    let retained = retained_command_candidates(project_root, target)?;
+    retained_commands::preserve_receipt(project_root, target, &retained)?;
     let stage_root = project_root
         .join(".metactl")
         .join("generated")
@@ -233,13 +238,14 @@ pub(crate) fn stage_outputs(
         outputs.push(output);
     }
 
-    retain_installed_codex_commands(
-        project_root,
-        &stage_root,
-        target,
-        previous_manifest.as_ref(),
-        &mut outputs,
-    )?;
+    for output in retained {
+        if outputs.iter().any(|current| {
+            current.path == output.path || current.destination_path == output.destination_path
+        }) {
+            return Err(anyhow!("retained command collides with current synthesis"));
+        }
+        outputs.push(output);
+    }
 
     let expected_paths = outputs
         .iter()
@@ -272,70 +278,6 @@ pub(crate) fn stage_outputs(
     .with_context(|| format!("write {}", manifest_path.display()))?;
 
     Ok(manifest)
-}
-
-fn retain_installed_codex_commands(
-    project_root: &Path,
-    stage_root: &Path,
-    target: &Ref,
-    previous_manifest: Option<&CompileManifest>,
-    outputs: &mut Vec<GeneratedOutput>,
-) -> Result<()> {
-    if target.id != "codex-cli" {
-        return Ok(());
-    }
-    let Some(previous_manifest) = previous_manifest else {
-        return Ok(());
-    };
-    for previous in &previous_manifest.generated_outputs {
-        let Some(destination) = previous.destination_path.as_deref() else {
-            continue;
-        };
-        if !destination.starts_with(".codex/commands/")
-            || outputs.iter().any(|output| output.path == previous.path)
-        {
-            continue;
-        }
-        validate_relative_output_path("legacy Codex command destination", destination)?;
-        ensure_contained_regular_path(project_root, Path::new(destination), true)?;
-        if outputs
-            .iter()
-            .any(|output| output.destination_path.as_deref() == Some(destination))
-        {
-            return Err(anyhow!(
-                "legacy Codex command destination collides with a new output: {destination}"
-            ));
-        }
-        let installed = project_root.join(destination);
-        match fs::symlink_metadata(&installed) {
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(err) => return Err(err).with_context(|| format!("stat {}", installed.display())),
-            Ok(metadata) if !metadata.is_file() && !metadata.file_type().is_symlink() => {
-                return Err(anyhow!(
-                    "legacy Codex command destination is not a file or symlink: {}",
-                    installed.display()
-                ));
-            }
-            Ok(_) => {}
-        }
-        let staged = safe_staged_output_path(project_root, stage_root, &previous.path)?;
-        ensure_contained_regular_path(project_root, Path::new(&previous.path), false)?;
-        let staged_digest = sha256_path(&staged)
-            .with_context(|| format!("verify retained Codex command {}", staged.display()))?;
-        if previous.digest.as_deref() != Some(staged_digest.as_str()) {
-            return Err(anyhow!(
-                "retained Codex command staged bytes changed: {}; preserve and reconcile before recompiling",
-                staged.display()
-            ));
-        }
-        let mut retained = previous.clone();
-        let reason = "unsupported_codex_command_retained_for_compatibility";
-        if !retained.degradation_codes.iter().any(|code| code == reason) {
-            retained.degradation_codes.push(reason.to_string());
-        }
-        outputs.push(retained);
-    }
-    Ok(())
 }
 
 fn load_compile_manifest_if_present(path: &Path) -> Result<Option<CompileManifest>> {
@@ -2785,7 +2727,9 @@ mod tests {
         for unsafe_path in ["../outside", "/tmp/outside", "a//b", "é/SKILL.md"] {
             assert!(validate_relative_output_path("fixture", unsafe_path).is_err());
         }
+        #[cfg(unix)]
         let project = tempfile::tempdir().expect("project");
+        #[cfg(unix)]
         let outside = tempfile::tempdir().expect("outside");
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), project.path().join(".agents"))
