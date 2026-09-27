@@ -34,6 +34,34 @@ pub(crate) struct StagedOutputInput {
     pub materialize_as_regular_file: bool,
 }
 
+impl StagedOutputInput {
+    /// The canonical, pure descriptor used by staging and replay validation.
+    pub(crate) fn generated_output(&self, target: &Ref) -> GeneratedOutput {
+        GeneratedOutput {
+            id: self.id.clone(),
+            path: normalize_relative(
+                &Path::new(".metactl")
+                    .join("generated")
+                    .join(&target.id)
+                    .join(&self.destination_path),
+            ),
+            destination_path: Some(self.destination_path.clone()),
+            kind: self.kind.clone(),
+            digest: Some(sha256_bytes(&self.contents)),
+            instruction_mode: self.instruction_mode.clone(),
+            pack_ref: self.pack_ref.clone(),
+            surface_id: self.surface_id.clone(),
+            surface_slug: self.surface_slug.clone(),
+            source_resource_paths: self.source_resource_paths.clone(),
+            merge_status: self.merge_status.clone(),
+            degradation_codes: self.degradation_codes.clone(),
+            ownership_token: self.ownership_token.clone(),
+            materialize_as_regular_file: self.materialize_as_regular_file,
+            managed: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct StageOutputsParams {
     pub resolve_graph: Option<crate::types::ResolveGraph>,
@@ -193,10 +221,8 @@ pub(crate) fn stage_outputs(
     for input in params.inputs {
         validate_relative_output_path("generated destination", &input.destination_path)?;
         ensure_platform_unique_path(&mut seen_destinations, &input.destination_path)?;
-        let relative_stage_path = Path::new(".metactl")
-            .join("generated")
-            .join(&target.id)
-            .join(&input.destination_path);
+        let output = input.generated_output(target);
+        let relative_stage_path = Path::new(&output.path);
         let stage_path = project_root.join(&relative_stage_path);
         ensure_contained_regular_path(project_root, &relative_stage_path, true)?;
         if let Some(parent) = stage_path.parent() {
@@ -204,23 +230,7 @@ pub(crate) fn stage_outputs(
         }
         write_staged_if_changed(&stage_path, &input.contents, params.durable)
             .with_context(|| format!("write {}", stage_path.display()))?;
-        outputs.push(GeneratedOutput {
-            id: input.id,
-            path: normalize_relative(&relative_stage_path),
-            destination_path: Some(input.destination_path),
-            kind: input.kind,
-            digest: Some(sha256_bytes(&input.contents)),
-            instruction_mode: input.instruction_mode,
-            pack_ref: input.pack_ref,
-            surface_id: input.surface_id,
-            surface_slug: input.surface_slug,
-            source_resource_paths: input.source_resource_paths,
-            merge_status: input.merge_status,
-            degradation_codes: input.degradation_codes,
-            ownership_token: input.ownership_token,
-            materialize_as_regular_file: input.materialize_as_regular_file,
-            managed: true,
-        });
+        outputs.push(output);
     }
 
     retain_installed_codex_commands(

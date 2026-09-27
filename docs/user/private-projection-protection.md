@@ -54,9 +54,11 @@ MCP active-pack metadata retains private selections under the same protection.
 
 Compile manifests record resolution inputs. Apply replays synthesis against the
 current library, checks visibility against actual pack manifests, and compares
-staged paths and byte digests before accepting shared output. Changed inputs or
+staged paths, byte digests and all materialization metadata, including patch
+marker identifiers and behavior flags, before accepting shared output. Changed inputs or
 digests require recompilation. All older manifests without replay inputs can
-only apply to ignored, untracked destinations, with `.metactl/` protected too.
+only apply to ignored, untracked destinations, with `.metactl/` protected too,
+including plans without generated outputs that still create local state records.
 Recompile before applying legacy shared outputs to establish synthesis evidence.
 A category or missing or edited attribution field cannot grant sharing.
 

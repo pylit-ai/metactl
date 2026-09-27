@@ -1,4 +1,5 @@
 use super::*;
+use crate::types::GeneratedOutput;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -357,6 +358,126 @@ fn legacy_manifest_guard_requires_protection_for_every_output_kind() {
             assert!(!project.path().join(".metactl").exists());
         }
     }
+}
+
+#[test]
+fn empty_legacy_manifest_guard_requires_untracked_state_protection() {
+    let (_library, project, registry, params) = fixture(false);
+    let manifest: CompileManifest = serde_json::from_value(serde_json::json!({
+        "api_version": crate::types::API_VERSION,
+        "target": params.target_capability.target_ref(),
+        "generated_outputs": []
+    }))
+    .unwrap();
+    assert!(registry
+        .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+        .is_err());
+    fs::write(project.path().join(".git/info/exclude"), ".metactl/\n").unwrap();
+    registry
+        .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+        .unwrap();
+    assert!(!project.path().join(".metactl").exists());
+    // State records remain privacy-relevant even without generated outputs.
+    fs::create_dir(project.path().join(".metactl")).unwrap();
+    fs::write(project.path().join(".metactl/fixture.json"), "{}\n").unwrap();
+    assert!(git(project.path(), &["add", "-f", ".metactl/fixture.json"])
+        .status
+        .success());
+    assert!(registry
+        .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+        .is_err());
+}
+
+#[test]
+fn replay_guard_validates_all_generated_output_metadata_without_writes() {
+    let (_library, project, registry, params) = fixture(false);
+    fs::write(project.path().join(".git/info/exclude"), "*\n").unwrap();
+    let proofs = registry.projection_proofs(&params).unwrap();
+    let outputs: Vec<GeneratedOutput> = proofs
+        .iter()
+        .map(|proof| proof.expected_output.clone())
+        .collect();
+    let manifest: CompileManifest = serde_json::from_value(serde_json::json!({
+        "api_version": crate::types::API_VERSION,
+        "target": params.target_capability.target_ref(),
+        "resolve_graph": params.resolve_graph,
+        "generated_outputs": outputs,
+        "surface_selection_mode": params.surface_selection_mode
+    }))
+    .unwrap();
+    registry
+        .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+        .unwrap();
+    let mutations = serde_json::json!({
+        "id": "synthetic-altered-marker",
+        "path": ".metactl/generated/altered.txt",
+        "destination_path": "altered.txt",
+        "kind": "resource_file",
+        "digest": "sha256:altered",
+        "instruction_mode": "reference_index",
+        "pack_ref": {"kind":"pack","id":"synthetic-altered","version":"1.0.0"},
+        "surface_id": "synthetic-altered-surface",
+        "surface_slug": "synthetic-altered-slug",
+        "source_resource_paths": ["synthetic-altered-resource"],
+        "merge_status": "suppressed",
+        "degradation_codes": ["synthetic-altered-degradation"],
+        "ownership_token": "synthetic-altered-owner",
+        "materialize_as_regular_file": true,
+        "managed": false
+    });
+    let mut accepted = Vec::new();
+    for (field, value) in mutations.as_object().unwrap() {
+        let mut altered = manifest.clone();
+        let mut output = serde_json::to_value(&altered.generated_outputs[0]).unwrap();
+        let value = if output.get(field) == Some(value) {
+            match field.as_str() {
+                "kind" => serde_json::json!("other"),
+                "instruction_mode" => serde_json::json!("inline"),
+                "materialize_as_regular_file" | "managed" => {
+                    serde_json::json!(!value.as_bool().unwrap())
+                }
+                _ => panic!("mutation must alter {field}"),
+            }
+        } else {
+            value.clone()
+        };
+        assert_ne!(
+            output.get(field),
+            Some(&value),
+            "mutation must alter {field}"
+        );
+        output[field] = value.clone();
+        altered.generated_outputs[0] = serde_json::from_value(output).unwrap();
+        if registry
+            .protect_private_manifest(project.path(), &altered, &ApplyMode::Copy)
+            .is_ok()
+        {
+            accepted.push(field.clone());
+        }
+    }
+    let mut missing_destination = manifest.clone();
+    missing_destination.generated_outputs[0].destination_path = None;
+    assert!(registry
+        .protect_private_manifest(project.path(), &missing_destination, &ApplyMode::Copy)
+        .is_err());
+    let mut retained = manifest.clone();
+    let mut output = retained.generated_outputs[0].clone();
+    output.destination_path = Some(".codex/commands/legacy.md".into());
+    output.path = ".metactl/generated/codex-cli/.codex/commands/legacy.md".into();
+    output
+        .degradation_codes
+        .push("unsupported_codex_command_retained_for_compatibility".into());
+    retained.generated_outputs.push(output);
+    assert!(registry
+        .protect_private_manifest(project.path(), &retained, &ApplyMode::Copy)
+        .unwrap_err()
+        .to_string()
+        .contains("absent from current synthesis evidence"));
+    assert!(!project.path().join(".metactl").exists());
+    assert!(
+        accepted.is_empty(),
+        "accepted altered metadata: {accepted:?}"
+    );
 }
 
 #[test]

@@ -8,6 +8,7 @@ pub struct ProjectionProof {
     pub staged_path: String,
     pub digest: String,
     pub private: bool,
+    pub expected_output: crate::types::GeneratedOutput,
 }
 
 fn private_output(
@@ -221,14 +222,18 @@ impl LibraryRegistry {
         let mut replay_private = std::collections::BTreeSet::new();
         for output in &manifest.generated_outputs {
             let Some(destination) = &output.destination_path else {
+                if proofs.is_some() {
+                    anyhow::bail!(
+                        "output absent from current synthesis evidence; recompile before apply"
+                    );
+                }
                 continue;
             };
             let proof = proofs
                 .as_ref()
                 .and_then(|p| p.iter().find(|p| &p.destination == destination));
             if let Some(proof) = proof {
-                if output.path != proof.staged_path || output.digest.as_ref() != Some(&proof.digest)
-                {
+                if output != &proof.expected_output {
                     anyhow::bail!("stale or altered projection evidence; recompile before apply");
                 }
                 if proof.private {
@@ -258,7 +263,8 @@ impl LibraryRegistry {
             })
             .filter_map(|o| o.destination_path.clone())
             .collect();
-        if !paths.is_empty()
+        if manifest.resolve_graph.is_none()
+            || !paths.is_empty()
             || manifest
                 .resolve_graph
                 .as_ref()
@@ -302,14 +308,15 @@ impl LibraryRegistry {
         )?;
         Ok(outputs
             .iter()
-            .map(|o| ProjectionProof {
-                destination: o.destination_path.clone(),
-                staged_path: format!(
-                    ".metactl/generated/{}/{}",
-                    params.target_capability.target_id, o.destination_path
-                ),
-                digest: format!("sha256:{}", hex::encode(Sha256::digest(&o.contents))),
-                private: private_output(o, graph, &params.target_capability),
+            .map(|o| {
+                let expected_output = o.generated_output(&params.target_capability.target_ref());
+                ProjectionProof {
+                    destination: o.destination_path.clone(),
+                    staged_path: expected_output.path.clone(),
+                    digest: expected_output.digest.clone().expect("synthesis digest"),
+                    private: private_output(o, graph, &params.target_capability),
+                    expected_output,
+                }
             })
             .collect())
     }

@@ -17,6 +17,8 @@
   instruction diagnostics.
 - Preserve private hooks and mixed runtime configuration behind verified local
   Git protection; reject stale or altered synthesis evidence before apply.
+- Bind replayed outputs to their complete materialization metadata, including
+  patch marker identifiers and behavior flags, before apply.
 - Require protected destinations for every legacy output lacking replay inputs;
   shared application requires recompilation with current synthesis evidence.
 - Retain displaced ignore files and independent recovery snapshots on macOS,
