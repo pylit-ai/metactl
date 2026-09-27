@@ -28,7 +28,8 @@ jobs:
         run: cargo test --locked -p metactl --lib windows_link_leaf_proposals_match_native_directory_only_rules -- --nocapture
       - name: Exercise native Windows Git privacy unit contracts
         if: always()
-        run: cargo test --locked -p metactl --lib git_privacy:: -- --nocapture
+        run: |
+          cargo test --locked -p metactl --lib git_privacy:: -- --nocapture
       - name: Exercise native Windows CLI workflows
         if: always()
         timeout-minutes: 30
