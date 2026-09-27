@@ -12,6 +12,12 @@ and matching installed bytes. Shared aggregate outputs and materializer-owned
 links can migrate. Protected private skills and their resources remain supported.
 No private payloads enter the isolated Git probe repository.
 
+Shared migration requires exact projection bytes in both the working file and
+any staged Git blob. Git line-ending conversion or clean filters can change the
+staged bytes; such a mismatch refuses migration, including when the working
+file has been removed. Review and reconcile the staged representation before
+retrying; filtered bytes are not automatically accepted as shared provenance.
+
 Routine sync, compile and apply check the requested private destinations and
 their relevant ignore sources. They inspect the cached Git index, including
 native filesystem aliases, but do not walk unrelated ignored dependency or
@@ -49,9 +55,10 @@ MCP active-pack metadata retains private selections under the same protection.
 Compile manifests record resolution inputs. Apply replays synthesis against the
 current library, checks visibility against actual pack manifests, and compares
 staged paths and byte digests before accepting shared output. Changed inputs or
-digests require recompilation. Older aggregate manifests without replay inputs
-can only apply to ignored, untracked destinations; recompile to establish shared
-evidence. A missing or edited attribution field cannot grant sharing.
+digests require recompilation. All older manifests without replay inputs can
+only apply to ignored, untracked destinations, with `.metactl/` protected too.
+Recompile before applying legacy shared outputs to establish synthesis evidence.
+A category or missing or edited attribution field cannot grant sharing.
 
 Private selection uses `metactl use PACK --local`. Ignore rules belong in the
 local Git exclude file when their paths reveal private identifiers. A tracked

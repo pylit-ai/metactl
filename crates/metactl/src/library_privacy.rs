@@ -238,24 +238,10 @@ impl LibraryRegistry {
                 anyhow::bail!(
                     "output absent from current synthesis evidence; recompile before apply"
                 );
-            } else if matches!(
-                output.kind,
-                GeneratedOutputKind::RuntimeJson
-                    | GeneratedOutputKind::HookConfig
-                    | GeneratedOutputKind::McpConfig
-            ) || target
-                .as_ref()
-                .and_then(|t| t.runtime_template.as_ref())
-                .is_some_and(|t| &t.destination_path == destination)
-                || target.as_ref().is_some_and(|t| {
-                    t.compile_targets.iter().any(|c| {
-                        c.output_kind == CompileTargetKind::McpConfig
-                            && &c.path_template == destination
-                    })
-                })
-            {
-                // Legacy aggregates lack independent synthesis evidence. They may
-                // only be applied into protected private destinations.
+            } else {
+                // Every legacy output lacks independent synthesis evidence.
+                // Its kind or pack label cannot establish shared provenance;
+                // protected destinations remain usable without recompilation.
                 replay_private.insert(destination.clone());
             }
         }

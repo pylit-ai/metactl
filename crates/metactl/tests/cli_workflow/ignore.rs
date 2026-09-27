@@ -132,6 +132,10 @@ fn ignore_nested_coordinates_refuse_unknown_working_and_index_only_paths() {
             for scope in ["repo", "local"] {
                 let repo = TempDir::new().unwrap();
                 git_init_project(repo.path());
+                // The CLI helper places its synthetic HOME inside the fixture.
+                // It is not project content and its cache can exceed Windows
+                // Git's path limit when an ordinary git add scans it.
+                fs::write(repo.path().join(".gitignore"), ".test-home/\n").unwrap();
                 let configuration = TempDir::new().unwrap();
                 let empty_excludes = configuration.path().join("empty-excludes");
                 fs::write(&empty_excludes, []).unwrap();
@@ -572,6 +576,9 @@ fn ignore_nested_shared_index_bytes_use_project_coordinates() {
     for changed in [false, true] {
         let repo = TempDir::new().unwrap();
         git_init_project(repo.path());
+        assert!(run_git(repo.path(), &["config", "core.autocrlf", "false"])
+            .status
+            .success());
         let project = repo.path().join("nested");
         fs::create_dir(&project).unwrap();
         init_project(&project);
@@ -581,7 +588,14 @@ fn ignore_nested_shared_index_bytes_use_project_coordinates() {
         if changed {
             fs::write(&file, "SYNTHETIC_PRIVATE_INDEX\n").unwrap();
         }
+        let original = fs::read(&file).unwrap();
         git_add_forced(&project, &[destination]);
+        let indexed = run_git(&project, &["show", &format!(":./{destination}")]);
+        assert!(indexed.status.success(), "{}", stderr(&indexed));
+        assert_eq!(
+            indexed.stdout, original,
+            "coordinate fixture must preserve index bytes"
+        );
         fs::remove_file(file).unwrap();
         let index = run_git(repo.path(), &["ls-files", "--stage"]).stdout;
         let broad = "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n# metactl:end generated-agent-surfaces\n";
@@ -607,6 +621,80 @@ fn ignore_nested_shared_index_bytes_use_project_coordinates() {
             );
         }
     }
+}
+
+#[test]
+fn ignore_nested_filtered_shared_index_refuses_before_mutation() {
+    let repo = TempDir::new().unwrap();
+    let library = TempDir::new().unwrap();
+    sync_workflow::copy_directory(Path::new(&starter_library_root()), library.path());
+    let skill = library.path().join("packs/python-refactor/SKILL.md");
+    let body = fs::read_to_string(&skill).unwrap().replace("\r\n", "\n");
+    fs::write(&skill, body.replace('\n', "\r\n")).unwrap();
+    git_init_project(repo.path());
+    assert!(run_git(repo.path(), &["config", "core.autocrlf", "true"])
+        .status
+        .success());
+    let project = repo.path().join("nested");
+    fs::create_dir(&project).unwrap();
+    let init = run_cli(
+        &project,
+        &[
+            "init",
+            "--target",
+            "codex-cli",
+            "--starter-library",
+            library.path().to_str().unwrap(),
+        ],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+    let sync = run_cli(&project, &["sync", "--yes"]);
+    assert!(sync.status.success(), "{}", stderr(&sync));
+    let destination = ".agents/skills/python-refactor/python-refactor/SKILL.md";
+    let file = project.join(destination);
+    let original = fs::read(&file).unwrap();
+    assert!(original.windows(2).any(|bytes| bytes == b"\r\n"));
+    git_add_forced(&project, &[destination]);
+    let indexed = run_git(&project, &["show", &format!(":./{destination}")]);
+    assert!(indexed.status.success(), "{}", stderr(&indexed));
+    assert_ne!(
+        indexed.stdout, original,
+        "Git must actually transform this fixture"
+    );
+    assert_eq!(
+        indexed.stdout,
+        String::from_utf8(original)
+            .unwrap()
+            .replace("\r\n", "\n")
+            .as_bytes()
+    );
+    fs::remove_file(file).unwrap();
+    fs::write(project.join(".gitignore"), "# metactl:begin generated-agent-surfaces\n.metactl/\n.agents/\n# metactl:end generated-agent-surfaces\n").unwrap();
+    let before = sync_workflow::privacy_snapshot(repo.path());
+    let index_before = fs::read(repo.path().join(".git/index")).unwrap();
+    let result = run_cli(
+        &project,
+        &[
+            "ignore",
+            "fix",
+            "--scope",
+            "repo",
+            "--target",
+            "codex-cli",
+            "--yes",
+        ],
+    );
+    assert!(!result.status.success(), "transformed index accepted");
+    assert!(
+        stderr(&result).contains("no verified public projection bytes"),
+        "{}",
+        stderr(&result)
+    );
+    assert_eq!(sync_workflow::privacy_snapshot(repo.path()), before);
+    assert_eq!(
+        fs::read(repo.path().join(".git/index")).unwrap(),
+        index_before
+    );
 }
 
 fn agent_path_is_ignored(project: &Path, path: &str) -> bool {
@@ -1380,16 +1468,14 @@ fn concurrent_authored_ignore_edit_is_preserved_or_reported_in_recovery_copy() {
         .any(|window| window == b"authored-concurrent-rule\n");
     assert!(in_destination || in_backup, "concurrent bytes disappeared");
     if !in_destination {
-        let response = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let response = json_output(&output);
+        let message = response["message"]
+            .as_str()
+            .expect("reported recovery message")
+            .replace('\\', "/");
         assert!(
             matching_backups.iter().any(|path| {
-                let path = path.to_str().expect("backup path");
-                let encoded = serde_json::to_string(path).expect("JSON backup path");
-                response.contains(path) || response.contains(&encoded[1..encoded.len() - 1])
+                message.contains(&path.to_str().expect("backup path").replace('\\', "/"))
             }),
             "displaced edit not reported: {response}"
         );

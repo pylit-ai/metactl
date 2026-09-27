@@ -17,6 +17,8 @@
   instruction diagnostics.
 - Preserve private hooks and mixed runtime configuration behind verified local
   Git protection; reject stale or altered synthesis evidence before apply.
+- Require protected destinations for every legacy output lacking replay inputs;
+  shared application requires recompilation with current synthesis evidence.
 - Retain displaced ignore files and independent recovery snapshots on macOS,
   Linux and Windows, including failed multi-file publication and rollback.
 - Scope routine private publication to relevant destinations and cached index

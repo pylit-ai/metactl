@@ -2,7 +2,7 @@ use super::*;
 
 // Sync, apply, and generated-output workflow tests.
 
-fn copy_directory(source: &Path, destination: &Path) {
+pub(super) fn copy_directory(source: &Path, destination: &Path) {
     fs::create_dir_all(destination).expect("create copy destination");
     for entry in fs::read_dir(source).expect("read copy source") {
         let entry = entry.expect("read copy entry");
@@ -1528,7 +1528,7 @@ fn cli_zero_match_shared_document_retains_safe_diagnostic() {
     assert!(body.contains("|gap:pack_selection=ZeroMatch"), "{body}");
 }
 
-fn privacy_snapshot(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+pub(super) fn privacy_snapshot(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
     fn walk(root: &Path, path: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
         for entry in fs::read_dir(path).unwrap() {
             let entry = entry.unwrap();

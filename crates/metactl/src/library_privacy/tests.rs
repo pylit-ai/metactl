@@ -303,6 +303,63 @@ fn replay_rejects_unknown_output_even_when_kind_and_attribution_are_forged() {
 }
 
 #[test]
+fn legacy_manifest_guard_requires_protection_for_every_output_kind() {
+    let (_library, project, registry, params) = fixture(false);
+    for kind in [
+        GeneratedOutputKind::InstructionFile,
+        GeneratedOutputKind::SkillFolder,
+        GeneratedOutputKind::ResourceFile,
+        GeneratedOutputKind::HookConfig,
+        GeneratedOutputKind::McpConfig,
+        GeneratedOutputKind::RuntimeJson,
+        GeneratedOutputKind::PackExtensionManifest,
+        GeneratedOutputKind::Other,
+    ] {
+        for pack_ref in [
+            None,
+            Some(Ref {
+                kind: RefKind::Pack,
+                id: "python-refactor".into(),
+                version: Some("1.0.0".into()),
+            }),
+        ] {
+            // Exercise validation only: no staged payload or destination exists.
+            // A category or shared pack label cannot replace synthesis evidence.
+            let manifest: CompileManifest = serde_json::from_value(serde_json::json!({
+                "api_version": crate::types::API_VERSION,
+                "target": params.target_capability.target_ref(),
+                "generated_outputs": [{
+                    "path": ".metactl/generated/claude-code/legacy-output.txt",
+                    "destination_path": "legacy-output.txt",
+                    "kind": kind,
+                    "pack_ref": pack_ref
+                }]
+            }))
+            .unwrap();
+            for exclusions in ["", "legacy-output.txt\n"] {
+                fs::write(project.path().join(".git/info/exclude"), exclusions).unwrap();
+                assert!(
+                    registry
+                        .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+                        .is_err(),
+                    "legacy {kind:?} without complete protection accepted"
+                );
+            }
+            fs::write(
+                project.path().join(".git/info/exclude"),
+                "legacy-output.txt\n.metactl/\n",
+            )
+            .unwrap();
+            registry
+                .protect_private_manifest(project.path(), &manifest, &ApplyMode::Copy)
+                .unwrap();
+            assert!(!project.path().join("legacy-output.txt").exists());
+            assert!(!project.path().join(".metactl").exists());
+        }
+    }
+}
+
+#[test]
 fn graph_privacy_audits_all_reference_and_opaque_metadata_fields() {
     let (_library, _project, registry, mut params) = fixture(false);
     let graph = &mut params.resolve_graph;
