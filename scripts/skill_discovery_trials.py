@@ -127,7 +127,8 @@ def validate_event(event):
             _hex(event["decision_id"], UUIDHEX, "decision_id")
     elif kind == "discovery_error":
         _number(event["elapsed_ms"], "elapsed_ms")
-        if event["reason"] not in {"project_config_missing", "project_discovery_failed"}:
+        if (not isinstance(event["reason"], str)
+                or event["reason"] not in {"project_config_missing", "project_discovery_failed"}):
             raise ValueError("unrecognized discovery error")
         for key in ("provider_attempts", "provider_calls"):
             if type(event[key]) is not int or event[key] != 0:

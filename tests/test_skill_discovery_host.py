@@ -119,20 +119,23 @@ class RankerTests(unittest.TestCase):
 
     def test_caller_deadline_does_not_depend_on_communicate_timeout(self):
         real_popen = subprocess.Popen
+        spawned_at = []
         def stalled_worker(argv, **kwargs):
             child = real_popen([os.sys.executable, "-c", "import time; time.sleep(5)"], **kwargs)
+            # The exchange deadline begins after Popen returns. Process startup
+            # on a loaded host is outside the caller's pipe-exchange deadline.
+            spawned_at.append(host.time.monotonic())
             communicate = child.communicate
             def delayed(*args, **options):
                 host.time.sleep(.8)
                 return communicate(*args, **options)
             child.communicate = delayed
             return child
-        start = host.time.monotonic()
         with patch.object(host.subprocess, "Popen", side_effect=stalled_worker):
             result, metric = host.Ranker(True, True, 1, .05, key="fake").rank("test", baseline())
         self.assertEqual(result, baseline())
         self.assertEqual(metric["reason"], "deadline")
-        self.assertLess(host.time.monotonic() - start, .6)
+        self.assertLess(host.time.monotonic() - spawned_at[0], .6)
 
     def test_private_query_uses_stdin(self):
         sentinel = "private-query-sentinel"
@@ -269,7 +272,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cohort["discoveries"], 0)
         self.assertEqual(cohort["sessions_without_outcome"], 0)
         for change in ({"provider_calls": 1}, {"provider_attempts": True},
-                       {"query": "private"}, {"reason": "private raw error"}):
+                       {"query": "private"}, {"reason": "private raw error"}, {"reason": ["x"]}):
             with self.assertRaises(ValueError):
                 trial.validate_event({**events[0], **change})
         status = subprocess.run(command + ["--status"], capture_output=True,
@@ -284,6 +287,7 @@ class CliTests(unittest.TestCase):
         run = subprocess.run(explicit, capture_output=True, text=True, env=env, timeout=20)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         config.unlink()
+        self.fx.save_config()  # Missing explicit --config must not fall back here.
         run = subprocess.run(explicit, capture_output=True, text=True, env=env, timeout=20)
         self.assertEqual(run.returncode, 1)
         value = json.loads(run.stdout)
