@@ -23,7 +23,7 @@ gateway limits, or suppress the agent's native skill menu.
 | Experienced user | Reuse a named catalog, preview/apply a user-wide connection, inspect effective settings, and override or disable discovery per project. |
 | Coding agent | Call discovery when specialist guidance is useful, show one compact receipt, then load a returned ID and digest. Continue with local guidance on setup/provider failure. |
 | Existing enrolled project | Keep saved advisory Jev preferences and exact workspace authorization; origin alone grants nothing, while the selected metadata's classification can require local ranking. |
-| New unconfigured folder | Use the user catalog locally. Jev runs only if this exact workspace and candidate metadata already satisfy the provider grant. Otherwise report the precise local-only reason. |
+| New unconfigured folder | Use the user catalog locally. Jev runs only if the resolved workspace identity and candidate metadata already satisfy the provider grant. Otherwise report the precise local-only reason. |
 
 Proposed command syntax below is illustrative and is not available today:
 
@@ -44,6 +44,8 @@ Setup should show: selected library, agent target, eligible skill count, visibil
 across workspaces, provider data class, existing Jev preference, and how to turn
 it off. Save these as product preferences, not a per-task approval prompt. Catalog
 setup and provider enrollment remain separate actions with distinct receipts.
+The single setup save covers catalog, connection and metadata classification;
+it never creates workspace enrollment.
 
 The generated agent instruction stays small: discover when useful, load by ID and
 digest, display the receipt, and continue locally when unavailable. Put changing
@@ -61,7 +63,8 @@ ProviderDecision { allowed, reason, workspace_identity, catalog_digest,
                    gateway_project, data_class }
 ```
 
-An explicit `--project` selects the exact canonical root. Preserve current public
+An explicit `--project` selects the exact canonical root and takes precedence
+over a connection's `git_worktree` mode; doctor reports that choice. Preserve current public
 CLI exact-root behavior by default. An explicit `git_worktree` connection mode
 may normalize a launch directory to its containing Git worktree, preserving the
 existing external launcher's behavior without divergent Python/Rust heuristics.
@@ -114,7 +117,9 @@ A new user catalog defaults to local-only until its candidate-metadata policy is
 configured. Setup offers public, private-owned, or local-only classification for
 operator-selected sources, explaining that descriptions may leave the device.
 Existing project permission never authorizes secret or third-party-restricted
-metadata. Unknown/mixed classification stays local. Adding a source previews its
+metadata. Unknown/mixed user-catalog classification stays local. Configured-project
+metadata retains its current grant evaluation under the unchanged-behavior
+contract. Adding a source previews its
 visibility and classification; ordinary content edits do not cause a per-task
 prompt. Validate the exact candidate snapshot against the saved policy when
 building a provider request. Policy changes invalidate cached provider decisions.
@@ -182,10 +187,11 @@ Required tests:
 4. Enrolled unconfigured workspace with authorized metadata preserves advisory;
    unknown/revoked workspace and unauthorized/new metadata make zero provider calls.
 5. Direct-provider flags/environment cannot bypass either permission decision.
-6. Nested directories/repos, nested configs, worktrees and symlink aliases obey
+6. Explicit `--project` wins over connection modes. Nested directories/repos,
+   nested configs, worktrees and symlink aliases obey
    the selected identity mode, without ancestor/sibling enrollment inheritance.
-7. Origin changes, stale digests, resource escapes, invalid sources and target
-   mismatches fail safely for both discovery and direct load.
+7. Origin changes, stale digests, resource escapes and invalid sources fail safely
+   for discovery and direct load. New target-mismatch cases apply to user origin only.
 8. Connection migration/removal preserves unrelated configuration and the prior
    identity mode, including Git-normalizing launchers, and rolls back.
 9. Unwritable/full/missing log paths report truthful state without payload leaks;
@@ -197,5 +203,6 @@ Build order: resolver/offline fixtures; host and permission tests with fake
 gateways; connector migration; native-client acceptance; opt-in release. Keep
 fallback opt-in until target identity and source-visibility checks pass. Rollback
 restores the prior user catalog/connection, retaining provider preferences and
-logs. This design makes discovery available; it does not claim token savings,
+logs. Restored metadata policy invalidates cached provider decisions just like
+any other policy change. This design makes discovery available; it does not claim token savings,
 native catalog suppression, or improved coding outcomes.
