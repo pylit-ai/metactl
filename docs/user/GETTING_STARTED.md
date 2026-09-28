@@ -4,24 +4,24 @@ This guide covers the public local `metactl` CLI.
 
 ## Install
 
-The source crate version is 0.1.25. From this source checkout, run
+The source crate version is 0.1.26. From this source checkout, run
 `cargo install --path crates/metactl --locked` if the version is not on
 crates.io yet. When the [registry](https://crates.io/crates/metactl) shows
-0.1.25, install the CLI with this pinned command:
+0.1.26, install the CLI with this pinned command:
 
 ```bash
-cargo install metactl --version 0.1.25 --locked
-# Installed package `metactl v0.1.25` (executable `metactl`)
+cargo install metactl --version 0.1.26 --locked
+# Installed package `metactl v0.1.26` (executable `metactl`)
 ```
 
 The published `metactl` package bundles the public starter library. You do not need a checkout of this repository for the built-in demo, `metactl list packs`, or the default `python-refactor` workflow.
 
 Install `metactld` only if you need the local JSON-RPC/MCP daemon and its
-0.1.25 version has appeared on crates.io:
+0.1.26 version has appeared on crates.io:
 
 ```bash
-cargo install metactld --version 0.1.25 --locked
-# Installed package `metactld v0.1.25` (executable `metactld`)
+cargo install metactld --version 0.1.26 --locked
+# Installed package `metactld v0.1.26` (executable `metactld`)
 ```
 
 Once available, the pinned commands above reproduce this release. To update to
@@ -39,8 +39,8 @@ Check installed binaries:
 ```bash
 metactl --version
 metactld --version
-# metactl 0.1.25 (metactl/v2alpha1)
-# metactld 0.1.25
+# metactl 0.1.26 (metactl/v2alpha1)
+# metactld 0.1.26
 ```
 
 For source development:
@@ -49,8 +49,8 @@ For source development:
 git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo build -p metactl -p metactld
-#    Compiling metactl v0.1.25 (...)
-#    Compiling metactld v0.1.25 (...)
+#    Compiling metactl v0.1.26 (...)
+#    Compiling metactld v0.1.26 (...)
 #     Finished `dev` profile ...
 ```
 

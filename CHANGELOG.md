@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.1.26 - 2026-09-28
+
+### Fixed
+
+- Explain missing project configuration in skill discovery, including explicit
+  configuration overrides, instead of returning a generic rejection.
+- Return zero-provider-call receipts for catalog failures and record private
+  discovery errors separately from successful discovery and task outcomes.
+- Keep raw CLI errors and task queries out of diagnostics and failure logs.
+
 ## 0.1.25 - 2026-09-26
 
 ### Fixed
