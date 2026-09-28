@@ -44,6 +44,7 @@ DISCOVER = {"elapsed_ms", "rank_ms", "result_bytes", "result_count",
             "reason", "provider_attempts", "provider_calls", "usage", "model",
             "native_catalog_suppressed", "cost_usd", "decision_id"}
 LOAD = {"elapsed_ms", "result_bytes", "repeat_load", "skill_id"}
+DISCOVERY_ERROR = {"elapsed_ms", "reason", "provider_attempts", "provider_calls"}
 OUTCOME = {"success", "task_ms", "input_tokens", "output_tokens", "cost_usd",
            "human_interventions", "verifier_ref"}
 
@@ -74,7 +75,8 @@ def validate_event(event):
     if not isinstance(event, dict):
         raise ValueError("event must be an object")
     kind = event.get("kind")
-    fields = {"discover": DISCOVER, "load": LOAD, "outcome": OUTCOME}.get(kind)
+    fields = {"discover": DISCOVER, "load": LOAD, "outcome": OUTCOME,
+              "discovery_error": DISCOVERY_ERROR}.get(kind)
     if fields is None or event.get("schema") != SCHEMA:
         raise ValueError("unsupported trial schema or kind")
     allowed = COMMON | fields
@@ -123,6 +125,13 @@ def validate_event(event):
             raise ValueError("native suppression and cost are unproven in discover events")
         if "decision_id" in event:
             _hex(event["decision_id"], UUIDHEX, "decision_id")
+    elif kind == "discovery_error":
+        _number(event["elapsed_ms"], "elapsed_ms")
+        if event["reason"] not in {"project_config_missing", "project_discovery_failed"}:
+            raise ValueError("unrecognized discovery error")
+        for key in ("provider_attempts", "provider_calls"):
+            if type(event[key]) is not int or event[key] != 0:
+                raise ValueError("catalog failures cannot make provider calls")
     elif kind == "load":
         _number(event["elapsed_ms"], "elapsed_ms")
         _number(event["result_bytes"], "result_bytes", integer=True)
@@ -275,9 +284,12 @@ def summarize(events, runtime=None, arm=None):
     cohorts = []
     for (rt, cohort_arm), rows in sorted(groups.items()):
         discovers = [e for e in rows if e["kind"] == "discover"]
+        discovery_errors = [e for e in rows if e["kind"] == "discovery_error"]
         loads = [e for e in rows if e["kind"] == "load"]
         outcomes = [e for e in rows if e["kind"] == "outcome"]
-        sessions = {e["session_id"] for e in rows}
+        # Setup failures never reached discovery; exclude error-only sessions
+        # from task-outcome coverage, while keeping the error count visible.
+        sessions = {e["session_id"] for e in rows if e["kind"] != "discovery_error"}
         outcome_sessions = {e["session_id"] for e in outcomes}
         known_usage = [e["usage"] for e in discovers if e["usage"] is not None]
         known_calls = [e["provider_calls"] for e in discovers if e["provider_calls"] is not None]
@@ -290,6 +302,7 @@ def summarize(events, runtime=None, arm=None):
         cohorts.append({
             "runtime": rt, "arm": cohort_arm, "sessions": len(sessions),
             "discoveries": len(discovers), "loads": len(loads), "outcomes": len(outcomes),
+            "discovery_errors": len(discovery_errors),
             "outcome_sessions": len(outcome_sessions),
             "sessions_without_outcome": len(sessions - outcome_sessions),
             "pass": sum(e["success"] == "pass" for e in outcomes),
@@ -347,9 +360,9 @@ def render_html(report):
         return f"<section><h2>{esc(title)}</h2><table><thead><tr>{heads}</tr></thead><tbody>{body}</tbody></table></section>"
 
     cohorts = report["cohorts"]
-    overview = table("Overview", ["Runtime", "Arm", "Sessions", "Discoveries", "Loads",
+    overview = table("Overview", ["Runtime", "Arm", "Sessions", "Discoveries", "Discovery errors", "Loads",
                                    "Outcomes", "Missing outcomes", "Repeated loads"],
-                     [[esc(r[k]) for k in ("runtime", "arm", "sessions", "discoveries", "loads",
+                     [[esc(r[k]) for k in ("runtime", "arm", "sessions", "discoveries", "discovery_errors", "loads",
                                              "outcomes", "sessions_without_outcome", "repeated_loads")]
                       for r in cohorts])
     latency = table("Latency and returned bytes", ["Runtime", "Arm", "Discover p50 / p95 ms",

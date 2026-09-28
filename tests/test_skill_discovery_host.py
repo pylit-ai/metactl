@@ -86,6 +86,19 @@ def response(choice="b" * 64):
 
 
 class RankerTests(unittest.TestCase):
+    def test_catalog_failure_receipt_survives_failed_logging(self):
+        def fail(*args):
+            raise host.DiscoveryCliError("project_config_missing")
+        with tempfile.TemporaryDirectory() as directory:
+            # A file cannot be the ledger's parent directory.
+            parent = Path(directory).resolve() / "not-a-directory"
+            parent.write_text("fixture")
+            h = host.Host("unused", directory, runner=fail, event_log=str(parent / "events"))
+            value = h.call("discover_skills", {"query": "synthetic"})
+            self.assertEqual(value["metrics"]["telemetry_status"], "failed")
+            self.assertIn("log=failed", value["routing_receipt"])
+            self.assertIn("provider_calls=0", value["routing_receipt"])
+
     def test_embedded_host_matches_canonical_source(self):
         self.assertEqual((ROOT / "scripts/skill_discovery_host.py").read_bytes(),
                          (ROOT / "crates/metactl/assets/skill_discovery_host.py").read_bytes())
@@ -214,6 +227,80 @@ class RankerTests(unittest.TestCase):
 
 @unittest.skipUnless(BINARY.exists(), "build CLI before running end-user-path tests")
 class CliTests(unittest.TestCase):
+    def test_missing_project_config_has_receipt_in_both_transports_and_ledger(self):
+        (self.fx.project / "metactl.yaml").unlink()
+        # macOS TemporaryDirectory may use /var -> /private/var; the ledger
+        # correctly rejects symlink ancestors, so use its canonical path.
+        log = self.fx.root.resolve() / "events.jsonl"
+        command = [str(BINARY), "--project", str(self.fx.project), "--no-profile",
+                   "skills", "host", "--event-log", str(log)]
+        query = "PRIVATE query must not appear in diagnostics or ledger"
+        request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                   "params": {"name": "discover_skills", "arguments": {"query": query}}}
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("METACTL_") and k != "TYPESAFE_API_KEY"}
+        env["HOME"] = str(self.fx.root / "isolated-home")
+        env["XDG_CONFIG_HOME"] = str(self.fx.root / "isolated-config")
+        for suffix, wire, exit_code in [([], json.dumps(request) + "\n", 0),
+                (["--call-tool", "discover_skills"], json.dumps({"query": query}), 1)]:
+            run = subprocess.run(command + suffix, input=wire, capture_output=True,
+                                 text=True, env=env, timeout=20)
+            self.assertEqual(run.returncode, exit_code, run.stderr)
+            value = json.loads(run.stdout)
+            if not suffix:
+                self.assertTrue(value["result"]["isError"])
+                value = json.loads(value["result"]["content"][0]["text"])
+            self.assertEqual(value["reason"], "project_config_missing")
+            self.assertEqual(value["metrics"]["provider_calls"], 0)
+            self.assertEqual(value["metrics"]["telemetry_status"], "recorded")
+            self.assertIn("provider_calls=0", value["routing_receipt"])
+            self.assertIn("metactl init --detect", value["next"])
+            self.assertNotIn(query, run.stdout + run.stderr)
+        events = [json.loads(line) for line in log.read_text().splitlines()]
+        self.assertEqual([e["kind"] for e in events], ["discovery_error"] * 2)
+        self.assertNotIn(query, log.read_text())
+        self.assertNotIn(str(self.fx.project), log.read_text())
+        trial_spec = importlib.util.spec_from_file_location(
+            "trial", ROOT / "scripts/skill_discovery_trials.py")
+        trial = importlib.util.module_from_spec(trial_spec)
+        trial_spec.loader.exec_module(trial)
+        cohort = trial.summarize(events)["cohorts"][0]
+        self.assertEqual(cohort["discovery_errors"], 2)
+        self.assertEqual(cohort["discoveries"], 0)
+        self.assertEqual(cohort["sessions_without_outcome"], 0)
+        for change in ({"provider_calls": 1}, {"provider_attempts": True},
+                       {"query": "private"}, {"reason": "private raw error"}):
+            with self.assertRaises(ValueError):
+                trial.validate_event({**events[0], **change})
+        status = subprocess.run(command + ["--status"], capture_output=True,
+                                text=True, env=env, timeout=20)
+        self.assertEqual(status.returncode, 1)
+        self.assertEqual(json.loads(status.stdout)["reason"], "project_config_missing")
+        self.assertEqual(len(log.read_text().splitlines()), 2)
+        # A supplied config remains authoritative; no guessed filesystem precheck.
+        config = self.fx.root / "elsewhere.json"
+        config.write_text(json.dumps(self.fx.config))
+        explicit = command[:1] + ["--config", str(config)] + command[1:] + ["--status"]
+        run = subprocess.run(explicit, capture_output=True, text=True, env=env, timeout=20)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        config.unlink()
+        run = subprocess.run(explicit, capture_output=True, text=True, env=env, timeout=20)
+        self.assertEqual(run.returncode, 1)
+        value = json.loads(run.stdout)
+        self.assertEqual(value["reason"], "project_config_missing")
+        self.assertIn("If --config was supplied, correct that path", value["next"])
+
+    def test_invalid_config_is_distinct_and_raw_errors_stay_private(self):
+        (self.fx.project / "metactl.yaml").write_text("role: [PRIVATE_INVALID_CONFIG")
+        ranker = host.Ranker(True, True, 1, key="fake",
+                             sender=lambda *a: self.fail("provider must not run"))
+        h = host.Host(str(BINARY), str(self.fx.project), ranker, cli_args=["--no-profile"])
+        value = h.call("discover_skills", {"query": "PRIVATE_QUERY"})
+        self.assertEqual(value["reason"], "project_discovery_failed")
+        self.assertEqual(value["metrics"]["provider_calls"], 0)
+        self.assertNotIn("PRIVATE", json.dumps(value))
+        self.assertEqual(ranker.remaining, 1)
+
     def test_packaged_host_status_config_and_fail_closed_check(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("METACTL_") and k != "TYPESAFE_API_KEY"}
         env["XDG_CONFIG_HOME"] = str(self.fx.root / "config")

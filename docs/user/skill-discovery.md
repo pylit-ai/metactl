@@ -491,6 +491,30 @@ references are not thereby admitted or verified.
 
 ## Metrics and reproducible offline checks
 
+### A globally connected agent reports missing project configuration
+
+A user-wide MCP registration makes discovery available in every workspace. It
+does not create a MetaCTL catalog in every folder. When the selected project has
+no `metactl.yaml`, discovery reports `project_config_missing` with a routing
+receipt showing zero provider calls. This is a local setup failure, not a Jev
+rejection or exhausted provider budget. Continue with local skills, configure the
+folder with `metactl init --detect`, or supply `--config PATH` for an existing
+configuration. Project setup alone does not enroll a project for Jev.
+
+Other catalog failures report `project_discovery_failed`; run
+`metactl skills catalog` in the affected folder for local diagnostics. Raw CLI
+errors are deliberately kept out of agent responses and discovery logs because
+they may include private configuration content.
+
+When logging is enabled, these pre-provider failures are recorded as
+`discovery_error` events. Reports count them separately from successful
+discoveries; no query, project path, or catalog contents are stored in those
+events. Sessions containing only setup errors are excluded from task-outcome
+coverage. Status checks remain unlogged, and a failed log write is shown
+explicitly in the receipt. Older trial readers that do not recognize
+`discovery_error` reject these logs; use the trial reader bundled with the host
+version that wrote them or a newer version.
+
 ```sh
 cargo build -p metactl
 python3 -m unittest discover -s tests -p 'test_skill_discovery*.py' -v
