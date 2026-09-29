@@ -66,6 +66,12 @@ class TrialTests(unittest.TestCase):
         summary = trial.summarize([event(reason="disabled"), event(reason="unambiguous")])
         self.assertEqual(summary["cohorts"][0]["fallback"], 0)
         self.assertEqual(summary["cohorts"][0]["skipped"], 2)
+        reasons = ("user_disabled", "project_disabled", "session_disabled",
+                   "project_not_enrolled", "data_not_authorized")
+        for reason in reasons:
+            trial.record_event(self.log, event(reason=reason))
+        preferences = trial.summarize([event(reason=reason) for reason in reasons])["cohorts"][0]
+        self.assertEqual((preferences["fallback"], preferences["skipped"]), (0, 5))
 
     def test_all_canonical_targets_have_working_host_and_ledger_labels(self):
         targets = [json.loads(p.read_text())["target_id"]
@@ -199,7 +205,8 @@ class TrialTests(unittest.TestCase):
         self.assertIsNone(advisory["human_interventions_reported"])
         html_output = trial.render_html(report)
         self.assertEqual(html_output.count("<table>"), 4)
-        self.assertEqual(html_output.count("<th scope='col'>"), 30)
+        self.assertEqual(html_output.count("<th scope='col'>"), 31)
+        self.assertIn("Discovery errors", html_output)
         self.assertIn("unknown <small>(0/0 known)</small>", html_output)
         self.assertIn("unknown / unknown", html_output)
         self.assertEqual(trial.summarize(rows, runtime="pi")["event_count"], 1)

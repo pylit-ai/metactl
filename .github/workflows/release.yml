@@ -28,6 +28,20 @@ jobs:
             target: aarch64-apple-darwin
     steps:
       - uses: actions/checkout@v4
+      - name: Ensure public-boundary scanner
+        shell: bash
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            case "$RUNNER_OS" in
+              Linux)
+                sudo apt-get update
+                sudo apt-get install -y ripgrep
+                ;;
+              macOS) brew install ripgrep ;;
+              *) echo "Unsupported scanner installation platform: $RUNNER_OS" >&2; exit 1 ;;
+            esac
+          fi
+          rg --version
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -38,7 +52,7 @@ jobs:
           cargo test -p metactl
           make verify-v1-release-gate
           make metactl-validate-contracts
-          bash scripts/check_public_boundary.sh
+          make verify-public-boundary
       - name: Package crates
         run: |
           cargo package -p metactl --locked
@@ -52,6 +66,11 @@ jobs:
         shell: bash
         run: |
           python3 scripts/package_release.py --target "${{ matrix.target }}" --binary-dir "target/${{ matrix.target }}/release"
+      - name: Smoke assembled archive outside the source checkout
+        shell: bash
+        run: |
+          version=$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("crates/metactl/Cargo.toml").read_text())["package"]["version"])')
+          python3 scripts/smoke_release_archive.py "dist/metactl-v${version}-${{ matrix.target }}.tar.gz" --version "$version"
       - name: Attest archive provenance
         uses: actions/attest-build-provenance@v2
         with:
