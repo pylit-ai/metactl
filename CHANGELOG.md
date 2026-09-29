@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.1.27 - 2026-09-28
+
+### Fixed
+
+- Keep explicitly named eligible skills in the five-candidate discovery
+  shortlist when the name appears inside a longer task query.
+- Rank distinct meaningful task terms without letting connective words or
+  repeated aliases and intents dominate the shortlist.
+- Preserve Jev ranking for ordinary single-word task mentions while supporting
+  explicit `$name`, backtick, exact-name, and exact-ID selection.
+
+## 0.1.26 - 2026-09-28
+
+### Fixed
+
+- Explain missing project configuration in skill discovery, including explicit
+  configuration overrides, instead of returning a generic rejection.
+- Return zero-provider-call receipts for catalog failures and record private
+  discovery errors separately from successful discovery and task outcomes.
+- Keep raw CLI errors and task queries out of diagnostics and failure logs.
+
 ## 0.1.25 - 2026-09-26
 
 ### Fixed
