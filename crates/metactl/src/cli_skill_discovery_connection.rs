@@ -162,6 +162,14 @@ fn host_command(
         ));
     }
     let mut args = vec!["--project".into(), root.to_string_lossy().into_owned()];
+    if cli.catalog_mode != "project" {
+        args.extend([
+            "--catalog-mode".into(),
+            cli.catalog_mode.clone(),
+            "--discovery-target".into(),
+            target.into(),
+        ]);
+    }
     if cli.no_profile {
         args.push("--no-profile".into());
     }
@@ -434,6 +442,18 @@ fn managed_entry(
     while args.get(i).map(String::as_str) != Some("skills") {
         match args.get(i)?.as_str() {
             "--no-profile" => i += 1,
+            "--catalog-mode" => {
+                if args.get(i + 1)?.as_str() != "project-or-user" {
+                    return None;
+                }
+                i += 2;
+            }
+            "--discovery-target" => {
+                if args.get(i + 1)?.as_str() != target {
+                    return None;
+                }
+                i += 2;
+            }
             "--profile" => {
                 args.get(i + 1)?;
                 i += 2;
@@ -1078,7 +1098,12 @@ fn offline_status(command: &str, args: &[String]) -> (String, Value) {
                     return ("invalid_status".into(), Value::Null);
                 }
                 return match serde_json::from_slice::<Value>(&output) {
-                    Ok(value) if value.get("project_ready") == Some(&Value::Bool(true)) => {
+                    Ok(value)
+                        if value
+                            .get("catalog_ready")
+                            .or_else(|| value.get("project_ready"))
+                            == Some(&Value::Bool(true)) =>
+                    {
                         ("ready".into(), value)
                     }
                     _ => ("invalid_status".into(), Value::Null),
@@ -1454,6 +1479,14 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
     } else {
         offline_status(&command, &args)
     };
+    let catalog = if catalog.is_null() {
+        host_status
+            .get("eligible_skills")
+            .cloned()
+            .unwrap_or(Value::Null)
+    } else {
+        catalog
+    };
     let mut latest = Value::Null;
     let mut observed = 0usize;
     let mut invalid_lines = 0usize;
@@ -1468,8 +1501,10 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                 for line in body.lines() {
                     match serde_json::from_str::<Value>(line) {
                         Ok(value)
-                            if value.get("schema").and_then(Value::as_str)
-                                == Some("metactl.discovery_trial.v1") =>
+                            if matches!(
+                                value.get("schema").and_then(Value::as_str),
+                                Some("metactl.discovery_trial.v1" | "metactl.discovery_trial.v2")
+                            ) =>
                         {
                             if value.get("runtime").and_then(Value::as_str) == Some(&options.target)
                                 && value.get("kind").and_then(Value::as_str) == Some("discover")
@@ -1546,6 +1581,13 @@ pub(super) fn doctor(cli: &Cli, options: &SkillsDoctorArgs) -> Result<CommandOut
                 "preferences": host_status.get("preferences"),
                 "effective_gateway_state": host_status.pointer("/preferences/gateway_state"),
                 "provider_ready": host_status.get("provider_ready"),
+                "catalog_origin": host_status.get("catalog_origin"),
+                "catalog_ready": host_status.get("catalog_ready"),
+                "project_config_state": host_status.get("project_config_state"),
+                "workspace_resolution": host_status.get("workspace_resolution"),
+                "effective_target": host_status.get("effective_target"),
+                "provider_effective_reason": host_status.get("provider_effective_reason"),
+                "context_identity": host_status.get("context_identity"),
                 "registration_ignores_preferences": matches!(registered_mode, Some("advisory" | "shadow")),
                 "effective_mode": host_status.get("trial_mode"),
                 "agent_tools": "unknown",
