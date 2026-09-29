@@ -567,3 +567,104 @@ The [evaluation contract](../design/optional-skill-discovery.md) defines the
 remaining held-out session gates before rollout. Keep live Jev benchmark data
 private unless its applicable agreement permits publication. Rollback simply
 removes the optional MCP registration; no native defaults have changed.
+
+## Discovery in folders without project configuration
+
+User-catalog fallback is opt-in. It makes selected local skill libraries available
+in explicitly connected folders without creating a project configuration. A
+configured project always uses its own catalog, including an empty catalog.
+Malformed, unreadable or dangling project configuration remains an error.
+
+Preview a trusted local library and agent target, then save:
+
+~~~sh
+metactl skills setup --scope user --source /absolute/path/to/library --target codex-cli
+metactl skills setup --scope user --source /absolute/path/to/library --target codex-cli --apply
+~~~
+
+The preview shows eligible counts, source visibility and candidate-metadata
+classification. Sources must be declared MetaCTL libraries with library.json;
+setup does not scan native skill directories, download libraries, or enroll a
+workspace for Jev. Relative paths in an existing saved catalog resolve against
+the catalog file. The catalog is stored separately from provider preferences in
+$XDG_CONFIG_HOME/metactl/discovery-catalog.json, or
+~/.config/metactl/discovery-catalog.json, with private file permissions.
+
+The default metadata classification is local-only. If the selected names and
+descriptions may leave the device, choose --metadata-policy public-nonsensitive
+or --metadata-policy private-owned during setup. Skill bodies remain available
+to the coding agent, so choose sources suitable for that agent's visibility
+across the connected folders. Classification grants no provider access:
+existing exact-workspace enrollment, saved Jev preferences and gateway limits
+still apply. Private-owned metadata cannot use a public-only workspace grant.
+An unregistered folder reports project_not_enrolled and ranks locally.
+
+Connect an exact fixed workspace without editing an agent configuration:
+
+~~~sh
+metactl --project /absolute/workspace --catalog-mode project-or-user skills connect --scope user --target codex-cli --use-preferences
+metactl --project /absolute/workspace --catalog-mode project-or-user skills connect --scope user --target codex-cli --use-preferences --apply
+metactl --project /absolute/workspace --catalog-mode project-or-user skills doctor --scope user --target codex-cli --use-preferences --json
+~~~
+
+User scope currently supports Codex's existing fixed-root registration. It does
+**not** follow the folder of every coding session. Use project scope for another
+supported adapter and a fixed explicit root. Start a fresh native client session
+after applying a connection. Automatic launch-directory discovery, migration of
+Git-normalizing external launchers, and native acceptance across unrelated
+folders remain separate work; they are not advertised by this release.
+
+For direct discovery, status and loading:
+
+~~~sh
+metactl --project /absolute/workspace --catalog-mode project-or-user --discovery-target codex-cli skills catalog --json
+metactl --project /absolute/workspace --catalog-mode project-or-user skills host --target codex-cli --runtime codex-cli --use-preferences --status
+# The agent supplies minimal JSON to the host's existing --call-tool interface.
+metactl --project /absolute/workspace --catalog-mode project-or-user skills host --target codex-cli --runtime codex-cli --use-preferences --call-tool discover_skills
+~~~
+
+Status makes no provider call. It separates catalog_ready,
+project_config_state, catalog_origin, effective_target,
+workspace_resolution and provider_effective_reason. Routine receipts and logs
+use opaque context identifiers; local administrative status may show paths.
+
+Persistent off/on controls preserve sources and data policy:
+
+~~~sh
+metactl skills setup --disable              # preview, no write
+metactl skills setup --disable --apply
+metactl skills setup --enable --apply
+~~~
+
+Changing sources or classification requires a setup preview and
+--replace --apply. A running host rejects changed catalog configuration or
+project/user origin with catalog_context_changed; restart it. Ordinary library
+content edits are revalidated on each call, and load requires the current
+package digest. Save a private copy of the old catalog before replacing it if
+you need rollback; restore that copy and restart the host. Provider preferences
+and existing logs are separate and remain intact.
+
+## Recommendations are distinct from candidates
+
+Discovery returns eligible result.skills for compatibility. These are candidate
+instructions, not automatic activation. The coding agent must still decide
+whether a skill is relevant, then load its ID and digest before following it.
+
+| Field value | Meaning |
+| --- | --- |
+| recommendation_status=recommended | Validated advisory Jev chose the single ID in recommended_ids. |
+| recommendation_status=abstained | Validated advisory Jev chose no skill; recommended_ids is empty. Do not activate fallback candidates merely because returned. |
+| recommendation_status=ranked_candidates | Local fallback or shadow returned ranked candidates; no provider recommendation is exposed. |
+| recommendation_status=no_matches | The deterministic shortlist is empty. |
+
+Shadow mode always exposes only baseline candidate/recommendation behavior, even
+when Jev privately abstains. Failures retain local candidates and truthful
+provider-attempt accounting. Availability, a successful provider call, or a
+changed order does not prove lower coding cost or better outcomes. This workflow
+does not suppress the native skill catalog or establish token savings.
+
+
+Catalog-context-bearing events use metactl.discovery_trial.v2. The bundled
+reader and doctor accept both v1 and v2 records in the same ledger; upgrade
+readers before inspecting v2 logs. Older strict readers reject v2 explicitly.
+Neither version stores queries, skill bodies or workspace paths.
