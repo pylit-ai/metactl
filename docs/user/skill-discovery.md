@@ -66,6 +66,32 @@ task text or skill bodies. Local logging is separate from provider retention.
 Enabled does not prove a coding agent invoked discovery: ask it to show its
 receipt. Default-on uses Jev when useful; unambiguous requests remain local.
 
+## How skills are selected
+
+Single-word names or aliases inside prose remain topical matches unless marked
+with `$name` or backticks. For example, "Review tests for a repair" can still use
+Jev; "Use `$review`" explicitly selects that skill. A query consisting only of
+the exact skill name or ID also remains an explicit local selection.
+
+Discovery first filters the catalog for project policy and supported instruction
+semantics. It then ranks eligible skills locally. Whole skill names and aliases
+inside task prose take priority; longer matching labels win over shorter ones.
+Direct named exclusions such as `do not use NAME` are respected. Other queries
+use distinct meaningful words, ignoring common connecting words such as `and`
+and `for`. Repeated aliases/intents do not accumulate extra field weight. A
+negative intent penalizes a match only when all its meaningful words are present.
+This remains lexical retrieval, not general natural-language understanding.
+
+The host sends at most five local candidates to Jev, which can move one to the
+front or abstain. It cannot recover a skill absent from that shortlist. Explicit
+name/alias matches stay local. `score` is a local ranking value, not a probability
+or Jev confidence; scores may change as retrieval improves. `excluded` counts
+catalog eligibility/validation rejections, not results omitted by the limit.
+
+Agents should load a relevant result using its returned ID and digest before
+following its full instructions. A discovery receipt proves the lookup; a load
+event proves delivery of instructions. Neither alone proves task benefit.
+
 ## Check status and limits
 
 These checks make no provider request. Use the same absolute project path and
