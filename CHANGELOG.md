@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.1.29 - 2026-09-29
+
+### Fixed
+
+- Compare physical workspace paths in macOS user-catalog test assertions,
+  preserving exact enrollment, nested-folder isolation and alias identity checks.
+  Production workspace binding and provider permissions remain unchanged.
+
 ## 0.1.28 - 2026-09-29
 
 ### Added

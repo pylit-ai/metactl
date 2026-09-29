@@ -202,7 +202,7 @@ print(json.dumps({"available":True,"response":{"model":"jev-1.13.0","answers":{"
         validate_event(event)
         self.assertEqual(first["metrics"]["catalog_origin"], "user")
         self.assertEqual(first["recommendation_status"], "recommended")
-        self.assertEqual((self.f.root / "gateway-marker").read_text(), str(self.f.project))
+        self.assertEqual((self.f.root / "gateway-marker").read_text(), str(self.f.project.resolve()))
         # Classification changes and revocation apply on the next request.
         self.setup(policy="local-only", replace=True)
         value = self.host_call("--use-preferences")
@@ -250,7 +250,7 @@ print(json.dumps({"available":True,"response":{"model":"jev-1.13.0","answers":{"
         value = self.run_cli("--catalog-mode", "project-or-user", "skills", "host",
                              "--runtime", "codex-cli", "--use-preferences", "--status", project=nested)
         self.assertEqual(value["preferences"]["reason"], "project_not_enrolled")
-        self.assertEqual(value["project"], str(nested))
+        self.assertEqual(value["project"], str(nested.resolve()))
         alias = self.f.root / "alias"
         alias.symlink_to(self.f.project, target_is_directory=True)
         a = self.user("catalog")["discovery_context"]["context_identity"]
