@@ -1,8 +1,9 @@
 # Skill discovery onboarding proposal
 
-Status: product proposal. The `skills connect` and `skills doctor` commands below
-do not exist yet. The current commands are `skills host --status`,
-`skills host --client-config`, and `skills trials inspect`.
+Status: baseline connector and diagnostics implemented on the post-v0.1.23
+development branch. Fresh native agent acceptance and Jev default-on rollout
+remain separate gates. `skills host --client-config` and `skills trials inspect`
+remain available for manual and evaluation paths.
 
 ## User problem
 
@@ -29,25 +30,30 @@ Keep deterministic discovery available without a provider. Add a target-aware,
 preview-first connector after confirming each target's native format:
 
 ```text
-metactl --project /absolute/project skills connect --target codex-cli --scope project --preview
+metactl --project /absolute/project skills connect --target codex-cli --scope project
 metactl --project /absolute/project skills connect --target codex-cli --scope project --apply
 metactl --project /absolute/project skills doctor --target codex-cli
 ```
 
-`connect` should display the exact file and entry it will change, a redacted
-diff, the fixed project path, deterministic baseline mode, a private ledger
-destination, and a reversible removal command. `--apply` should edit only that
-server entry and preserve unrelated configuration. It should never install an
-`AGENTS.md` instruction or switch on paid Jev automatically. Offer a separate,
+`connect` displays the exact file and entry it will change, the fixed project
+path, deterministic baseline mode, a private ledger destination, and a reversible
+removal command. `--apply` edits only that server entry and preserves unrelated
+configuration values. JSON formatting can change on apply. It never installs an
+`AGENTS.md` instruction or switches on paid Jev automatically. Offer a separate,
 copyable project instruction after registration. Project config is loaded by
 Codex only in trusted projects; the installer must say so.
+Removal recognizes the pinned project's MetaCTL baseline entry after a binary
+or Python upgrade. Doctor compares the registration with the current invocation.
+On a mismatch it reports readiness as unknown and does not execute the
+registered command.
 
-`doctor` should display a compact state ladder, with unknown as a first-class
+`doctor` displays a compact state ladder, with unknown as a first-class
 state:
 
-1. **Catalog:** configured project, eligible count, and exclusions.
-2. **Registration:** target config file and command/arguments found or missing.
-3. **Host:** local handshake and tool names verified or not tested.
+1. **Catalog:** configured project and eligible count from local Rust discovery.
+2. **Registration:** target config entry found, missing, or conflicting.
+3. **Host:** offline readiness checked in the current shell when registration
+   matches the requested options, without a provider call.
 4. **Agent:** native fresh-session acceptance reported by the user or not yet
    verified; MetaCTL cannot infer it from a config file.
 5. **Routing:** last matching event, mode, provider attempts/calls, fallback

@@ -12,6 +12,32 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+pub(super) fn routing_terms(query: &str) -> BTreeSet<String> {
+    query
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|term| !term.is_empty())
+        .map(|term| term.to_ascii_lowercase())
+        .collect()
+}
+
+pub(super) fn score_routing_field(
+    terms: &BTreeSet<String>,
+    field: &str,
+    weight: i64,
+    field_name: &str,
+    matched_fields: &mut Vec<String>,
+) -> i64 {
+    let field_terms = routing_terms(field);
+    if !terms.is_disjoint(&field_terms) {
+        if !matched_fields.iter().any(|item| item == field_name) {
+            matched_fields.push(field_name.to_string());
+        }
+        weight
+    } else {
+        0
+    }
+}
+
 pub(super) fn normalize_candidate(
     root: &Path,
     path: &Path,

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "Public boundary scan unavailable: required scanner rg (ripgrep) is missing." >&2
+  exit 2
+fi
+
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
@@ -29,11 +34,25 @@ fi
 
 content_markers='/Users/[[:alnum:]_.-]+|/home/[[:alnum:]_.-]+|[A-Za-z]:\\Users\\'
 if rg -n "$content_markers" --glob '!target/**' --glob '!tmp/**' --glob '!Cargo.lock' --glob '!scripts/check_public_boundary.sh' . >"$content_hits"; then
-  grep -Ev '(/Users/example|/home/example|[A-Za-z]:\\Users\\example)' "$content_hits" >"$content_filtered" || true
+  if grep -Ev '(/Users/example|/home/example|[A-Za-z]:\\Users\\example)' "$content_hits" >"$content_filtered"; then
+    filter_status=0
+  else
+    filter_status=$?
+  fi
+  if [ "$filter_status" -gt 1 ]; then
+    echo "Public boundary content filter failed (status $filter_status)." >&2
+    exit "$filter_status"
+  fi
   if [ -s "$content_filtered" ]; then
     echo "Public repo contains non-public content markers:"
     cat "$content_filtered"
     exit 1
+  fi
+else
+  scan_status=$?
+  if [ "$scan_status" -ne 1 ]; then
+    echo "Public boundary content scan failed (rg status $scan_status)." >&2
+    exit "$scan_status"
   fi
 fi
 

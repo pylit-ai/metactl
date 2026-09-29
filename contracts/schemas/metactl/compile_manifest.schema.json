@@ -6,6 +6,7 @@
   "properties": {
     "api_version": { "const": "metactl/v2alpha1" },
     "target": { "$ref": "common.schema.json#/$defs/ref" },
+    "resolve_graph": { "$ref": "resolve_graph.schema.json" },
     "generated_outputs": {
       "type": "array",
       "items": {

@@ -288,6 +288,13 @@ fn trust_legacy_managed_state_without_new_metadata_patches_restored_root_docs() 
 #[test]
 fn trust_private_pack_stays_out_of_public_surfaces_and_in_local_surfaces() {
     let project = TempDir::new().expect("tempdir");
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["init", "-q"])
+        .status()
+        .unwrap()
+        .success());
     init_project_with_targets(
         project.path(),
         &["codex-cli", "claude-code", "gemini-cli", "cursor"],
@@ -295,6 +302,11 @@ fn trust_private_pack_stays_out_of_public_surfaces_and_in_local_surfaces() {
 
     let add = run_cli(project.path(), &["add", "local-only-example"]);
     assert!(add.status.success(), "{}", stderr(&add));
+    let protect = run_cli(
+        project.path(),
+        &["ignore", "install", "--scope", "both", "--yes"],
+    );
+    assert!(protect.status.success(), "{}", stderr(&protect));
     let compile = run_cli(project.path(), &["compile"]);
     assert!(compile.status.success(), "{}", stderr(&compile));
 

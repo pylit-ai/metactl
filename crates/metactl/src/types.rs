@@ -1062,6 +1062,9 @@ pub struct GeneratedOutput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CompileManifest {
+    /// Replay inputs; apply re-synthesizes against the current library before trusting outputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolve_graph: Option<ResolveGraph>,
     pub api_version: String,
     pub target: Ref,
     pub generated_outputs: Vec<GeneratedOutput>,

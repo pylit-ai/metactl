@@ -159,11 +159,38 @@ pub(super) fn instruction_document(
             ));
         }
     }
+    let known_capabilities = serde_json::to_value(&target.capabilities)?;
+    let mut rendered_gaps = BTreeSet::new();
     for gap in &resolve_graph.capability_gaps {
-        lines.push(format!("|gap:{}={:?}", gap.feature, gap.reason_code));
+        // Saved local selections can refer to private, suppressed, deselected,
+        // or unknown packs. Keep a useful diagnostic, never its opaque id.
+        let feature = if gap.feature.starts_with("auto_surface_selection:") {
+            "auto_surface_selection"
+        } else if gap.feature == "pack_selection" && gap.reason_code == ReasonCode::ZeroMatch {
+            "pack_selection"
+        } else if (known_capabilities.get(&gap.feature).is_some()
+            || policy.rules.iter().any(|rule| rule.id == gap.feature))
+            && !gap.affected_refs.is_empty()
+            && gap.affected_refs.iter().all(|reference| {
+                reference.kind == RefKind::Pack
+                    && packs_in_plan(plan).contains(&reference.id.as_str())
+            })
+        {
+            gap.feature.as_str()
+        } else {
+            continue;
+        };
+        let rendered = format!("|gap:{feature}={:?}", gap.reason_code);
+        if rendered_gaps.insert(rendered.clone()) {
+            lines.push(rendered);
+        }
     }
 
     budget_instruction_document(lines.join("\n"))
+}
+
+fn packs_in_plan(plan: &InstructionDocumentPlan) -> Vec<&str> {
+    plan.packs.iter().map(|p| p.pack_ref.id.as_str()).collect()
 }
 
 fn instruction_references_for_pack(
@@ -819,7 +846,7 @@ pub(super) fn expand_runtime_template(
     template_ref: &RuntimeTemplateRef,
     target: &TargetCapabilityMatrix,
     policy: &PolicyManifest,
-    resolve_graph: &ResolveGraph,
+    _resolve_graph: &ResolveGraph,
     packs: &[&DiscoveredPack],
 ) -> Result<(GeneratedOutputKind, Vec<u8>)> {
     let (tmpl_path, raw) = library_roots
@@ -856,10 +883,9 @@ pub(super) fn expand_runtime_template(
     ctx.insert(
         "active_packs_json_array".into(),
         serde_json::to_string(
-            &resolve_graph
-                .activated_pack_refs
+            &packs
                 .iter()
-                .map(|item| &item.id)
+                .map(|item| &item.manifest.id)
                 .collect::<Vec<_>>(),
         )
         .unwrap_or_else(|_| "[]".into()),

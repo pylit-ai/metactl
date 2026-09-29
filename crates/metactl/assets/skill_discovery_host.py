@@ -238,6 +238,61 @@ class Ranker:
         return original, metadata
 
 
+class PreferenceRanker(Ranker):
+    """Re-evaluate user policy per call without replenishing this host's budget."""
+    def __init__(self, project):
+        super().__init__(mode="baseline", transport_kind="gateway")
+        module_dir = os.path.dirname(os.path.realpath(__file__))
+        if module_dir not in sys.path:
+            sys.path.insert(0, module_dir)
+        from skill_discovery_preferences import resolve
+        self.resolve = resolve
+        self.project, self.attempted = project, 0
+        self.refresh()
+
+    def refresh(self):
+        self.preference = self.resolve(self.project)
+        self.enabled = self.allow_data = self.preference["enabled"]
+        self.mode = "advisory" if self.enabled else "baseline"
+        self.remaining = max(0, self.preference.get("max_provider_calls", 0) - self.attempted)
+        self.deadline = self.preference.get("provider_deadline", 5.0)
+        command = self.preference.get("gateway_command", "")
+        self.key = "scoped-client" if command and os.access(command, os.X_OK) else None
+        project = self.preference.get("gateway_project")
+        data_class = self.preference.get("data_class")
+        self.sender = lambda payload, _key, deadline: gateway_transport(
+            payload, deadline, command, project, self.project, data_class)
+
+    def rank(self, query, baseline):
+        self.refresh()
+        result, metric = super().rank(query, baseline)
+        self.attempted += metric["provider_attempts"]
+        if not self.enabled:
+            metric["reason"] = self.preference["reason"]
+        metric["preference_source"] = "user"
+        return result, metric
+
+
+class DiscoveryCliError(ValueError):
+    """Safe, fixed diagnostics; never forward CLI output or project content."""
+    def __init__(self, reason="project_discovery_failed"):
+        self.reason = reason
+        super().__init__(reason)
+
+    def diagnostic(self):
+        missing = self.reason == "project_config_missing"
+        return {
+            "error": ("The selected MetaCTL project configuration does not exist."
+                      if missing else "MetaCTL could not read the project skill catalog."),
+            "reason": self.reason,
+            "next": ("Use local skills for this task. If --config was supplied, correct that path. "
+                     "Otherwise run metactl init --detect here to configure this folder, "
+                     "or supply --config PATH for an existing config. "
+                     "Project setup does not enroll the folder for Jev."
+                     if missing else "Run metactl skills catalog in this folder for local diagnostics."),
+        }
+
+
 class Host:
     def __init__(self, binary, project, ranker=None, excluded=(), runner=None, cli_args=(),
                  event_log=None, session_id=None, runtime="other"):
@@ -281,7 +336,17 @@ class Host:
         completed = subprocess.run([self.binary, "--project", self.project, "--json", "--full", "--no-input",
                                     *self.cli_args, "skills", *args], input=private_input, capture_output=True, text=True, timeout=15)
         if completed.returncode:
-            raise ValueError("project discovery failed; inspect the CLI locally")
+            # Recognize only the CLI's missing-config diagnostic. Do not expose
+            # arbitrary stdout/stderr, which may contain private configuration.
+            reason = "project_discovery_failed"
+            try:
+                message = json.loads(completed.stdout).get("message", "")
+                if (isinstance(message, str) and message.startswith("Project config ")
+                        and message.endswith(" does not exist.")):
+                    reason = "project_config_missing"
+            except (ValueError, AttributeError):
+                pass
+            raise DiscoveryCliError(reason)
         result = json.loads(completed.stdout)
         return result["result"]
 
@@ -295,7 +360,18 @@ class Host:
             command = ["discover", "--limit", "5", "--query-stdin"]
             for excluded in sorted(self.excluded):
                 command.extend(["--exclude", excluded])
-            baseline = self.runner(command, args["query"])
+            try:
+                baseline = self.runner(command, args["query"])
+            except DiscoveryCliError as error:
+                # This branch runs before ranking. No provider attempt occurred.
+                metric = {"operation": "discover", "reason": error.reason,
+                          "elapsed_ms": (time.monotonic() - start) * 1000,
+                          "provider_attempts": 0, "provider_calls": 0}
+                self.record("discovery_error", metric)
+                receipt = (f"Skill discovery: status=error; reason={error.reason}; "
+                           f"provider_calls=0; log={metric['telemetry_status']}; "
+                           f"event={metric['event_id']}")
+                return {**error.diagnostic(), "metrics": metric, "routing_receipt": receipt}
             result, metric = self.ranker.rank(args["query"], baseline)
             metric.update(operation="discover", elapsed_ms=(time.monotonic() - start) * 1000,
                           result_count=len(result["skills"]),
@@ -358,9 +434,11 @@ class Host:
                 params = request["params"]
                 value = self.call(params["name"], params.get("arguments", {}))
                 response["result"] = {"content": [{"type": "text", "text": compact(value)}],
-                                      "isError": False}
+                                      "isError": "error" in value}
             else:
                 response["error"] = {"code": -32601, "message": "method not found"}
+        except DiscoveryCliError as error:
+            response["result"] = {"content": [{"type": "text", "text": compact(error.diagnostic())}], "isError": True}
         except Exception:
             response["result"] = {"content": [{"type": "text", "text": "Discovery/load rejected; inspect local configuration and rerun discovery."}], "isError": True}
         return response
@@ -397,6 +475,7 @@ def main():
                       help="One tool call with JSON arguments on stdin; gateway shared limits still apply")
     parser.add_argument("--ranker", choices=("deterministic", "jev"), default="deterministic")
     parser.add_argument("--allow-provider-data", action="store_true")
+    parser.add_argument("--use-preferences", action="store_true")
     parser.add_argument("--max-provider-calls", type=int, default=0)
     parser.add_argument("--provider-deadline", type=float, default=1.5)
     parser.add_argument("--exclude-skill", action="append", default=[])
@@ -433,6 +512,8 @@ def main():
     ranker = Ranker(args.ranker == "jev", args.allow_provider_data,
                     args.max_provider_calls, args.provider_deadline, key, sender,
                     mode=args.trial_mode, transport_kind=args.jev_transport)
+    if args.use_preferences:
+        ranker = PreferenceRanker(os.path.realpath(args.project))
     cli_args = ["--no-profile"] if args.no_profile else []
     for key in ("profile", "config", "overlay"):
         if getattr(args, key):
@@ -457,6 +538,8 @@ def main():
                 command_args.extend(["--" + key.replace("_", "-"), value])
         if args.allow_provider_data:
             command_args.append("--allow-provider-data")
+        if args.use_preferences:
+            command_args.append("--use-preferences")
         for excluded in args.exclude_skill:
             command_args.extend(["--exclude-skill", excluded])
         print(compact({"mcpServers": {"metactl-skills": {"command": args.metactl, "args": command_args}}}))
@@ -465,9 +548,16 @@ def main():
         try:
             catalog = host.runner(["catalog"])
             report = readiness(ranker)
+            if args.use_preferences:
+                report["preferences"] = ranker.preference
             eligible = [s for s in catalog["skills"] if s["id"] not in host.excluded and s["name"] not in host.excluded]
             report.update(project=host.project, eligible_skills=len(eligible),
-                          catalog_digest=catalog["catalog_digest"], project_ready=True)
+                          catalog_digest=catalog["catalog_digest"], project_ready=True,
+                          event_log=args.event_log)
+        except DiscoveryCliError as error:
+            print(compact({"project_ready": False, "provider_verified": False,
+                           "provider_calls_this_check": 0, **error.diagnostic()}))
+            sys.exit(1)
         except Exception:
             print(compact({"project_ready": False, "provider_verified": False,
                            "reason": "project_discovery_failed", "next": "Run skills catalog locally."}))
@@ -485,7 +575,13 @@ def main():
             raw = sys.stdin.buffer.read(MAX_LINE + 1)
             if len(raw) > MAX_LINE:
                 raise ValueError("input too large")
-            print(compact(host.call(args.call_tool, json.loads(raw))), flush=True)
+            value = host.call(args.call_tool, json.loads(raw))
+            print(compact(value), flush=True)
+            if "error" in value:
+                sys.exit(1)
+        except DiscoveryCliError as error:
+            print(compact(error.diagnostic()))
+            sys.exit(1)
         except Exception:
             print(compact({"error": "Discovery/load rejected; inspect local configuration."}))
             sys.exit(1)

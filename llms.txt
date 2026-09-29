@@ -5,6 +5,7 @@
 ## Start here
 
 - [Agent surfaces](docs/agent-surfaces.md) — target-owned files and machine-output contract.
+- [Skill discovery](docs/user/skill-discovery.md) — saved preferences, project enrollment, routing receipts and provider boundaries.
 - `metactl explain --capabilities --json` — command, error, and target capability manifest; works outside a project.
 - `metactl help --all` — complete local command help.
 
@@ -16,6 +17,8 @@
 - `metactl status` — show readiness, drift, and next actions.
 - `metactl validate` — check generated surfaces and policy.
 - `metactl doctor` — run health checks.
+- `metactl --project PATH skills preferences` — inspect effective discovery preferences without changing consent or enrollment.
+- `metactl --project PATH skills doctor --target TARGET --use-preferences --json` — inspect one client's discovery registration, local health and observed events without a provider call.
 - `metactl demo` — create or remove a disposable sandbox.
 
 ## Agent contract
@@ -25,6 +28,7 @@
 - `next_commands` is always a non-empty array; consumers can safely offer recovery actions.
 - Machine lists may be bounded; inspect `<list>_truncated` and `<list>_total_count`, or pass `--full`.
 - Pass `--project PATH` to target a project explicitly; `explain --capabilities` needs no project.
+- For relevant specialist instructions, call `discover_skills`, then load a returned ID and digest. Report its routing receipt; registration alone does not prove discovery or Jev use. Do not change consent or enroll projects without authorization.
 
 ## References
 

@@ -6,8 +6,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![API](https://img.shields.io/badge/API-metactl%2Fv2alpha1-2f6f9f)](#automation-and-mcp)
 
-Current source crate version: `0.1.23`. The crates.io badges show the latest
-published versions; use the pinned 0.1.23 install commands below after that
+Current source crate version: `0.1.27`. The crates.io badges show the latest
+published versions; use the pinned 0.1.27 install commands below after that
 version appears in the registry.
 
 `metactl` lets an individual developer define agent instructions once, review the generated files, and work across supported coding agents without hand-copying prompt state.
@@ -62,7 +62,7 @@ Modern coding agents read different files, directories, skill formats, and rule 
 | Homebrew (tap template) | `brew install --HEAD pylit-ai/tap/metactl` | macOS users after the maintained tap is published. |
 | npm shim (unpublished) | See [`packaging/npm`](packaging/npm) | Installer scaffold; the npm package is not yet published. |
 | This source checkout | `cargo install --path crates/metactl --locked` | Use the checked-out version before its registry release. |
-| crates.io, after 0.1.23 publication | `cargo install metactl --version 0.1.23 --locked` | Portable source build. |
+| crates.io, after 0.1.27 publication | `cargo install metactl --version 0.1.27 --locked` | Portable source build. |
 | GitHub Actions | `uses: pylit-ai/metactl@v0` | CI drift checks; see [the copy-paste recipe](docs/user/ci-drift-gate.md). |
 
 All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Action also verifies GitHub build provenance when the runner provides a compatible GitHub CLI. The npm shim emits an explicit warning and supports [manual provenance verification](docs/user/install-verification.md). `cargo binstall` currently covers Linux x86_64 and Apple Silicon; use Cargo source installs on other platforms.
@@ -70,13 +70,13 @@ All prebuilt paths verify the release SHA-256 checksum before use. The GitHub Ac
 ## Quickstart
 
 From this source checkout, `cargo install --path crates/metactl --locked`
-installs 0.1.23 before registry publication. For a registry install, check the
-crates.io badge above; when it shows 0.1.23, use:
+installs 0.1.27 before registry publication. For a registry install, check the
+crates.io badge above; when it shows 0.1.27, use:
 
 ```bash
-cargo install metactl --version 0.1.23 --locked
+cargo install metactl --version 0.1.27 --locked
 metactl version
-# metactl 0.1.23 (metactl/v2alpha1)
+# metactl 0.1.27 (metactl/v2alpha1)
 ```
 
 The published CLI includes the public starter library, so the demo and normal pack workflows do not require a repository checkout or a manual `--starter-library` path.
@@ -133,7 +133,7 @@ git clone https://github.com/pylit-ai/metactl.git
 cd metactl
 cargo install --path crates/metactl --locked
 metactl version
-# metactl 0.1.23 (metactl/v2alpha1)
+# metactl 0.1.27 (metactl/v2alpha1)
 ```
 
 </details>
@@ -142,12 +142,12 @@ metactl version
 <summary>Install the daemon for JSON-RPC or MCP</summary>
 
 `metactld` exposes the same reference kernel for local stdio JSON-RPC/MCP integration.
-Install this pinned version after 0.1.23 appears on crates.io:
+Install this pinned version after 0.1.27 appears on crates.io:
 
 ```bash
-cargo install metactld --version 0.1.23 --locked
+cargo install metactld --version 0.1.27 --locked
 metactld --version
-# metactld 0.1.23
+# metactld 0.1.27
 ```
 
 Start with [docs/mcp/servers.md](https://github.com/pylit-ai/metactl/blob/main/docs/mcp/servers.md) when wiring an editor, agent runtime, or local MCP server.
@@ -162,22 +162,30 @@ package installation is needed:
 
 ```bash
 metactl --project /path/to/project skills host --status
-metactl --project /path/to/project skills host --client-config
+metactl --project /path/to/project skills connect --target codex-cli
+metactl --project /path/to/project skills connect --target codex-cli --apply
+metactl --project /path/to/project skills doctor --target codex-cli
 ```
 
 The first command checks the project's catalog and local readiness without a
-provider call. The second prints a no-secret, client-neutral MCP registration
-snippet; review it and register it in your coding client. MetaCTL does not
-currently have a project-enabling command that writes your client's settings.
+provider call. `connect` previews one target-native server entry; `--apply` writes it;
+`doctor` separates configuration, local health, observed discovery events
+(including manual calls), and unknown states.
+The connector starts in deterministic baseline mode with zero Jev calls.
+`skills host --client-config` remains available for custom/manual adapters.
 Start a fresh agent session, verify that `discover_skills` and `load_skill` are
 available, then make one baseline discovery call and inspect its
 `routing_receipt`. Registration alone does not invoke discovery on every task.
 Follow the [agent adapter guide](docs/user/discovery-agent-adapters.md) for
 target-specific configuration and the [first-run workflow](docs/user/skill-discovery.md#first-run-workflow)
 for evidence at each step.
-Jev is **optional and off by default**. Follow the [activation and verification
-guide](docs/user/skill-discovery.md#shared-gateway-and-measured-trials) for
-secret injection, data consent, bounded requests, status, live checks and rollback.
+Jev is **optional and off by default**. Operators with an approved gateway can
+[enable saved preferences for explicitly enrolled projects](docs/user/skill-discovery.md#enable-jev-once-for-managed-projects)
+and connect clients with `--use-preferences`. That choice persists across tasks;
+unambiguous requests still use local discovery. See the
+[status command map and budget layers](docs/user/skill-discovery.md#check-status-and-limits)
+for free checks, receipt interpretation and the limits that can stop Jev calls.
+For a bounded experiment, use the [gateway trial workflow](docs/user/skill-discovery.md#shared-gateway-and-measured-trials).
 
 In a frozen 12-query, 208-descriptor development fixture, deterministic discovery
 found **75% versus 35%** of relevant skills in the first five results. Median
@@ -287,9 +295,9 @@ metactl validate
 | `metactl target add cursor` | Add another target without hand-editing YAML. |
 | `metactl explain` | Show why packs and targets were selected. |
 | `metactl revert` | Remove applied outputs tracked by metactl. |
-| `metactl ignore install` | Hide generated agent surfaces from local git status. |
+| `metactl ignore install` | Protect MetaCTL-local state without hiding mixed agent roots. |
 | `metactl ignore status` | Check whether generated surfaces and private source state are protected. |
-| `metactl ignore fix --plan` | Plan generated-surface ignore repair and Git-index untracking safely. |
+| `metactl ignore fix --plan` | Plan repair of MetaCTL's managed ignore blocks; agent-root files stay visible and tracked. |
 | `metactl audit sources` | Diagnose private source cache, lock, and public-example exposure failures. |
 
 </details>
@@ -336,9 +344,43 @@ metactl ignore fix --scope local --include-private-sources --yes
 ```
 
 Local ignore scope writes `.git/info/exclude` for the current checkout only. Use
-repo scope only when the team wants the ignore posture committed. If generated
-roots are already tracked, use `--untrack-generated --yes`; this removes them
-from the Git index only and leaves files on disk.
+repo scope only when the team wants the ignore posture committed. Agent roots
+can contain authored files, so `ignore fix` and `ignore install` do not hide or
+untrack `.agents/`, `.codex/`, `.claude/`, `.cursor/`, or `.gemini/` files.
+Exact private local names remain ignored independently of the selected target:
+`CLAUDE.local.md`, `GEMINI.local.md`, `AGENTS.local.md`, `OPENCLAW.local.md`,
+`.cursor/rules/metactl-pack-index.local.mdc`, `.claude/settings.local.json`,
+`.cursor/mcp.json`, and `.gemini/.env`. Private skills, resources and local
+instruction documents require effective Git protection before publication.
+Select private packs with `metactl use <pack> --local --no-input` so their
+identifiers stay in `metactl.local.yaml`; `add` deliberately edits the shared
+project configuration. Run `metactl ignore install --scope both --yes` after
+selecting private packs (then retry sync if the first publication was refused);
+exact private capability paths go only into local `.git/info/exclude`, keeping
+private identifiers out of the shared `.gitignore`. Sync refuses exposed or
+already tracked private outputs before staging them. Ignore rules never untrack
+files; resolve an already tracked private file through a separate reviewed Git
+change.
+
+Migration uses a payload-free temporary Git repository and verifies original
+rule parity before evaluating all proposed rules together. Preserved suffix
+negations, child `.gitignore` files and global excludes retain native precedence.
+Checks batch working and index-only paths in a constant number of Git probes.
+Unknown files that would lose protection refuse migration. Review each such file
+before explicitly publishing it; tracked non-generated authored files remain
+untouched. Generated paths still require matching shared synthesis evidence.
+Ambiguous paths, symlink parents and incomplete rule evidence refuse before writes.
+Protection is checked at operation time; later external rule changes invalidate it.
+Existing ignore files use Linux/macOS atomic exchange or Windows backed
+replacement, retaining the displaced live file. Other source platforms use
+capture followed by no-clobber publication, with a possible missing-path
+interval. Recovery copies preserve edits; Windows directory metadata is not
+guaranteed durable across power loss.
+`--untrack-generated` is refused until exclusive ownership can be proven.
+Changed ignore files retain a reported recovery copy under the private,
+Git-ignored `.metactl/ignore-recovery/` directory. Review these copies before
+removing them. A concurrent edit may make the command fail while preserving
+both versions for manual reconciliation.
 
 </details>
 
@@ -700,7 +742,7 @@ Use the smallest focused gate for a local edit, then broaden to `make verify` be
 
 ## Project Status
 
-Current source crate version: `0.1.23` for both `metactl` and `metactld`.
+Current source crate version: `0.1.27` for both `metactl` and `metactld`.
 Check the crates.io badges above for the versions available to install.
 
 `metactl` is ready for local CLI workflows, sentinel-guarded demo sandboxes, Codex CLI and Claude Code targets, conformance-covered packaging, and local automation through JSON/JSON-RPC/MCP. Some target adapters and Fleet Sync workflows are intentionally marked preview until their support matrix entries are promoted.
