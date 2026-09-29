@@ -1,16 +1,16 @@
 # Release Readiness
 
-Release candidate: **0.1.26**, prepared September 28, 2026. Distribution unit:
+Release candidate: **0.1.27**, prepared September 28, 2026. Distribution unit:
 GitHub native binary archives. Crate packaging and dry-run checks remain gates;
 registry publication is a separate, explicitly verified action. npm remains an
 unpublished scaffold; no new registry distribution is included.
 
-This release repairs ignore migration and preserves protected private skills,
-resources, hooks and runtime configuration. Native Git evaluates proposed rules
-before private publication; current synthesis evidence distinguishes shared
-outputs from private or unknown content. Recovery retains displaced files on
-macOS, Linux and Windows. See [private projection protection](user/private-projection-protection.md)
-and the [changelog](../CHANGELOG.md).
+This release repairs the local shortlist used before optional Jev reranking.
+Explicitly named eligible skills survive contextual task text, meaningful terms
+outweigh connective words, and ordinary single-word task mentions keep the
+provider path available. Eligibility, digest-validated loading, deterministic
+fallback and private event logging remain unchanged. See
+[skill discovery](user/skill-discovery.md) and the [changelog](../CHANGELOG.md).
 
 ## Evidence and claims
 
@@ -45,11 +45,11 @@ an isolated home and no provider credentials. See [install verification](user/in
 ## Publication order and recovery
 
 1. Push candidate and require green exact-head CI; merge through normal PR flow.
-2. Verify merged main, then push an annotated v0.1.26 tag. Never move a published tag.
+2. Verify merged main, then push an annotated v0.1.27 tag. Never move a published tag.
 3. Verify workflow and draft assets before public release.
 
 If crate publication is separately included in the release scope, publish
-metactl only after its dry-run passes, wait for metactl 0.1.26 to be visible,
+metactl only after its dry-run passes, wait for metactl 0.1.27 to be visible,
 then dry-run and publish metactld. Verify both registry versions independently;
 the GitHub release does not imply registry publication.
 
