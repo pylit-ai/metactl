@@ -21,6 +21,7 @@ import uuid
 
 
 SCHEMA = "metactl.discovery_trial.v1"
+SUPPORTED_EVENT_SCHEMAS = {SCHEMA, "metactl.discovery_trial.v2"}
 MAX_LOG_BYTES = 8 * 1024 * 1024
 MAX_EVENT_BYTES = 16 * 1024
 MAX_REPORT_BYTES = 2 * 1024 * 1024
@@ -31,7 +32,8 @@ REASONS = frozenset({"baseline", "disabled", "data_not_authorized", "missing_cre
                      "budget_exhausted", "unambiguous", "payload_budget",
                      "abstained", "reordered", "unchanged", "deadline",
                      "provider_or_schema_failure", "preferences_unavailable", "session_disabled",
-                     "user_disabled", "project_not_enrolled", "project_disabled"})
+                     "user_disabled", "project_not_enrolled", "project_disabled",
+                     "candidate_metadata_not_authorized", "user_catalog_requires_preferences"})
 RUNTIMES = frozenset({"claude-code", "codex-cli", "cursor", "filesystem-agent",
                       "gemini-cli", "openclaw", "opencode",
                       "codex", "omnigent", "pi", "other", "contract"})
@@ -77,9 +79,21 @@ def validate_event(event):
     kind = event.get("kind")
     fields = {"discover": DISCOVER, "load": LOAD, "outcome": OUTCOME,
               "discovery_error": DISCOVERY_ERROR}.get(kind)
-    if fields is None or event.get("schema") != SCHEMA:
+    if fields is None or event.get("schema") not in SUPPORTED_EVENT_SCHEMAS:
         raise ValueError("unsupported trial schema or kind")
-    allowed = COMMON | fields
+    catalog_fields = {"catalog_origin", "context_identity", "effective_target"}
+    if event.get("schema") == "metactl.discovery_trial.v2" and not catalog_fields.issubset(event):
+        raise ValueError("v2 requires catalog context")
+    if event.get("schema") == SCHEMA and any(k in event for k in catalog_fields):
+        raise ValueError("catalog context requires v2")
+    allowed = COMMON | fields | catalog_fields
+    if any(k in event for k in catalog_fields):
+        if event.get("catalog_origin") not in ("project", "user"):
+            raise ValueError("invalid catalog origin")
+        _hex(event.get("context_identity"), HEX64, "context_identity")
+        if (not isinstance(event.get("effective_target"), str) or
+                not re.fullmatch(r"[a-z][a-z0-9-]{0,79}", event["effective_target"])):
+            raise ValueError("invalid effective target")
     extra = event.keys() - allowed
     missing = (COMMON | (fields - {"decision_id"} if kind == "discover" else
                          fields - {"task_ms", "input_tokens", "output_tokens",
@@ -128,7 +142,8 @@ def validate_event(event):
     elif kind == "discovery_error":
         _number(event["elapsed_ms"], "elapsed_ms")
         if (not isinstance(event["reason"], str)
-                or event["reason"] not in {"project_config_missing", "project_discovery_failed"}):
+                or event["reason"] not in {"project_config_missing", "project_discovery_failed", "catalog_context_changed",
+                    "user_catalog_invalid", "user_catalog_conflict", "user_catalog_target_required", "user_catalog_target_mismatch"}):
             raise ValueError("unrecognized discovery error")
         for key in ("provider_attempts", "provider_calls"):
             if type(event[key]) is not int or event[key] != 0:

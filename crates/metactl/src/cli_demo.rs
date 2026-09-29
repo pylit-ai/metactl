@@ -49,6 +49,8 @@ fn cmd_demo_create(
     write_demo_manifest(&demo_root, &demo_name, &args.target).map_err(internal_error)?;
 
     let demo_cli = Cli {
+        catalog_mode: "project".into(),
+        discovery_target: None,
         json: cli.json,
         no_input: cli.no_input,
         agent: cli.agent,
