@@ -273,6 +273,26 @@ class PreferenceRanker(Ranker):
         return result, metric
 
 
+class DiscoveryCliError(ValueError):
+    """Safe, fixed diagnostics; never forward CLI output or project content."""
+    def __init__(self, reason="project_discovery_failed"):
+        self.reason = reason
+        super().__init__(reason)
+
+    def diagnostic(self):
+        missing = self.reason == "project_config_missing"
+        return {
+            "error": ("The selected MetaCTL project configuration does not exist."
+                      if missing else "MetaCTL could not read the project skill catalog."),
+            "reason": self.reason,
+            "next": ("Use local skills for this task. If --config was supplied, correct that path. "
+                     "Otherwise run metactl init --detect here to configure this folder, "
+                     "or supply --config PATH for an existing config. "
+                     "Project setup does not enroll the folder for Jev."
+                     if missing else "Run metactl skills catalog in this folder for local diagnostics."),
+        }
+
+
 class Host:
     def __init__(self, binary, project, ranker=None, excluded=(), runner=None, cli_args=(),
                  event_log=None, session_id=None, runtime="other"):
@@ -316,7 +336,17 @@ class Host:
         completed = subprocess.run([self.binary, "--project", self.project, "--json", "--full", "--no-input",
                                     *self.cli_args, "skills", *args], input=private_input, capture_output=True, text=True, timeout=15)
         if completed.returncode:
-            raise ValueError("project discovery failed; inspect the CLI locally")
+            # Recognize only the CLI's missing-config diagnostic. Do not expose
+            # arbitrary stdout/stderr, which may contain private configuration.
+            reason = "project_discovery_failed"
+            try:
+                message = json.loads(completed.stdout).get("message", "")
+                if (isinstance(message, str) and message.startswith("Project config ")
+                        and message.endswith(" does not exist.")):
+                    reason = "project_config_missing"
+            except (ValueError, AttributeError):
+                pass
+            raise DiscoveryCliError(reason)
         result = json.loads(completed.stdout)
         return result["result"]
 
@@ -330,7 +360,18 @@ class Host:
             command = ["discover", "--limit", "5", "--query-stdin"]
             for excluded in sorted(self.excluded):
                 command.extend(["--exclude", excluded])
-            baseline = self.runner(command, args["query"])
+            try:
+                baseline = self.runner(command, args["query"])
+            except DiscoveryCliError as error:
+                # This branch runs before ranking. No provider attempt occurred.
+                metric = {"operation": "discover", "reason": error.reason,
+                          "elapsed_ms": (time.monotonic() - start) * 1000,
+                          "provider_attempts": 0, "provider_calls": 0}
+                self.record("discovery_error", metric)
+                receipt = (f"Skill discovery: status=error; reason={error.reason}; "
+                           f"provider_calls=0; log={metric['telemetry_status']}; "
+                           f"event={metric['event_id']}")
+                return {**error.diagnostic(), "metrics": metric, "routing_receipt": receipt}
             result, metric = self.ranker.rank(args["query"], baseline)
             metric.update(operation="discover", elapsed_ms=(time.monotonic() - start) * 1000,
                           result_count=len(result["skills"]),
@@ -393,9 +434,11 @@ class Host:
                 params = request["params"]
                 value = self.call(params["name"], params.get("arguments", {}))
                 response["result"] = {"content": [{"type": "text", "text": compact(value)}],
-                                      "isError": False}
+                                      "isError": "error" in value}
             else:
                 response["error"] = {"code": -32601, "message": "method not found"}
+        except DiscoveryCliError as error:
+            response["result"] = {"content": [{"type": "text", "text": compact(error.diagnostic())}], "isError": True}
         except Exception:
             response["result"] = {"content": [{"type": "text", "text": "Discovery/load rejected; inspect local configuration and rerun discovery."}], "isError": True}
         return response
@@ -511,6 +554,10 @@ def main():
             report.update(project=host.project, eligible_skills=len(eligible),
                           catalog_digest=catalog["catalog_digest"], project_ready=True,
                           event_log=args.event_log)
+        except DiscoveryCliError as error:
+            print(compact({"project_ready": False, "provider_verified": False,
+                           "provider_calls_this_check": 0, **error.diagnostic()}))
+            sys.exit(1)
         except Exception:
             print(compact({"project_ready": False, "provider_verified": False,
                            "reason": "project_discovery_failed", "next": "Run skills catalog locally."}))
@@ -528,7 +575,13 @@ def main():
             raw = sys.stdin.buffer.read(MAX_LINE + 1)
             if len(raw) > MAX_LINE:
                 raise ValueError("input too large")
-            print(compact(host.call(args.call_tool, json.loads(raw))), flush=True)
+            value = host.call(args.call_tool, json.loads(raw))
+            print(compact(value), flush=True)
+            if "error" in value:
+                sys.exit(1)
+        except DiscoveryCliError as error:
+            print(compact(error.diagnostic()))
+            sys.exit(1)
         except Exception:
             print(compact({"error": "Discovery/load rejected; inspect local configuration."}))
             sys.exit(1)

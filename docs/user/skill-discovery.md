@@ -66,6 +66,32 @@ task text or skill bodies. Local logging is separate from provider retention.
 Enabled does not prove a coding agent invoked discovery: ask it to show its
 receipt. Default-on uses Jev when useful; unambiguous requests remain local.
 
+## How skills are selected
+
+Single-word names or aliases inside prose remain topical matches unless marked
+with `$name` or backticks. For example, "Review tests for a repair" can still use
+Jev; "Use `$review`" explicitly selects that skill. A query consisting only of
+the exact skill name or ID also remains an explicit local selection.
+
+Discovery first filters the catalog for project policy and supported instruction
+semantics. It then ranks eligible skills locally. Whole skill names and aliases
+inside task prose take priority; longer matching labels win over shorter ones.
+Direct named exclusions such as `do not use NAME` are respected. Other queries
+use distinct meaningful words, ignoring common connecting words such as `and`
+and `for`. Repeated aliases/intents do not accumulate extra field weight. A
+negative intent penalizes a match only when all its meaningful words are present.
+This remains lexical retrieval, not general natural-language understanding.
+
+The host sends at most five local candidates to Jev, which can move one to the
+front or abstain. It cannot recover a skill absent from that shortlist. Explicit
+name/alias matches stay local. `score` is a local ranking value, not a probability
+or Jev confidence; scores may change as retrieval improves. `excluded` counts
+catalog eligibility/validation rejections, not results omitted by the limit.
+
+Agents should load a relevant result using its returned ID and digest before
+following its full instructions. A discovery receipt proves the lookup; a load
+event proves delivery of instructions. Neither alone proves task benefit.
+
 ## Check status and limits
 
 These checks make no provider request. Use the same absolute project path and
@@ -490,6 +516,30 @@ for the host to read under its existing permissions; arbitrary undeclared extern
 references are not thereby admitted or verified.
 
 ## Metrics and reproducible offline checks
+
+### A globally connected agent reports missing project configuration
+
+A user-wide MCP registration makes discovery available in every workspace. It
+does not create a MetaCTL catalog in every folder. When the selected project has
+no `metactl.yaml`, discovery reports `project_config_missing` with a routing
+receipt showing zero provider calls. This is a local setup failure, not a Jev
+rejection or exhausted provider budget. Continue with local skills, configure the
+folder with `metactl init --detect`, or supply `--config PATH` for an existing
+configuration. Project setup alone does not enroll a project for Jev.
+
+Other catalog failures report `project_discovery_failed`; run
+`metactl skills catalog` in the affected folder for local diagnostics. Raw CLI
+errors are deliberately kept out of agent responses and discovery logs because
+they may include private configuration content.
+
+When logging is enabled, these pre-provider failures are recorded as
+`discovery_error` events. Reports count them separately from successful
+discoveries; no query, project path, or catalog contents are stored in those
+events. Sessions containing only setup errors are excluded from task-outcome
+coverage. Status checks remain unlogged, and a failed log write is shown
+explicitly in the receipt. Older trial readers that do not recognize
+`discovery_error` reject these logs; use the trial reader bundled with the host
+version that wrote them or a newer version.
 
 ```sh
 cargo build -p metactl
