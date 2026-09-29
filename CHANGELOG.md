@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.1.28 - 2026-09-29
+
+### Added
+
+- Opt-in persistent user catalogs for explicitly connected folders without a
+  project configuration, with declared local library sources and private storage.
+- Preview, replace and persistent disable/enable controls with explicit metadata
+  classification; catalog setup grants no provider access or workspace enrollment.
+- Distinguish validated advisory recommendations and abstention from ranked
+  fallback candidates; shadow mode exposes baseline behavior only.
+
+### Changed
+
+- Revalidate catalog context and package digests while preserving configured
+  project precedence and refusing malformed or changed catalog configuration.
+- Read mixed v1/v2 private discovery ledgers without recording task queries,
+  skill bodies or workspace paths.
+
+### Evidence limits
+
+- Native acceptance across unrelated folders, automatic launch-directory
+  discovery and lower coding cost remain unverified. User-scope Codex connections
+  retain an explicitly fixed workspace root.
+
 ## 0.1.27 - 2026-09-28
 
 ### Fixed
