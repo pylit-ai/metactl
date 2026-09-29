@@ -45,6 +45,8 @@ DISCOVER = {"elapsed_ms", "rank_ms", "result_bytes", "result_count",
             "catalog_digest", "baseline_ids", "effective_ids", "proposed_ids",
             "reason", "provider_attempts", "provider_calls", "usage", "model",
             "native_catalog_suppressed", "cost_usd", "decision_id"}
+POOL = {"candidate_ids", "candidate_count", "candidate_limit", "result_limit",
+        "retrieved_count", "submitted_candidate_count", "payload_bytes", "payload_limit"}
 LOAD = {"elapsed_ms", "result_bytes", "repeat_load", "skill_id"}
 DISCOVERY_ERROR = {"elapsed_ms", "reason", "provider_attempts", "provider_calls"}
 OUTCOME = {"success", "task_ms", "input_tokens", "output_tokens", "cost_usd",
@@ -86,7 +88,7 @@ def validate_event(event):
         raise ValueError("v2 requires catalog context")
     if event.get("schema") == SCHEMA and any(k in event for k in catalog_fields):
         raise ValueError("catalog context requires v2")
-    allowed = COMMON | fields | catalog_fields
+    allowed = COMMON | fields | catalog_fields | (POOL if kind == "discover" else set())
     if any(k in event for k in catalog_fields):
         if event.get("catalog_origin") not in ("project", "user"):
             raise ValueError("invalid catalog origin")
@@ -137,6 +139,34 @@ def validate_event(event):
             raise ValueError("model must be a bounded model identifier")
         if event["native_catalog_suppressed"] is not False or event["cost_usd"] is not None:
             raise ValueError("native suppression and cost are unproven in discover events")
+        if event.keys() & POOL:
+            if not POOL.issubset(event):
+                raise ValueError("candidate coverage requires complete bounded pool fields")
+            ids = event["candidate_ids"]
+            if (not isinstance(ids, list) or len(ids) > 20 or
+                    len(ids) != len(set(map(str, ids)))):
+                raise ValueError("candidate_ids must be a bounded unique list")
+            for item in ids:
+                _hex(item, HEX64, "candidate_ids")
+            for key in ("candidate_count", "candidate_limit", "result_limit", "retrieved_count", "submitted_candidate_count", "payload_limit"):
+                _number(event[key], key, integer=True)
+            if (not 5 <= event["candidate_limit"] <= 20 or event["result_limit"] != 5 or
+                    event["candidate_count"] != len(ids) or len(ids) > event["candidate_limit"]):
+                raise ValueError("invalid candidate coverage bounds")
+            _number(event["payload_bytes"], "payload_bytes", integer=True, nullable=True)
+            if (not event["candidate_count"] <= event["retrieved_count"] <= event["candidate_limit"] or
+                    event["payload_limit"] not in (15000, 24000) or
+                    event["submitted_candidate_count"] != (len(ids) if event["provider_attempts"] else 0) or
+                    (event["provider_attempts"] and (event["payload_bytes"] is None or
+                     event["payload_bytes"] > event["payload_limit"]))):
+                raise ValueError("invalid retrieval/submission or payload coverage")
+            for key in ("baseline_ids", "effective_ids", "proposed_ids"):
+                if not set(event[key]).issubset(ids):
+                    raise ValueError("proposal and result IDs must belong to the candidate pool")
+            if (len(event["baseline_ids"]) > event["result_limit"] or
+                    len(event["effective_ids"]) != event["result_count"] or
+                    event["result_count"] > event["result_limit"]):
+                raise ValueError("result exceeds shortlist bounds")
         if "decision_id" in event:
             _hex(event["decision_id"], UUIDHEX, "decision_id")
     elif kind == "discovery_error":
@@ -307,6 +337,7 @@ def summarize(events, runtime=None, arm=None):
         # from task-outcome coverage, while keeping the error count visible.
         sessions = {e["session_id"] for e in rows if e["kind"] != "discovery_error"}
         outcome_sessions = {e["session_id"] for e in outcomes}
+        known_pools = [e for e in discovers if "candidate_count" in e]
         known_usage = [e["usage"] for e in discovers if e["usage"] is not None]
         known_calls = [e["provider_calls"] for e in discovers if e["provider_calls"] is not None]
         known_cost = [e["cost_usd"] for e in outcomes if e.get("cost_usd") is not None]
@@ -328,7 +359,14 @@ def summarize(events, runtime=None, arm=None):
                             "user_disabled", "project_disabled", "session_disabled", "project_not_enrolled", "data_not_authorized"} for e in discovers),
             "skipped": sum(e["reason"] in {"disabled", "unambiguous", "user_disabled", "project_disabled",
                            "session_disabled", "project_not_enrolled", "data_not_authorized"} for e in discovers),
-            "reordered": sum(e["reason"] == "reordered" and e["proposed_ids"] != e["baseline_ids"] for e in discovers),
+            "reordered": sum(e["reason"] == "reordered" and e["proposed_ids"][:len(e["baseline_ids"])] != e["baseline_ids"] for e in discovers),
+            "candidate_coverage_known": len(known_pools),
+            "candidate_count_reported": sum(e["candidate_count"] for e in known_pools) if known_pools else None,
+            "retrieved_count_reported": sum(e["retrieved_count"] for e in known_pools) if known_pools else None,
+            "submitted_candidate_count_reported": sum(e["submitted_candidate_count"] for e in known_pools) if known_pools else None,
+            "outside_shortlist_choices": sum(e["reason"] in {"reordered", "unchanged"}
+                and bool(e["proposed_ids"]) and e["proposed_ids"][0] not in e["baseline_ids"]
+                for e in known_pools) if known_pools else None,
             "abstained": sum(e["reason"] == "abstained" for e in discovers),
             "provider_attempts": sum(e["provider_attempts"] for e in discovers),
             "provider_calls_observed": sum(known_calls),
@@ -392,7 +430,7 @@ def render_html(report):
                      for r in cohorts])
     provider = table("Provider and returned data", ["Runtime", "Arm", "Fallback / reorder / abstain",
                                                     "Attempts", "Validated calls", "Uncertain attempts",
-                                                    "Usage coverage", "Input / output tokens"],
+                                                    "Usage coverage", "Input / output tokens", "Candidate pool coverage", "Choices outside shortlist"],
                      [[esc(r["runtime"]), esc(r["arm"]),
                        esc(f"{r['fallback']} / {r['reordered']} / {r['abstained']}"),
                        esc(r["provider_attempts"]),
@@ -401,7 +439,9 @@ def render_html(report):
                        esc(r["uncertain_provider_attempts"]),
                        esc(f"{r['usage_known']}/{r['discoveries']} discoveries"),
                        (f"{esc(r['input_tokens_reported'])} / {esc(r['output_tokens_reported'])}"
-                        if r["usage_known"] else "unknown")]
+                        if r["usage_known"] else "unknown"),
+                       coverage(r["candidate_count_reported"], r["candidate_coverage_known"], r["discoveries"]),
+                       esc(r["outside_shortlist_choices"])]
                       for r in cohorts])
     outcomes = table("Task outcomes and cost", ["Runtime", "Arm", "Pass / fail / unknown",
                                                 "Outcome coverage", "Task p50 / p95 ms",

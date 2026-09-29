@@ -57,6 +57,8 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             .arg(project_root(cli)?)
             .arg("--ranker")
             .arg(&args.ranker)
+            .arg("--candidate-limit")
+            .arg(args.candidate_limit.to_string())
             .arg("--max-provider-calls")
             .arg(args.max_provider_calls.to_string())
             .arg("--provider-deadline")
