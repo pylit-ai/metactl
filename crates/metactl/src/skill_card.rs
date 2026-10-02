@@ -64,7 +64,18 @@ fn validate_v2(object: &serde_json::Map<String, Value>) -> Result<SkillCardDecis
     }
     let provenance = required_object(object, "provenance")?;
     let source_kind = required_string(provenance, "source_kind")?;
-    if !["first_party", "vendored", "imported", "local"].contains(&source_kind) {
+    if ![
+        "first_party",
+        "vendored",
+        "imported",
+        "local",
+        "first_party_adaptation",
+        "first_party_reviewed_adaptation",
+        "third_party_adaptation",
+        "user_provided_research_adaptation",
+    ]
+    .contains(&source_kind)
+    {
         return Err(anyhow!("invalid provenance.source_kind"));
     }
     required_string(provenance, "reviewed_by")?;
