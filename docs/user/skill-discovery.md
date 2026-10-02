@@ -82,11 +82,19 @@ and `for`. Repeated aliases/intents do not accumulate extra field weight. A
 negative intent penalizes a match only when all its meaningful words are present.
 This remains lexical retrieval, not general natural-language understanding.
 
-The host sends at most five local candidates to Jev, which can move one to the
-front or abstain. It cannot recover a skill absent from that shortlist. Explicit
-name/alias matches stay local. `score` is a local ranking value, not a probability
-or Jev confidence; scores may change as retrieval improves. `excluded` counts
-catalog eligibility/validation rejections, not results omitted by the limit.
+The host retrieves up to twenty eligible local candidates for Jev while returning
+at most five to the agent. A validated choice can promote a candidate from outside
+the original five; the remaining returned candidates retain their local order.
+`--candidate-limit 5..20` bounds this provider pool; `5` restores the original
+shortlist. The packaged host also accepts `METACTL_DISCOVERY_CANDIDATE_LIMIT`.
+The existing payload, consent, call and deadline bounds still apply. The host
+trims the lowest-ranked tail until the actual encoded payload fits, preserving
+full descriptions and the original five. If even five exceed the wire budget,
+it makes no provider attempt and returns those original five.
+Abstention, failure, deterministic mode and shadow mode also retain those five.
+Explicit name/alias matches stay local. `score` is a local ranking value, not a
+probability or Jev confidence; scores may change as retrieval improves. `excluded`
+counts catalog eligibility/validation rejections, not results omitted by the limit.
 
 Agents should load a relevant result using its returned ID and digest before
 following its full instructions. A discovery receipt proves the lookup; a load
@@ -457,9 +465,10 @@ positive call budget it uses the deterministic baseline. Budget is per process;
 it includes failed attempts but is not a cross-process monetary quota.
 
 The host uses the documented [TypeSafe API](https://docs.typesafe.ai/api), pinned
-to `jev-1.13.0`. One call may move a candidate to the first position; it cannot add,
-drop, activate or authorize a skill. None, failure, invalid schema, missing key,
-exhausted budget or deadline returns the original ordering. No retries or login
+to `jev-1.13.0`. One call may promote a candidate from the bounded eligible pool
+into the returned five. It cannot activate or authorize a skill or bypass catalog
+eligibility and fresh digest checks. None, failure, invalid schema, missing key,
+exhausted budget or deadline returns the original five in their local ordering. No retries or login
 prompts. Clear exact matches and fewer than two candidates do not call Jev. The
 default deadline is 1.5 seconds for the provider subprocess, in addition to local
 discovery time. A configured model/API change needs contract verification.

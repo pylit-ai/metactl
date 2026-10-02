@@ -990,6 +990,9 @@ struct SkillsHostArgs {
     ranker: String,
     #[arg(long, env = "METACTL_JEV_ALLOW_DATA")]
     allow_provider_data: bool,
+    /// Eligible provider pool bound; 5 restores the original shortlist
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u8).range(5..=20), env = "METACTL_DISCOVERY_CANDIDATE_LIMIT")]
+    candidate_limit: u8,
     /// Per-process request ceiling, including failures; not a dollar quota
     #[arg(long, default_value_t = 0, env = "METACTL_JEV_MAX_CALLS")]
     max_provider_calls: u32,
