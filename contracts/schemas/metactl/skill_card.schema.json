@@ -63,7 +63,7 @@
         "provenance": {
           "type": "object",
           "properties": {
-            "source_kind": {"enum": ["first_party", "vendored", "imported", "local"]},
+            "source_kind": {"enum": ["first_party", "vendored", "imported", "local", "first_party_adaptation", "first_party_reviewed_adaptation", "third_party_adaptation", "user_provided_research_adaptation"]},
             "reviewed_by": {"$ref": "#/$defs/nonEmptyString"},
             "reviewed_at": {"$ref": "#/$defs/nonEmptyString"}
           },
