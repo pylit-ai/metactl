@@ -17,7 +17,10 @@ agent's underlying model.
 
 Every discovery response includes a `routing_receipt`, for example:
 `Skill discovery: mode=shadow; reason=shadow; provider_calls=1; order_changed=False; log=recorded; event=<opaque ID>`.
-In shadow mode the response omits proposed IDs and masks successful choice or
+Full candidate and proposal IDs are retained only in the private ledger. Public
+metrics expose numeric pool counts, bounds and payload bytes;
+advisory proposal IDs are limited to the returned five. In shadow mode the
+response omits proposed IDs and masks successful choice or
 abstention reasons as `shadow`, so the coding agent cannot follow the hidden
 proposal. Failure and no-call reasons remain visible. The private ledger
 retains the proposal and original reason for later analysis.
@@ -130,14 +133,29 @@ verifier.
 
 ## What the report measures
 
-The report groups runtime and arm. It shows sessions, discovery/load/outcome
+The report groups runtime and arm. New discoveries record the considered
+pool after any wire-budget tail trimming as `candidate_ids` and `candidate_count`,
+bounded by `candidate_limit` (maximum twenty). `retrieved_count` records the
+broader lexical retrieval; `submitted_candidate_count` is zero without an attempt
+and otherwise counts the pool actually dispatched. Exact `payload_bytes` and
+`payload_limit` record wire-budget coverage; bytes are unknown when no payload
+was constructed. A five-candidate payload can still be rejected without dispatch. `baseline_ids` and `effective_ids` remain limited to five;
+`proposed_ids` preserves the complete proposed pool before truncation. These IDs
+are opaque and must belong to that same eligible pool. Candidate coverage and
+choices outside the original shortlist are descriptive counts, including hidden
+shadow proposals. Earlier v1/v2 events without pool fields have unknown coverage;
+the current reader accepts them alongside new events. Upgrade strict older
+readers before inspecting events with these optional fields.
+
+The report shows sessions, discovery/load/outcome
 counts, fallback/reorder/abstain counts, provider attempts and observed calls,
 known usage coverage, p50/p95 measured latency, returned bytes, repeated loads,
 task completion labels, task duration and cost coverage. Unknown provider calls
 and missing outcome/usage/cost data stay explicit. Provider attempts may have
 incurred charges when validated usage is unavailable.
 
-The reorder count requires a changed proposed ID order. In shadow mode this is
+The reorder count compares the proposal prefix with the original shortlist,
+so a longer proposal alone is not counted as a reorder. In shadow mode this is
 only a proposal; in advisory mode it is the applied order. A valid Jev choice
 that was already first is recorded as `unchanged`, not as a reorder or fallback.
 The report also checks ID order when reading older events whose reason was

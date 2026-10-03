@@ -5,6 +5,7 @@ pub(super) fn cmd_skills(
     args: &SkillsArgs,
 ) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
+        SkillsCommand::Setup(setup_args) => discovery_catalog::setup(cli, setup_args),
         SkillsCommand::Add(add_args) => cmd_skills_add(cli, add_args),
         SkillsCommand::List(list_args) => cmd_skills_list(cli, list_args),
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
@@ -56,6 +57,8 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             .arg(project_root(cli)?)
             .arg("--ranker")
             .arg(&args.ranker)
+            .arg("--candidate-limit")
+            .arg(args.candidate_limit.to_string())
             .arg("--max-provider-calls")
             .arg(args.max_provider_calls.to_string())
             .arg("--provider-deadline")
@@ -68,6 +71,10 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             .arg(&args.trial_mode)
             .arg("--runtime")
             .arg(&args.runtime);
+        command.arg("--catalog-mode").arg(&cli.catalog_mode);
+        if let Some(target) = args.target.as_ref().or(cli.discovery_target.as_ref()) {
+            command.arg("--target").arg(target);
+        }
         for (value, flag) in [
             (&args.gateway_project, "--gateway-project"),
             (&args.gateway_data_class, "--gateway-data-class"),
@@ -228,18 +235,14 @@ pub(super) fn cmd_skill_discovery(
     command: &SkillsCommand,
 ) -> std::result::Result<CommandOutput, CliError> {
     let root = project_root(cli).map_err(internal_error)?;
-    let context = load_required_context(cli, &root)?;
-    let config = context
-        .effective_config(&ConfigOverrides::default())
-        .map_err(state_error)?;
-    let registry = context
-        .registry
-        .as_ref()
-        .ok_or_else(|| CliError::new(EXIT_STATE, "No configured library"))?;
-    let value = match command {
+    let resolved = discovery_catalog::resolve(cli, &root)?;
+    let registry = &resolved.registry;
+    let config = resolved.config;
+    let overlay = resolved.overlay;
+    let mut value = match command {
         SkillsCommand::Catalog => serde_json::to_value(
             registry
-                .skill_catalog(&config, context.overlay.as_ref())
+                .skill_catalog(&config, overlay.as_ref())
                 .map_err(state_error)?,
         ),
         SkillsCommand::Discover(args) => {
@@ -255,25 +258,62 @@ pub(super) fn cmd_skill_discovery(
                 registry
                     .discover_skills(
                         &config,
-                        context.overlay.as_ref(),
+                        overlay.as_ref(),
                         &query,
                         args.limit,
-                        &args.excluded.iter().cloned().collect(),
+                        &args
+                            .excluded
+                            .iter()
+                            .chain(resolved.exclusions.iter())
+                            .cloned()
+                            .collect(),
                     )
                     .map_err(state_error)?,
             )
         }
         SkillsCommand::Load(args) => serde_json::to_value(
             registry
-                .load_discovered_skill(&config, context.overlay.as_ref(), &args.id, &args.digest)
+                .load_discovered_skill(&config, overlay.as_ref(), &args.id, &args.digest)
                 .map_err(state_error)?,
         ),
         _ => unreachable!(),
     }
     .map_err(internal_error)?;
+    if let Some(skills) = value.get_mut("skills").and_then(Value::as_array_mut) {
+        skills.retain(|skill| {
+            !resolved.exclusions.iter().any(|id| {
+                skill.get("id").and_then(Value::as_str) == Some(id.as_str())
+                    || skill.get("name").and_then(Value::as_str) == Some(id.as_str())
+            })
+        });
+    }
+    if matches!(command, SkillsCommand::Load(_))
+        && resolved.exclusions.iter().any(|id| {
+            value.get("id").and_then(Value::as_str) == Some(id.as_str())
+                || resolved
+                    .registry
+                    .skill_catalog(&config, overlay.as_ref())
+                    .ok()
+                    .is_some_and(|catalog| {
+                        catalog
+                            .skills
+                            .iter()
+                            .any(|s| s.id == value["id"].as_str().unwrap_or("") && s.name == *id)
+                    })
+        })
+    {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "User catalog excludes this skill.",
+        ));
+    }
     Ok(CommandOutput {
         human: serde_json::to_string_pretty(&value).map_err(internal_error)?,
-        json: success_json("skills", Some(&root), json!({"result":value})),
+        json: success_json(
+            "skills",
+            Some(&root),
+            json!({"result":value, "discovery_context":resolved.context}),
+        ),
     })
 }
 

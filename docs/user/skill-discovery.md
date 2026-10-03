@@ -66,6 +66,40 @@ task text or skill bodies. Local logging is separate from provider retention.
 Enabled does not prove a coding agent invoked discovery: ask it to show its
 receipt. Default-on uses Jev when useful; unambiguous requests remain local.
 
+## How skills are selected
+
+Single-word names or aliases inside prose remain topical matches unless marked
+with `$name` or backticks. For example, "Review tests for a repair" can still use
+Jev; "Use `$review`" explicitly selects that skill. A query consisting only of
+the exact skill name or ID also remains an explicit local selection.
+
+Discovery first filters the catalog for project policy and supported instruction
+semantics. It then ranks eligible skills locally. Whole skill names and aliases
+inside task prose take priority; longer matching labels win over shorter ones.
+Direct named exclusions such as `do not use NAME` are respected. Other queries
+use distinct meaningful words, ignoring common connecting words such as `and`
+and `for`. Repeated aliases/intents do not accumulate extra field weight. A
+negative intent penalizes a match only when all its meaningful words are present.
+This remains lexical retrieval, not general natural-language understanding.
+
+The host retrieves up to twenty eligible local candidates for Jev while returning
+at most five to the agent. A validated choice can promote a candidate from outside
+the original five; the remaining returned candidates retain their local order.
+`--candidate-limit 5..20` bounds this provider pool; `5` restores the original
+shortlist. The packaged host also accepts `METACTL_DISCOVERY_CANDIDATE_LIMIT`.
+The existing payload, consent, call and deadline bounds still apply. The host
+trims the lowest-ranked tail until the actual encoded payload fits, preserving
+full descriptions and the original five. If even five exceed the wire budget,
+it makes no provider attempt and returns those original five.
+Abstention, failure, deterministic mode and shadow mode also retain those five.
+Explicit name/alias matches stay local. `score` is a local ranking value, not a
+probability or Jev confidence; scores may change as retrieval improves. `excluded`
+counts catalog eligibility/validation rejections, not results omitted by the limit.
+
+Agents should load a relevant result using its returned ID and digest before
+following its full instructions. A discovery receipt proves the lookup; a load
+event proves delivery of instructions. Neither alone proves task benefit.
+
 ## Check status and limits
 
 These checks make no provider request. Use the same absolute project path and
@@ -431,9 +465,10 @@ positive call budget it uses the deterministic baseline. Budget is per process;
 it includes failed attempts but is not a cross-process monetary quota.
 
 The host uses the documented [TypeSafe API](https://docs.typesafe.ai/api), pinned
-to `jev-1.13.0`. One call may move a candidate to the first position; it cannot add,
-drop, activate or authorize a skill. None, failure, invalid schema, missing key,
-exhausted budget or deadline returns the original ordering. No retries or login
+to `jev-1.13.0`. One call may promote a candidate from the bounded eligible pool
+into the returned five. It cannot activate or authorize a skill or bypass catalog
+eligibility and fresh digest checks. None, failure, invalid schema, missing key,
+exhausted budget or deadline returns the original five in their local ordering. No retries or login
 prompts. Clear exact matches and fewer than two candidates do not call Jev. The
 default deadline is 1.5 seconds for the provider subprocess, in addition to local
 discovery time. A configured model/API change needs contract verification.
@@ -491,6 +526,30 @@ references are not thereby admitted or verified.
 
 ## Metrics and reproducible offline checks
 
+### A globally connected agent reports missing project configuration
+
+A user-wide MCP registration makes discovery available in every workspace. It
+does not create a MetaCTL catalog in every folder. When the selected project has
+no `metactl.yaml`, discovery reports `project_config_missing` with a routing
+receipt showing zero provider calls. This is a local setup failure, not a Jev
+rejection or exhausted provider budget. Continue with local skills, configure the
+folder with `metactl init --detect`, or supply `--config PATH` for an existing
+configuration. Project setup alone does not enroll a project for Jev.
+
+Other catalog failures report `project_discovery_failed`; run
+`metactl skills catalog` in the affected folder for local diagnostics. Raw CLI
+errors are deliberately kept out of agent responses and discovery logs because
+they may include private configuration content.
+
+When logging is enabled, these pre-provider failures are recorded as
+`discovery_error` events. Reports count them separately from successful
+discoveries; no query, project path, or catalog contents are stored in those
+events. Sessions containing only setup errors are excluded from task-outcome
+coverage. Status checks remain unlogged, and a failed log write is shown
+explicitly in the receipt. Older trial readers that do not recognize
+`discovery_error` reject these logs; use the trial reader bundled with the host
+version that wrote them or a newer version.
+
 ```sh
 cargo build -p metactl
 python3 -m unittest discover -s tests -p 'test_skill_discovery*.py' -v
@@ -517,3 +576,104 @@ The [evaluation contract](../design/optional-skill-discovery.md) defines the
 remaining held-out session gates before rollout. Keep live Jev benchmark data
 private unless its applicable agreement permits publication. Rollback simply
 removes the optional MCP registration; no native defaults have changed.
+
+## Discovery in folders without project configuration
+
+User-catalog fallback is opt-in. It makes selected local skill libraries available
+in explicitly connected folders without creating a project configuration. A
+configured project always uses its own catalog, including an empty catalog.
+Malformed, unreadable or dangling project configuration remains an error.
+
+Preview a trusted local library and agent target, then save:
+
+~~~sh
+metactl skills setup --scope user --source /absolute/path/to/library --target codex-cli
+metactl skills setup --scope user --source /absolute/path/to/library --target codex-cli --apply
+~~~
+
+The preview shows eligible counts, source visibility and candidate-metadata
+classification. Sources must be declared MetaCTL libraries with library.json;
+setup does not scan native skill directories, download libraries, or enroll a
+workspace for Jev. Relative paths in an existing saved catalog resolve against
+the catalog file. The catalog is stored separately from provider preferences in
+$XDG_CONFIG_HOME/metactl/discovery-catalog.json, or
+~/.config/metactl/discovery-catalog.json, with private file permissions.
+
+The default metadata classification is local-only. If the selected names and
+descriptions may leave the device, choose --metadata-policy public-nonsensitive
+or --metadata-policy private-owned during setup. Skill bodies remain available
+to the coding agent, so choose sources suitable for that agent's visibility
+across the connected folders. Classification grants no provider access:
+existing exact-workspace enrollment, saved Jev preferences and gateway limits
+still apply. Private-owned metadata cannot use a public-only workspace grant.
+An unregistered folder reports project_not_enrolled and ranks locally.
+
+Connect an exact fixed workspace without editing an agent configuration:
+
+~~~sh
+metactl --project /absolute/workspace --catalog-mode project-or-user skills connect --scope user --target codex-cli --use-preferences
+metactl --project /absolute/workspace --catalog-mode project-or-user skills connect --scope user --target codex-cli --use-preferences --apply
+metactl --project /absolute/workspace --catalog-mode project-or-user skills doctor --scope user --target codex-cli --use-preferences --json
+~~~
+
+User scope currently supports Codex's existing fixed-root registration. It does
+**not** follow the folder of every coding session. Use project scope for another
+supported adapter and a fixed explicit root. Start a fresh native client session
+after applying a connection. Automatic launch-directory discovery, migration of
+Git-normalizing external launchers, and native acceptance across unrelated
+folders remain separate work; they are not advertised by this release.
+
+For direct discovery, status and loading:
+
+~~~sh
+metactl --project /absolute/workspace --catalog-mode project-or-user --discovery-target codex-cli skills catalog --json
+metactl --project /absolute/workspace --catalog-mode project-or-user skills host --target codex-cli --runtime codex-cli --use-preferences --status
+# The agent supplies minimal JSON to the host's existing --call-tool interface.
+metactl --project /absolute/workspace --catalog-mode project-or-user skills host --target codex-cli --runtime codex-cli --use-preferences --call-tool discover_skills
+~~~
+
+Status makes no provider call. It separates catalog_ready,
+project_config_state, catalog_origin, effective_target,
+workspace_resolution and provider_effective_reason. Routine receipts and logs
+use opaque context identifiers; local administrative status may show paths.
+
+Persistent off/on controls preserve sources and data policy:
+
+~~~sh
+metactl skills setup --disable              # preview, no write
+metactl skills setup --disable --apply
+metactl skills setup --enable --apply
+~~~
+
+Changing sources or classification requires a setup preview and
+--replace --apply. A running host rejects changed catalog configuration or
+project/user origin with catalog_context_changed; restart it. Ordinary library
+content edits are revalidated on each call, and load requires the current
+package digest. Save a private copy of the old catalog before replacing it if
+you need rollback; restore that copy and restart the host. Provider preferences
+and existing logs are separate and remain intact.
+
+## Recommendations are distinct from candidates
+
+Discovery returns eligible result.skills for compatibility. These are candidate
+instructions, not automatic activation. The coding agent must still decide
+whether a skill is relevant, then load its ID and digest before following it.
+
+| Field value | Meaning |
+| --- | --- |
+| recommendation_status=recommended | Validated advisory Jev chose the single ID in recommended_ids. |
+| recommendation_status=abstained | Validated advisory Jev chose no skill; recommended_ids is empty. Do not activate fallback candidates merely because returned. |
+| recommendation_status=ranked_candidates | Local fallback or shadow returned ranked candidates; no provider recommendation is exposed. |
+| recommendation_status=no_matches | The deterministic shortlist is empty. |
+
+Shadow mode always exposes only baseline candidate/recommendation behavior, even
+when Jev privately abstains. Failures retain local candidates and truthful
+provider-attempt accounting. Availability, a successful provider call, or a
+changed order does not prove lower coding cost or better outcomes. This workflow
+does not suppress the native skill catalog or establish token savings.
+
+
+Catalog-context-bearing events use metactl.discovery_trial.v2. The bundled
+reader and doctor accept both v1 and v2 records in the same ledger; upgrade
+readers before inspecting v2 logs. Older strict readers reject v2 explicitly.
+Neither version stores queries, skill bodies or workspace paths.

@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## 0.1.29 - 2026-09-29
+
+### Fixed
+
+- Compare physical workspace paths in macOS user-catalog test assertions,
+  preserving exact enrollment, nested-folder isolation and alias identity checks.
+  Production workspace binding and provider permissions remain unchanged.
+
+## 0.1.28 - 2026-09-29
+
+### Added
+
+- Opt-in persistent user catalogs for explicitly connected folders without a
+  project configuration, with declared local library sources and private storage.
+- Preview, replace and persistent disable/enable controls with explicit metadata
+  classification; catalog setup grants no provider access or workspace enrollment.
+- Distinguish validated advisory recommendations and abstention from ranked
+  fallback candidates; shadow mode exposes baseline behavior only.
+
+### Changed
+
+- Revalidate catalog context and package digests while preserving configured
+  project precedence and refusing malformed or changed catalog configuration.
+- Read mixed v1/v2 private discovery ledgers without recording task queries,
+  skill bodies or workspace paths.
+
+### Evidence limits
+
+- Native acceptance across unrelated folders, automatic launch-directory
+  discovery and lower coding cost remain unverified. User-scope Codex connections
+  retain an explicitly fixed workspace root.
+
+## 0.1.27 - 2026-09-28
+
+### Fixed
+
+- Keep explicitly named eligible skills in the five-candidate discovery
+  shortlist when the name appears inside a longer task query.
+- Rank distinct meaningful task terms without letting connective words or
+  repeated aliases and intents dominate the shortlist.
+- Preserve Jev ranking for ordinary single-word task mentions while supporting
+  explicit `$name`, backtick, exact-name, and exact-ID selection.
+
+## 0.1.26 - 2026-09-28
+
+### Fixed
+
+- Explain missing project configuration in skill discovery, including explicit
+  configuration overrides, instead of returning a generic rejection.
+- Return zero-provider-call receipts for catalog failures and record private
+  discovery errors separately from successful discovery and task outcomes.
+- Keep raw CLI errors and task queries out of diagnostics and failure logs.
+
 ## 0.1.25 - 2026-09-26
 
 ### Fixed

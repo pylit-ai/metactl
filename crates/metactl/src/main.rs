@@ -138,6 +138,12 @@ struct Cli {
     /// Path to the project root (default: current directory)
     #[arg(long, global = true, value_name = "PATH")]
     project: Option<PathBuf>,
+    /// Opt in to the saved user catalog only when project configuration is absent
+    #[arg(long, global = true, default_value = "project", value_parser = ["project", "project-or-user"])]
+    catalog_mode: String,
+    /// Concrete runtime target for user-origin discovery (project targets are unchanged)
+    #[arg(long, global = true)]
+    discovery_target: Option<String>,
     /// Merge defaults from `$XDG_CONFIG_HOME/metactl/profiles/<PROFILE>.yaml` (or `~/.config/...`; also `METACTL_PROFILE`). Overrides `extends_profile` and machine `default_profile` in `config.yaml`.
     #[arg(long, global = true, env = "METACTL_PROFILE")]
     profile: Option<String>,
@@ -853,6 +859,8 @@ struct SkillsArgs {
 
 #[derive(Debug, Subcommand)]
 enum SkillsCommand {
+    /// Preview or save an explicit local user catalog; never enrolls a workspace for Jev
+    Setup(SkillsSetupArgs),
     /// Install a repo-local Agent Skill folder into the user-global Codex skill root
     Add(SkillsAddArgs),
     /// List repo-local or user-global Codex Agent Skill folders
@@ -881,6 +889,38 @@ enum SkillsCommand {
     Trials(SkillsTrialsArgs),
     /// Persistent Jev defaults and explicit project enrollment (no provider calls)
     Preferences(SkillsPreferencesArgs),
+}
+
+#[derive(Debug, Args)]
+struct SkillsSetupArgs {
+    #[arg(long, value_enum, default_value = "user")]
+    scope: DiscoveryScopeArg,
+    /// Ordered explicit local library roots (no automatic scanning or downloads)
+    #[arg(long, required_unless_present_any = ["disable", "enable"])]
+    source: Vec<PathBuf>,
+    #[arg(long, required_unless_present_any = ["disable", "enable"])]
+    target: Vec<String>,
+    #[arg(long, default_value = "builder")]
+    role: String,
+    #[arg(long, default_value = "brownfield-safe-builder")]
+    policy: String,
+    #[arg(long)]
+    exclude: Vec<String>,
+    /// Classification applies to candidate names/descriptions, not workspace authorization
+    #[arg(long, default_value = "local-only", value_parser = ["local-only", "public-nonsensitive", "private-owned"])]
+    metadata_policy: String,
+    /// Disable the saved user fallback while preserving its sources and policy
+    #[arg(long, conflicts_with = "enable")]
+    disable: bool,
+    /// Enable the saved user fallback; preserves policy and never enrolls roots
+    #[arg(long)]
+    enable: bool,
+    /// Save after reviewing visibility and eligibility; ordinary setup previews
+    #[arg(long)]
+    apply: bool,
+    /// Explicitly replace an existing saved user catalog
+    #[arg(long, requires = "apply")]
+    replace: bool,
 }
 
 #[derive(Debug, Args)]
@@ -928,6 +968,9 @@ struct SkillsTrialsArgs {
 
 #[derive(Debug, Args)]
 struct SkillsHostArgs {
+    /// Concrete user-catalog target; defaults to --runtime when supported
+    #[arg(long)]
+    target: Option<String>,
     /// Re-read persistent Jev preferences before every discovery request
     #[arg(long)]
     use_preferences: bool,
@@ -947,6 +990,9 @@ struct SkillsHostArgs {
     ranker: String,
     #[arg(long, env = "METACTL_JEV_ALLOW_DATA")]
     allow_provider_data: bool,
+    /// Eligible provider pool bound; 5 restores the original shortlist
+    #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u8).range(5..=20), env = "METACTL_DISCOVERY_CANDIDATE_LIMIT")]
+    candidate_limit: u8,
     /// Per-process request ceiling, including failures; not a dollar quota
     #[arg(long, default_value_t = 0, env = "METACTL_JEV_MAX_CALLS")]
     max_provider_calls: u32,
@@ -2336,7 +2382,7 @@ fn mutating_operation_label(cli: &Cli) -> Option<&'static str> {
             | SkillsCommand::Host(_)
             | SkillsCommand::Doctor(_)
             | SkillsCommand::Trials(_) => None,
-            SkillsCommand::Preferences(_) => None,
+            SkillsCommand::Preferences(_) | SkillsCommand::Setup(_) => None,
             SkillsCommand::Connect(args) if args.apply || args.remove => Some("skills connect"),
             SkillsCommand::Connect(_) => None,
             SkillsCommand::Select(_) => Some("skills select"),
@@ -11570,6 +11616,7 @@ mod cli_profile;
 mod cli_skill_discovery_connection;
 mod cli_skills;
 mod cli_source;
+mod discovery_catalog;
 
 use cli_demo::cmd_demo;
 use cli_export::{cmd_check_public_boundary, cmd_export, public_boundary_findings};
