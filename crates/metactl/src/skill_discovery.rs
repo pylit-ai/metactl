@@ -44,6 +44,151 @@ struct Entry {
     targets: Vec<String>,
 }
 
+fn skill_terms(text: &str) -> BTreeSet<String> {
+    let mut terms = routing_terms(text);
+    terms.retain(|term| {
+        !matches!(
+            term.as_str(),
+            "a" | "an"
+                | "and"
+                | "are"
+                | "as"
+                | "at"
+                | "be"
+                | "before"
+                | "after"
+                | "by"
+                | "do"
+                | "for"
+                | "from"
+                | "how"
+                | "i"
+                | "in"
+                | "is"
+                | "it"
+                | "its"
+                | "me"
+                | "my"
+                | "of"
+                | "on"
+                | "or"
+                | "please"
+                | "that"
+                | "the"
+                | "their"
+                | "these"
+                | "this"
+                | "those"
+                | "to"
+                | "use"
+                | "using"
+                | "was"
+                | "we"
+                | "with"
+                | "you"
+                | "your"
+        )
+    });
+    terms
+}
+
+// Literal names/aliases remain useful inside prose. Identifier boundaries keep
+// `some-skill` from becoming an explicit request for `some-skill-extended`.
+fn skill_mention(query: &str, label: &str) -> Option<i64> {
+    let label = label.to_ascii_lowercase();
+    if label.trim().is_empty() {
+        return None;
+    }
+    let identifier = |c: char| c.is_alphanumeric() || c == '-' || c == '_';
+    let mut found = None;
+    for (start, _) in query.match_indices(&label) {
+        let end = start + label.len();
+        if query[..start].chars().next_back().is_some_and(identifier)
+            || query[end..].chars().next().is_some_and(identifier)
+        {
+            continue;
+        }
+        // Handle direct named exclusions, without interpreting general negation.
+        let preceding = query[..start]
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>();
+        if [
+            &["not"][..],
+            &["not", "use"],
+            &["don", "t", "use"],
+            &["avoid"],
+            &["without"],
+            &["exclude"],
+        ]
+        .iter()
+        .any(|suffix| preceding.ends_with(suffix))
+        {
+            return Some(-1);
+        }
+        // A bare task word (e.g. "review") is not an explicit skill request.
+        // Preserve provider ranking unless a one-word label is marked as a name.
+        if routing_terms(&label).len() == 1
+            && !label.contains(['-', '_'])
+            && !query[..start].ends_with(['$', '`'])
+        {
+            continue;
+        }
+        found = Some(10000 + routing_terms(&label).len().min(99) as i64);
+    }
+    found
+}
+
+fn skill_score(
+    skill: &SkillDescriptor,
+    original_query: &str,
+    query: &str,
+    terms: &BTreeSet<String>,
+) -> i64 {
+    if skill.name.eq_ignore_ascii_case(original_query.trim()) || skill.id == original_query.trim() {
+        return 20000;
+    }
+    let mut explicit = 0;
+    for label in std::iter::once(&skill.name).chain(skill.aliases.iter()) {
+        if let Some(score) = skill_mention(query, label) {
+            if score < 0 {
+                return 0;
+            }
+            explicit = explicit.max(score);
+        }
+    }
+    if explicit > 0 {
+        return explicit;
+    }
+    let overlap = |field: &str| terms.intersection(&skill_terms(field)).count() as i64;
+    // Bound repeated metadata by its strongest field instead of rewarding the
+    // number of aliases/intents. Count meaningful distinct words within fields.
+    let score = 12 * overlap(&skill.name)
+        + 4 * overlap(&skill.description)
+        + 10 * skill.aliases.iter().map(|s| overlap(s)).max().unwrap_or(0)
+        + 6 * skill
+            .positive_intents
+            .iter()
+            .map(|s| overlap(s))
+            .max()
+            .unwrap_or(0);
+    let penalty = skill
+        .negative_intents
+        .iter()
+        .map(|intent| {
+            let negative = skill_terms(intent);
+            if !negative.is_empty() && negative.is_subset(terms) {
+                20 * negative.len() as i64
+            } else {
+                0
+            }
+        })
+        .max()
+        .unwrap_or(0);
+    // The host reserves >=10000 for an explicit, provider-free selection.
+    (score - penalty).min(9999)
+}
+
 fn safe_file(root: &Path, relative: &str) -> Result<PathBuf> {
     let relative = Path::new(relative);
     if relative
@@ -338,25 +483,10 @@ impl LibraryRegistry {
         catalog
             .skills
             .retain(|s| !excluded.contains(&s.id) && !excluded.contains(&s.name));
-        let terms = routing_terms(query);
+        let normalized_query = query.to_ascii_lowercase();
+        let terms = skill_terms(&normalized_query);
         catalog.skills.iter_mut().for_each(|s| {
-            let mut evidence = Vec::new();
-            s.score = if s.name.eq_ignore_ascii_case(query.trim()) || s.id == query.trim() {
-                10000
-            } else {
-                0
-            };
-            s.score += score_routing_field(&terms, &s.name, 12, "name", &mut evidence);
-            s.score += score_routing_field(&terms, &s.description, 4, "description", &mut evidence);
-            for alias in &s.aliases {
-                s.score += score_routing_field(&terms, alias, 10, "alias", &mut evidence);
-            }
-            for intent in &s.positive_intents {
-                s.score += score_routing_field(&terms, intent, 6, "intent", &mut evidence);
-            }
-            for intent in &s.negative_intents {
-                s.score -= score_routing_field(&terms, intent, 20, "negative", &mut evidence);
-            }
+            s.score = skill_score(s, query, &normalized_query, &terms);
         });
         catalog.skills.retain(|s| s.score > 0);
         catalog

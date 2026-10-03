@@ -1,5 +1,116 @@
 # Changelog
 
+## Unreleased
+
+## 0.1.29 - 2026-09-29
+
+### Fixed
+
+- Compare physical workspace paths in macOS user-catalog test assertions,
+  preserving exact enrollment, nested-folder isolation and alias identity checks.
+  Production workspace binding and provider permissions remain unchanged.
+
+## 0.1.28 - 2026-09-29
+
+### Added
+
+- Opt-in persistent user catalogs for explicitly connected folders without a
+  project configuration, with declared local library sources and private storage.
+- Preview, replace and persistent disable/enable controls with explicit metadata
+  classification; catalog setup grants no provider access or workspace enrollment.
+- Distinguish validated advisory recommendations and abstention from ranked
+  fallback candidates; shadow mode exposes baseline behavior only.
+
+### Changed
+
+- Revalidate catalog context and package digests while preserving configured
+  project precedence and refusing malformed or changed catalog configuration.
+- Read mixed v1/v2 private discovery ledgers without recording task queries,
+  skill bodies or workspace paths.
+
+### Evidence limits
+
+- Native acceptance across unrelated folders, automatic launch-directory
+  discovery and lower coding cost remain unverified. User-scope Codex connections
+  retain an explicitly fixed workspace root.
+
+## 0.1.27 - 2026-09-28
+
+### Fixed
+
+- Keep explicitly named eligible skills in the five-candidate discovery
+  shortlist when the name appears inside a longer task query.
+- Rank distinct meaningful task terms without letting connective words or
+  repeated aliases and intents dominate the shortlist.
+- Preserve Jev ranking for ordinary single-word task mentions while supporting
+  explicit `$name`, backtick, exact-name, and exact-ID selection.
+
+## 0.1.26 - 2026-09-28
+
+### Fixed
+
+- Explain missing project configuration in skill discovery, including explicit
+  configuration overrides, instead of returning a generic rejection.
+- Return zero-provider-call receipts for catalog failures and record private
+  discovery errors separately from successful discovery and task outcomes.
+- Keep raw CLI errors and task queries out of diagnostics and failure logs.
+
+## 0.1.25 - 2026-09-26
+
+### Fixed
+
+- Preserve historical Codex commands as no-op entries bound to protected prior
+  evidence, including edited installed bytes and links; refuse altered receipts
+  or unprotected private retention before staging.
+- Verify private projection protection against complete proposed native Git
+  rules before ignore migration, including preserved negations and nested rules.
+- Preserve protected private skills and resources during upgrades; refuse
+  exposed or tracked private destinations before publication instead of silently
+  dropping capabilities. Private path rules remain in local Git excludes.
+- Verify shared aggregate outputs and materializer-owned links from fresh
+  synthesis evidence so legitimate shared migrations can succeed.
+- Keep private pack identifiers out of shared runtime configuration and
+  instruction diagnostics.
+- Preserve private hooks and mixed runtime configuration behind verified local
+  Git protection; reject stale or altered synthesis evidence before apply.
+- Bind replayed outputs to their complete materialization metadata, including
+  patch marker identifiers and behavior flags, before apply.
+- Require protected destinations for every legacy output lacking replay inputs;
+  shared application requires recompilation with current synthesis evidence.
+- Retain displaced ignore files and independent recovery snapshots on macOS,
+  Linux and Windows, including failed multi-file publication and rollback.
+- Scope routine private publication to relevant destinations and cached index
+  entries, preserving native alias checks without walking unrelated ignored
+  build trees. Ignore migration retains its complete repository proof.
+- Preserve inherited Git configuration, selected indexes and operational linked
+  worktree hooks. Refuse foreign repository redirection and unsafe index files.
+- Permit unrelated non-UTF-8 filenames during routine private publication while
+  retaining conservative refusals for affected paths and full migration.
+
+### Verification
+
+- Add native Windows CLI and ignore-safety CI and clean-project smoke checks of assembled
+  macOS/Linux release archives before provenance attestation.
+
+## 0.1.24 - 2026-09-26
+
+### Added
+
+- Persistent Jev defaults with explicit project enrollment, private-owned data
+  classification, project/session opt-outs and revocable data permission.
+- Preference-aware discovery hosts recheck policy before each request, without
+  resetting their call ceiling. Missing or invalid policy falls back locally.
+- Target-native discovery connection and diagnostics for Codex, Claude Code,
+  Cursor, Gemini CLI and OpenCode; explicit manual guidance for other targets.
+- Diagnostics distinguish saved enablement, executable readiness, legacy
+  registrations, actual provider use and private event logging.
+
+### Evidence limits
+
+- Local preference and connection tests use simulated provider responses.
+  A saved preference or installed connection alone does not prove agent use,
+  provider availability, fleet deployment or productivity improvement.
+
 ## 0.1.23 - 2026-09-25
 
 ### Added

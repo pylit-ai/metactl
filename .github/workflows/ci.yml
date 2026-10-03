@@ -10,10 +10,47 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  windows-ignore:
+    name: Windows ignore safety
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check Windows source build
+        run: cargo check --locked -p metactl -p metactld
+      - name: Exercise Windows private workflows, ignore publication, and refusal paths
+        run: cargo test --locked -p metactl --test ignore_platform -- --nocapture
+      - name: Compare Windows link and junction proposals with native Git
+        if: always()
+        run: cargo test --locked -p metactl --lib windows_link_leaf_proposals_match_native_directory_only_rules -- --nocapture
+      - name: Exercise native Windows Git privacy unit contracts
+        if: always()
+        run: |
+          cargo test --locked -p metactl --lib git_privacy:: -- --nocapture
+      - name: Exercise native Windows CLI workflows
+        if: always()
+        timeout-minutes: 30
+        run: |
+          python3 --version
+          cargo test --locked -p metactl --test cli_workflow -- --nocapture
+      - name: Exercise native Windows manifest privacy
+        if: always()
+        run: |
+          cargo test --locked --lib library_privacy::
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Ensure public-boundary scanner
+        run: |
+          if ! command -v rg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ripgrep
+          fi
+          rg --version
       - uses: dtolnay/rust-toolchain@stable
       - name: Format
         run: cargo fmt --check
@@ -21,9 +58,11 @@ jobs:
         run: cargo check -p metactl -p metactld
       - name: Test
         run: cargo test -p metactl
+      - name: Exercise Linux privacy platform contracts (including non-UTF8 paths)
+        run: cargo test --locked -p metactl --test ignore_platform -- --nocapture
       - name: Validate contracts
         run: make metactl-validate-contracts
       - name: V1 release gate
         run: make verify-v1-release-gate
       - name: Public boundary
-        run: bash scripts/check_public_boundary.sh
+        run: make verify-public-boundary

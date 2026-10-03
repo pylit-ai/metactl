@@ -88,6 +88,7 @@ verify-v1-charter:
 	$(PYTHON) scripts/verify_v1_charter.py
 
 verify-public-boundary:
+	bash scripts/test_public_boundary.sh
 	bash scripts/check_public_boundary.sh
 	$(PYTHON) scripts/verify_public_boundary.py
 

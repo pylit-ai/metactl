@@ -10,6 +10,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::materializer::{self, StagedOutputInput};
+#[path = "library_privacy.rs"]
+mod library_privacy;
 use crate::suite_registry::selected_target_from_config;
 use crate::types::{
     ActivationClass, ApplyMode, ApplyReport, ApplyReviewPlan, AutoSurfaceSelection, CapabilityGap,
@@ -25,12 +27,13 @@ use crate::types::{
     TargetCapabilityMatrix, ValidateParams, ValidationCheck, ValidationReport, ValidationStatus,
     VisibilityScope,
 };
+pub use library_privacy::ProjectionProof;
 
 #[path = "library_discovery.rs"]
 mod library_discovery;
 use library_discovery::{
-    normalize_candidate, provenance_ref_for, query_terms, relevance_score, search_match_evidence,
-    why_string,
+    normalize_candidate, provenance_ref_for, query_terms, relevance_score, routing_terms,
+    score_routing_field, search_match_evidence, why_string,
 };
 
 #[path = "library_instruction_format.rs"]
@@ -813,6 +816,7 @@ impl LibraryRegistry {
             ));
         }
 
+        self.validate_privacy_graph(&params.resolve_graph)?;
         let project_root = compile_project_root(params.project_root.as_deref())?;
         let role = self.find_role(&params.resolve_graph.role)?;
         let policy_ref = params
@@ -865,10 +869,21 @@ impl LibraryRegistry {
         )?;
         degradations.extend(surface_degradations);
         dedupe_degradations(&mut degradations);
+        let mut private_paths = library_privacy::private_paths(
+            self,
+            &outputs,
+            &params.resolve_graph,
+            &params.target_capability,
+        );
+        private_paths.extend(
+            self.retained_private_paths(&project_root, &params.target_capability.target_ref())?,
+        );
+        crate::git_privacy::require_private(&project_root, &private_paths)?;
         let manifest = materializer::stage_outputs(
             &project_root,
             &params.target_capability.target_ref(),
             materializer::StageOutputsParams {
+                resolve_graph: Some(params.resolve_graph.clone()),
                 inputs: outputs,
                 surface_selection_mode: effective_surface_selection_mode,
                 surface_selection,
@@ -999,6 +1014,7 @@ impl LibraryRegistry {
         manifest: &CompileManifest,
         apply_mode: &ApplyMode,
     ) -> Result<ApplyReport> {
+        self.protect_private_manifest(project_root, manifest, apply_mode)?;
         materializer::apply_manifest(project_root, manifest, apply_mode)
     }
 
@@ -1018,6 +1034,7 @@ impl LibraryRegistry {
         apply_mode: &ApplyMode,
         expected_plan_digest: &str,
     ) -> Result<ApplyReport> {
+        self.protect_private_manifest(project_root, manifest, apply_mode)?;
         materializer::apply_manifest_bound(
             project_root,
             manifest,
@@ -1358,6 +1375,11 @@ fn synthesize_outputs(
         surface_selection_override,
         auto_surface_selection,
     } = context;
+    let shared_packs = packs
+        .iter()
+        .copied()
+        .filter(|pack| pack.manifest.visibility_scope == VisibilityScope::Shared)
+        .collect::<Vec<_>>();
     let mut outputs = Vec::new();
     let mut surface_selection = Vec::new();
     let mut degradations = Vec::new();
@@ -1646,8 +1668,8 @@ fn synthesize_outputs(
                 let destination = compile_target.path_template.clone();
                 let contents = serde_json::to_vec_pretty(&serde_json::json!({
                     "target": target.target_id,
-                    "policies": resolve_graph.applied_policies.iter().map(|item| &item.id).collect::<Vec<_>>(),
-                    "active_packs": resolve_graph.activated_pack_refs.iter().map(|item| &item.id).collect::<Vec<_>>(),
+                    "policies": [&policy.id],
+                    "active_packs": packs.iter().map(|pack| &pack.manifest.id).collect::<Vec<_>>(),
                 }))?;
                 outputs.push(StagedOutputInput {
                     id: Some("mcp-config".to_string()),
@@ -1655,7 +1677,10 @@ fn synthesize_outputs(
                     kind: GeneratedOutputKind::McpConfig,
                     contents,
                     instruction_mode: None,
-                    pack_ref: None,
+                    pack_ref: packs
+                        .iter()
+                        .find(|p| p.manifest.visibility_scope != VisibilityScope::Shared)
+                        .map(|p| p.manifest.pack_ref()),
                     surface_id: None,
                     surface_slug: None,
                     source_resource_paths: Vec::new(),
@@ -1677,6 +1702,22 @@ fn synthesize_outputs(
             resolve_graph,
             packs,
         )?;
+        let (_, shared_contents) = expand_runtime_template(
+            library_roots,
+            template_ref,
+            target,
+            policy,
+            resolve_graph,
+            &shared_packs,
+        )?;
+        let private_contributor = (contents != shared_contents)
+            .then(|| {
+                packs
+                    .iter()
+                    .find(|p| p.manifest.visibility_scope != VisibilityScope::Shared)
+                    .map(|p| p.manifest.pack_ref())
+            })
+            .flatten();
         let destination = template_ref.destination_path.clone();
         let ownership = format!("{}::runtime-template", target.target_id);
         outputs.push(StagedOutputInput {
@@ -1685,7 +1726,7 @@ fn synthesize_outputs(
             kind,
             contents,
             instruction_mode: None,
-            pack_ref: None,
+            pack_ref: private_contributor,
             surface_id: None,
             surface_slug: None,
             source_resource_paths: vec![template_ref.path.clone()],
@@ -1908,32 +1949,6 @@ fn read_pack_resource(pack: &DiscoveredPack, resource: &PackResource) -> Result<
             .unwrap_or_else(|| "No bundled instruction resource was available.".to_string())
     )
     .into_bytes())
-}
-
-fn routing_terms(query: &str) -> BTreeSet<String> {
-    query
-        .split(|character: char| !character.is_ascii_alphanumeric())
-        .filter(|term| !term.is_empty())
-        .map(|term| term.to_ascii_lowercase())
-        .collect()
-}
-
-fn score_routing_field(
-    terms: &BTreeSet<String>,
-    field: &str,
-    weight: i64,
-    field_name: &str,
-    matched_fields: &mut Vec<String>,
-) -> i64 {
-    let field_terms = routing_terms(field);
-    if !terms.is_disjoint(&field_terms) {
-        if !matched_fields.iter().any(|item| item == field_name) {
-            matched_fields.push(field_name.to_string());
-        }
-        weight
-    } else {
-        0
-    }
 }
 
 fn read_cached_pack_resource(path: &Path) -> Result<Vec<u8>> {
@@ -2845,6 +2860,13 @@ mod tests {
     #[test]
     fn relevance_selector_auto_uses_saved_selection() {
         let project = TempDir::new().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(project.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+        fs::write(project.path().join(".gitignore"), ".metactl/\n").unwrap();
         let kernel =
             ReferenceKernel::load_from_library_roots(vec![starter_root()]).expect("library kernel");
         let target = starter_target("codex-cli");

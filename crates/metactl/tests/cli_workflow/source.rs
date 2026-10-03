@@ -19,7 +19,11 @@ fn cli_help_surfaces_source_add_argument_shape() {
         .expect("help source add");
     assert!(source_help.status.success(), "{}", stderr(&source_help));
     let source_text = stdout(&source_help);
-    assert!(source_text.contains("Usage: metactl source add"));
+    assert!(
+        source_text.contains("Usage: metactl source add")
+            || source_text.contains("Usage: metactl.exe source add"),
+        "unexpected native executable usage: {source_text}"
+    );
     assert!(source_text.contains("[NAME_OR_LOCATION]"));
     assert!(source_text.contains("[LOCATION]"));
     assert!(source_text.contains("Name for this source, or the location"));

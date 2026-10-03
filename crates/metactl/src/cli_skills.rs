@@ -5,6 +5,7 @@ pub(super) fn cmd_skills(
     args: &SkillsArgs,
 ) -> std::result::Result<CommandOutput, CliError> {
     match &args.command {
+        SkillsCommand::Setup(setup_args) => discovery_catalog::setup(cli, setup_args),
         SkillsCommand::Add(add_args) => cmd_skills_add(cli, add_args),
         SkillsCommand::List(list_args) => cmd_skills_list(cli, list_args),
         SkillsCommand::Remove(remove_args) => cmd_skills_remove(cli, remove_args),
@@ -14,8 +15,15 @@ pub(super) fn cmd_skills(
             cmd_skill_discovery(cli, &args.command)
         }
         SkillsCommand::Select(select_args) => cmd_skills_select(cli, select_args),
+        SkillsCommand::Connect(connect_args) => {
+            cli_skill_discovery_connection::connect(cli, connect_args)
+        }
+        SkillsCommand::Doctor(doctor_args) => {
+            cli_skill_discovery_connection::doctor(cli, doctor_args)
+        }
         SkillsCommand::Host(_) => unreachable!("host has a dedicated stdio entrypoint"),
         SkillsCommand::Trials(_) => unreachable!("trials has a dedicated entrypoint"),
+        SkillsCommand::Preferences(_) => unreachable!("preferences has a dedicated entrypoint"),
     }
 }
 
@@ -35,6 +43,10 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             directory.path().join("skill_discovery_trials.py"),
             include_bytes!("../assets/skill_discovery_trials.py"),
         )?;
+        fs::write(
+            directory.path().join("skill_discovery_preferences.py"),
+            include_bytes!("../assets/skill_discovery_preferences.py"),
+        )?;
         let mut command = std::process::Command::new(&args.python);
         command
             .arg("-I")
@@ -45,6 +57,8 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             .arg(project_root(cli)?)
             .arg("--ranker")
             .arg(&args.ranker)
+            .arg("--candidate-limit")
+            .arg(args.candidate_limit.to_string())
             .arg("--max-provider-calls")
             .arg(args.max_provider_calls.to_string())
             .arg("--provider-deadline")
@@ -57,6 +71,10 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             .arg(&args.trial_mode)
             .arg("--runtime")
             .arg(&args.runtime);
+        command.arg("--catalog-mode").arg(&cli.catalog_mode);
+        if let Some(target) = args.target.as_ref().or(cli.discovery_target.as_ref()) {
+            command.arg("--target").arg(target);
+        }
         for (value, flag) in [
             (&args.gateway_project, "--gateway-project"),
             (&args.gateway_data_class, "--gateway-data-class"),
@@ -67,7 +85,26 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
                 command.arg(flag).arg(value);
             }
         }
-        if let Some(value) = &args.event_log {
+        let event_log = if args.use_preferences && args.event_log.is_none() {
+            let root = project_root(cli)?.canonicalize()?;
+            let ledger = cli_skill_discovery_connection::ledger_path(&root)
+                .map_err(|_| anyhow::anyhow!("Cannot resolve private discovery log"))?;
+            if !args.status && !args.client_config && !args.check {
+                let parent = ledger.parent().unwrap();
+                if !parent.exists() {
+                    fs::create_dir_all(parent)?;
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+                    }
+                }
+            }
+            Some(ledger)
+        } else {
+            args.event_log.clone()
+        };
+        if let Some(value) = &event_log {
             command.arg("--event-log").arg(value);
         }
         for (enabled, flag) in [
@@ -75,6 +112,7 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
             (args.check, "--check"),
             (args.client_config, "--client-config"),
             (args.allow_provider_data, "--allow-provider-data"),
+            (args.use_preferences, "--use-preferences"),
         ] {
             if enabled {
                 command.arg(flag);
@@ -109,6 +147,65 @@ pub(super) fn run_discovery_host(cli: &Cli, args: &SkillsHostArgs) -> ExitCode {
     }
 }
 
+pub(super) fn run_discovery_preferences(cli: &Cli, args: &SkillsPreferencesArgs) -> ExitCode {
+    let launch = || -> anyhow::Result<std::process::ExitStatus> {
+        let directory = tempfile::tempdir()?;
+        let script = directory.path().join("skill_discovery_preferences.py");
+        fs::write(
+            &script,
+            include_bytes!("../assets/skill_discovery_preferences.py"),
+        )?;
+        let mut command = std::process::Command::new(&args.python);
+        command
+            .arg("-I")
+            .arg(script)
+            .arg("--project")
+            .arg(project_root(cli)?);
+        if cli.machine_output() {
+            command.arg("--json");
+        }
+        for (flag, value) in [
+            ("--mode", &args.mode),
+            ("--gateway-project", &args.gateway_project),
+            ("--data-class", &args.data_class),
+            ("--project-mode", &args.project_mode),
+        ] {
+            if let Some(value) = value {
+                command.arg(flag).arg(value);
+            }
+        }
+        if args.allow_provider_data {
+            command.arg("--allow-provider-data");
+        }
+        if args.enroll {
+            command.arg("--enroll");
+        }
+        if args.replace_enrollment {
+            command.arg("--replace-enrollment");
+        }
+        if args.revoke_provider_data {
+            command.arg("--revoke-provider-data");
+        }
+        if let Some(value) = &args.gateway_command {
+            command.arg("--gateway-command").arg(value);
+        }
+        if let Some(value) = args.max_provider_calls {
+            command.arg("--max-provider-calls").arg(value.to_string());
+        }
+        if let Some(value) = args.provider_deadline {
+            command.arg("--provider-deadline").arg(value.to_string());
+        }
+        command.status().map_err(Into::into)
+    };
+    match launch() {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+        Err(_) => {
+            eprintln!("Discovery preferences could not start. Check Python 3.10+, the project path and temporary-directory access.");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 pub(super) fn run_discovery_trials(args: &SkillsTrialsArgs) -> ExitCode {
     fn launch(args: &SkillsTrialsArgs) -> anyhow::Result<std::process::ExitStatus> {
         use std::io::Write;
@@ -133,23 +230,19 @@ pub(super) fn run_discovery_trials(args: &SkillsTrialsArgs) -> ExitCode {
     }
 }
 
-fn cmd_skill_discovery(
+pub(super) fn cmd_skill_discovery(
     cli: &Cli,
     command: &SkillsCommand,
 ) -> std::result::Result<CommandOutput, CliError> {
     let root = project_root(cli).map_err(internal_error)?;
-    let context = load_required_context(cli, &root)?;
-    let config = context
-        .effective_config(&ConfigOverrides::default())
-        .map_err(state_error)?;
-    let registry = context
-        .registry
-        .as_ref()
-        .ok_or_else(|| CliError::new(EXIT_STATE, "No configured library"))?;
-    let value = match command {
+    let resolved = discovery_catalog::resolve(cli, &root)?;
+    let registry = &resolved.registry;
+    let config = resolved.config;
+    let overlay = resolved.overlay;
+    let mut value = match command {
         SkillsCommand::Catalog => serde_json::to_value(
             registry
-                .skill_catalog(&config, context.overlay.as_ref())
+                .skill_catalog(&config, overlay.as_ref())
                 .map_err(state_error)?,
         ),
         SkillsCommand::Discover(args) => {
@@ -165,25 +258,62 @@ fn cmd_skill_discovery(
                 registry
                     .discover_skills(
                         &config,
-                        context.overlay.as_ref(),
+                        overlay.as_ref(),
                         &query,
                         args.limit,
-                        &args.excluded.iter().cloned().collect(),
+                        &args
+                            .excluded
+                            .iter()
+                            .chain(resolved.exclusions.iter())
+                            .cloned()
+                            .collect(),
                     )
                     .map_err(state_error)?,
             )
         }
         SkillsCommand::Load(args) => serde_json::to_value(
             registry
-                .load_discovered_skill(&config, context.overlay.as_ref(), &args.id, &args.digest)
+                .load_discovered_skill(&config, overlay.as_ref(), &args.id, &args.digest)
                 .map_err(state_error)?,
         ),
         _ => unreachable!(),
     }
     .map_err(internal_error)?;
+    if let Some(skills) = value.get_mut("skills").and_then(Value::as_array_mut) {
+        skills.retain(|skill| {
+            !resolved.exclusions.iter().any(|id| {
+                skill.get("id").and_then(Value::as_str) == Some(id.as_str())
+                    || skill.get("name").and_then(Value::as_str) == Some(id.as_str())
+            })
+        });
+    }
+    if matches!(command, SkillsCommand::Load(_))
+        && resolved.exclusions.iter().any(|id| {
+            value.get("id").and_then(Value::as_str) == Some(id.as_str())
+                || resolved
+                    .registry
+                    .skill_catalog(&config, overlay.as_ref())
+                    .ok()
+                    .is_some_and(|catalog| {
+                        catalog
+                            .skills
+                            .iter()
+                            .any(|s| s.id == value["id"].as_str().unwrap_or("") && s.name == *id)
+                    })
+        })
+    {
+        return Err(CliError::new(
+            EXIT_STATE,
+            "User catalog excludes this skill.",
+        ));
+    }
     Ok(CommandOutput {
         human: serde_json::to_string_pretty(&value).map_err(internal_error)?,
-        json: success_json("skills", Some(&root), json!({"result":value})),
+        json: success_json(
+            "skills",
+            Some(&root),
+            json!({"result":value, "discovery_context":resolved.context}),
+        ),
     })
 }
 

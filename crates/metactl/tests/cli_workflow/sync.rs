@@ -2,7 +2,223 @@ use super::*;
 
 // Sync, apply, and generated-output workflow tests.
 
-fn copy_directory(source: &Path, destination: &Path) {
+fn retained_command_fixture() -> (TempDir, PathBuf, PathBuf) {
+    use sha2::{Digest, Sha256};
+    let project = TempDir::new().unwrap();
+    git_init_project(project.path());
+    // The synthetic HOME is fixture infrastructure, outside a real worktree.
+    fs::write(project.path().join(".git/info/exclude"), ".test-home/\n").unwrap();
+    init_project(project.path());
+    let initial = run_cli(project.path(), &["sync", "--yes"]);
+    assert!(initial.status.success(), "{}", stderr(&initial));
+    let manifest_path = project
+        .path()
+        .join(".metactl/generated/codex-cli/compile.manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    let destination = ".codex/commands/legacy-fixture.md";
+    let staged = format!(".metactl/generated/codex-cli/{destination}");
+    let bytes = b"# Synthetic retained command\n";
+    let staged_path = project.path().join(&staged);
+    let installed = project.path().join(destination);
+    fs::create_dir_all(staged_path.parent().unwrap()).unwrap();
+    fs::create_dir_all(installed.parent().unwrap()).unwrap();
+    fs::write(&staged_path, bytes).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&staged_path, &installed).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&staged_path, &installed).unwrap();
+    manifest["generated_outputs"].as_array_mut().unwrap().push(json!({
+        "id":"legacy-fixture", "path":staged, "destination_path":destination,
+        "kind":"resource_file", "digest":format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
+        "pack_ref":{"kind":"pack","id":"unit-test-loop","version":"1.0.0"},
+        "managed":true
+    }));
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let state_path = project.path().join(".metactl/state/codex-cli.json");
+    let mut state: Value = serde_json::from_slice(&fs::read(&state_path).unwrap()).unwrap();
+    state["outputs"].as_array_mut().unwrap().push(json!({
+        "id":"legacy-fixture", "staged_path":staged, "destination_path":destination,
+        "applied_digest":format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
+        "source_digest":format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
+        "backup_path":null, "patch_marker":null, "existed_before":false,
+        "pack_ref":{"kind":"pack","id":"unit-test-loop","version":"1.0.0"}
+    }));
+    fs::write(state_path, serde_json::to_vec_pretty(&state).unwrap()).unwrap();
+    (project, installed, manifest_path)
+}
+
+#[test]
+fn cli_sync_replays_retained_previous_manifest_command_twice() {
+    let (project, installed, _) = retained_command_fixture();
+    let link = fs::read_link(&installed).unwrap();
+    let bytes = fs::read(&installed).unwrap();
+    for _ in 0..2 {
+        let result = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(result.status.success(), "{}", stderr(&result));
+        assert_eq!(fs::read(&installed).unwrap(), bytes);
+        assert_eq!(fs::read_link(&installed).unwrap(), link);
+    }
+}
+
+#[test]
+fn cli_retained_private_command_refuses_before_writes_then_preserves_protected_bytes() {
+    let (project, installed, manifest_path) = retained_command_fixture();
+    for path in [
+        &manifest_path,
+        &project.path().join(".metactl/state/codex-cli.json"),
+    ] {
+        let mut value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        let entries = if value.get("generated_outputs").is_some() {
+            "generated_outputs"
+        } else {
+            "outputs"
+        };
+        value[entries].as_array_mut().unwrap().last_mut().unwrap()["pack_ref"]["id"] =
+            json!("local-only-example");
+        fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    let ignore = project.path().join(".gitignore");
+    let original = fs::read_to_string(&ignore).unwrap();
+    for exceptions in [
+        "!.metactl/\n!.metactl/**\n",
+        "!.codex/\n!.codex/commands/\n!.codex/commands/**\n",
+    ] {
+        fs::write(&ignore, format!("{original}\n{exceptions}")).unwrap();
+        let before = privacy_snapshot(project.path());
+        for args in [
+            vec!["sync", "--yes"],
+            vec!["compile"],
+            vec!["compile", "--apply"],
+            vec!["apply", "--mode", "symlink", "--no-input"],
+        ] {
+            let refused = run_cli(project.path(), &args);
+            assert!(!refused.status.success(), "{args:?}: {}", stdout(&refused));
+            assert_eq!(privacy_snapshot(project.path()), before, "{args:?}");
+        }
+    }
+    fs::write(
+        &ignore,
+        format!("{original}\n/.metactl/\n/.codex/commands/\n"),
+    )
+    .unwrap();
+    let bytes = fs::read(&installed).unwrap();
+    let link = fs::read_link(&installed).unwrap();
+    for _ in 0..2 {
+        let synced = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(synced.status.success(), "{}", stderr(&synced));
+        assert_eq!(fs::read(&installed).unwrap(), bytes);
+        assert_eq!(fs::read_link(&installed).unwrap(), link);
+    }
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["add", "--all"])
+        .status()
+        .unwrap()
+        .success());
+    let names = Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["ls-files", "-z"])
+        .output()
+        .unwrap();
+    for name in names
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|name| !name.is_empty())
+    {
+        let spec = format!(":{}", std::str::from_utf8(name).unwrap());
+        let blob = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["show", &spec])
+            .output()
+            .unwrap();
+        assert!(blob.status.success());
+        let text = String::from_utf8_lossy(&blob.stdout);
+        assert!(
+            !text.contains("Synthetic retained command") && !text.contains("local-only-example"),
+            "sensitive staged blob: {spec}"
+        );
+    }
+}
+
+#[test]
+fn cli_retained_command_receipt_and_metadata_tampering_refuse_unchanged() {
+    for change in ["manifest", "receipt", "missing", "staged"] {
+        let (project, installed, manifest_path) = retained_command_fixture();
+        let first = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(first.status.success(), "{}", stderr(&first));
+        let receipt = project.path().join(".metactl/retained-codex-commands.json");
+        match change {
+            "missing" => fs::remove_file(&receipt).unwrap(),
+            "staged" => {
+                fs::write(fs::read_link(&installed).unwrap(), "altered staged bytes").unwrap()
+            }
+            _ => {
+                let path = if change == "manifest" {
+                    &manifest_path
+                } else {
+                    &receipt
+                };
+                let mut value: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+                let key = if change == "manifest" {
+                    "generated_outputs"
+                } else {
+                    "outputs"
+                };
+                value[key].as_array_mut().unwrap().last_mut().unwrap()["id"] =
+                    json!("altered-retained-marker");
+                fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+            }
+        }
+        let before = privacy_snapshot(project.path());
+        let refused = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(!refused.status.success(), "{change}: {}", stdout(&refused));
+        assert_eq!(privacy_snapshot(project.path()), before, "{change}");
+    }
+}
+
+#[test]
+fn cli_old_retained_manifest_direct_apply_then_sync_preserves_customized_copy() {
+    let (project, installed, manifest_path) = retained_command_fixture();
+    fs::remove_file(&installed).unwrap();
+    fs::write(&installed, "# User customized historical command\n").unwrap();
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest.as_object_mut().unwrap().remove("resolve_graph");
+    manifest["generated_outputs"]
+        .as_array_mut()
+        .unwrap()
+        .last_mut()
+        .unwrap()["degradation_codes"] =
+        json!(["unsupported_codex_command_retained_for_compatibility"]);
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::write(project.path().join(".git/info/exclude"), "*\n").unwrap();
+    let applied = run_cli(
+        project.path(),
+        &["apply", "--mode", "symlink", "--no-input"],
+    );
+    assert!(applied.status.success(), "{}", stderr(&applied));
+    for _ in 0..2 {
+        let synced = run_cli(project.path(), &["sync", "--yes"]);
+        assert!(synced.status.success(), "{}", stderr(&synced));
+        assert_eq!(
+            fs::read_to_string(&installed).unwrap(),
+            "# User customized historical command\n"
+        );
+        assert!(!installed.is_symlink());
+    }
+}
+
+pub(super) fn copy_directory(source: &Path, destination: &Path) {
     fs::create_dir_all(destination).expect("create copy destination");
     for entry in fs::read_dir(source).expect("read copy source") {
         let entry = entry.expect("read copy entry");
@@ -207,6 +423,13 @@ fn agent_sync_preview_bounds_generated_paths_unless_full_is_requested() {
     )
     .expect("updated config");
 
+    git_init_project(project.path());
+    assert!(run_cli(
+        project.path(),
+        &["ignore", "install", "--scope", "both", "--yes"]
+    )
+    .status
+    .success());
     let bounded = run_cli(project.path(), &["--agent", "sync", "--adopt", "preview"]);
     assert!(
         bounded.status.success(),
@@ -1310,7 +1533,7 @@ fn cli_sync_all_targets_no_double_path_segments() {
         let mut files = Vec::new();
         walk_project_files(project.path(), &mut files);
         for path in &files {
-            let p = path.to_string_lossy().to_string();
+            let p = path.to_string_lossy().replace('\\', "/");
             for seg in ["commands", "rules", "scripts", "plugins", "hooks", "skills"] {
                 let needle = format!("/{seg}/");
                 if let Some(first) = p.find(&needle) {
@@ -1379,4 +1602,412 @@ fn cli_sync_gemini_produces_extension_bundle() {
         skills_root.display(),
         skill_files
     );
+}
+
+#[test]
+fn cli_saved_private_auto_gaps_never_enter_shared_docs() {
+    for deselected in [false, true] {
+        let project = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        copy_directory(Path::new(&starter_library_root()), library.path());
+        let pack_path = library.path().join("packs/local-only-example.json");
+        let mut pack: Value = serde_json::from_slice(&fs::read(&pack_path).unwrap()).unwrap();
+        pack["compatible_targets"] = json!(["claude-code"]);
+        fs::write(&pack_path, serde_json::to_vec(&pack).unwrap()).unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        let init = run_cli(
+            project.path(),
+            &["init", "--target", "claude-code", "--target", "codex-cli"],
+        );
+        assert!(init.status.success(), "{}", stderr(&init));
+        let config_path = project.path().join("metactl.yaml");
+        let config = fs::read_to_string(&config_path).unwrap();
+        fs::write(
+            config_path,
+            format!(
+                "{config}\nstarter_library:\n  - {}\n",
+                library.path().display()
+            ),
+        )
+        .unwrap();
+        let packs = if deselected {
+            "packs: []"
+        } else {
+            "packs:\n  - local-only-example"
+        };
+        fs::write(project.path().join("metactl.local.yaml"), format!("{packs}\ndefaults:\n  surface_selection_mode: auto\n  auto_surface_selection:\n    selected_surface_ids: [local-only-example:local-only-example]\n    pinned_surface_ids: [local-only-example:private-pin]\n    blocked_surface_ids: [absent-private-pack:private-block]\n")).unwrap();
+        let ignore = run_cli(
+            project.path(),
+            &["ignore", "install", "--scope", "both", "--yes"],
+        );
+        assert!(ignore.status.success(), "{}", stderr(&ignore));
+        let sync = run_cli(project.path(), &["sync", "--no-input"]);
+        assert!(sync.status.success(), "{}", stderr(&sync));
+        for doc in ["AGENTS.md", "CLAUDE.md"] {
+            let body = fs::read_to_string(project.path().join(doc)).unwrap();
+            assert!(
+                !body.contains("local-only-example"),
+                "deselected={deselected} {doc}: {body}"
+            );
+            assert!(!body.contains("absent-private-pack"), "{doc}: {body}");
+            assert!(
+                body.contains("|gap:auto_surface_selection=NotFound"),
+                "safe diagnostic missing: {body}"
+            );
+        }
+        let exclude = project.path().join(".git/info/exclude");
+        let rules = fs::read_to_string(&exclude).unwrap();
+        fs::write(exclude, format!("{rules}\n.test-home/\n")).unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["add", "--all"])
+            .status()
+            .unwrap()
+            .success());
+        let staged = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["diff", "--cached"])
+            .output()
+            .unwrap();
+        let staged = String::from_utf8(staged.stdout).unwrap();
+        assert!(!staged.contains("local-only-example"));
+        assert!(!staged.contains("absent-private-pack"));
+    }
+}
+
+#[test]
+fn cli_saved_auto_metadata_requires_private_staging_after_deselection() {
+    for field in [
+        "selected_surface_ids",
+        "pinned_surface_ids",
+        "blocked_surface_ids",
+    ] {
+        let project = TempDir::new().unwrap();
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        init_project(project.path());
+        fs::write(project.path().join("metactl.local.yaml"), format!("packs: []\ndefaults:\n  surface_selection_mode: auto\n  auto_surface_selection:\n    {field}: [absent-private-pack:private-surface]\n")).unwrap();
+        let ignore_path = project.path().join(".gitignore");
+        let ignore = fs::read_to_string(&ignore_path).unwrap_or_default();
+        fs::write(ignore_path, format!("{ignore}\n!/.metactl/\n")).unwrap();
+        let generated = project
+            .path()
+            .join(".metactl/generated/codex-cli/compile.manifest.json");
+        let before = fs::read(&generated).ok();
+        let compile = run_cli(project.path(), &["compile"]);
+        assert!(!compile.status.success(), "{field}: {}", stdout(&compile));
+        assert_eq!(
+            fs::read(&generated).ok(),
+            before,
+            "private graph staged despite failed preflight"
+        );
+    }
+}
+
+#[test]
+fn cli_zero_match_shared_document_retains_safe_diagnostic() {
+    let project = TempDir::new().unwrap();
+    init_project(project.path());
+    let library = TempDir::new().unwrap();
+    copy_directory(Path::new(&starter_library_root()), library.path());
+    let role_path = library.path().join("roles/builder.json");
+    let mut role: Value = serde_json::from_slice(&fs::read(&role_path).unwrap()).unwrap();
+    role["default_pack_refs"] = json!([]);
+    fs::write(role_path, serde_json::to_vec(&role).unwrap()).unwrap();
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["packs"] = serde_yaml::to_value(Vec::<String>::new()).unwrap();
+    config["starter_library"] =
+        serde_yaml::to_value(vec![library.path().display().to_string()]).unwrap();
+    fs::write(config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+    let compile = run_cli(
+        project.path(),
+        &["compile", "--apply", "--apply-mode", "copy"],
+    );
+    assert!(compile.status.success(), "{}", stderr(&compile));
+    let body = fs::read_to_string(project.path().join("AGENTS.md")).unwrap();
+    assert!(body.contains("|packs:none"), "{body}");
+    assert!(body.contains("|gap:pack_selection=ZeroMatch"), "{body}");
+}
+
+pub(super) fn privacy_snapshot(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(root: &Path, path: &Path, out: &mut std::collections::BTreeMap<String, Vec<u8>>) {
+        for entry in fs::read_dir(path).unwrap() {
+            let entry = entry.unwrap();
+            if [".git", ".test-home"].contains(&entry.file_name().to_string_lossy().as_ref()) {
+                continue;
+            }
+            let path = entry.path();
+            let key = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if path.is_symlink() {
+                out.insert(
+                    key,
+                    fs::read_link(path)
+                        .unwrap()
+                        .to_string_lossy()
+                        .as_bytes()
+                        .to_vec(),
+                );
+            } else if path.is_dir() {
+                out.insert(format!("{key}/"), vec![]);
+                walk(root, &path, out);
+            } else {
+                out.insert(key, fs::read(path).unwrap());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+#[test]
+fn cli_suppressed_private_graph_requires_protection_before_writes() {
+    for reason in ["target", "role", "policy", "missing"] {
+        let project = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        copy_directory(Path::new(&starter_library_root()), library.path());
+        let pack_path = library.path().join("packs/local-only-example.json");
+        let mut pack: Value = serde_json::from_slice(&fs::read(&pack_path).unwrap()).unwrap();
+        match reason {
+            "target" => pack["compatible_targets"] = json!(["claude-code"]),
+            "role" => pack["compatible_roles"] = json!(["release-manager"]),
+            "policy" => pack["trust_tier"] = json!("candidate_quarantined"),
+            _ => {}
+        }
+        fs::write(pack_path, serde_json::to_vec(&pack).unwrap()).unwrap();
+        if reason == "policy" {
+            let policy_path = library.path().join("policies/brownfield-safe-builder.json");
+            let mut policy: Value =
+                serde_json::from_slice(&fs::read(&policy_path).unwrap()).unwrap();
+            policy["rules"].as_array_mut().unwrap().push(json!({"id":"deny-private", "title":"Deny private fixture", "subject":"pack", "operator":"deny", "requested_enforcement_class":"enforceable_local", "selectors":{"ids":["local-only-example"]}}));
+            fs::write(policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
+        }
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["init", "-q"])
+            .status()
+            .unwrap()
+            .success());
+        init_project(project.path());
+        let config_path = project.path().join("metactl.yaml");
+        let config = fs::read_to_string(&config_path).unwrap();
+        fs::write(
+            config_path,
+            format!(
+                "{config}\nstarter_library:\n  - {}\n",
+                library.path().display()
+            ),
+        )
+        .unwrap();
+        let private_id = if reason == "missing" {
+            "missing-private-example"
+        } else {
+            "local-only-example"
+        };
+        fs::write(
+            project.path().join("metactl.local.yaml"),
+            format!("packs:\n  - {private_id}\n"),
+        )
+        .unwrap();
+        fs::write(
+            project.path().join(".gitignore"),
+            "/metactl.local.yaml\n/.test-home/\n!/.metactl/\n",
+        )
+        .unwrap();
+        for command in ["compile", "sync"] {
+            let before = privacy_snapshot(project.path());
+            let result = run_cli(project.path(), &[command, "--no-input"]);
+            assert!(
+                !result.status.success(),
+                "{reason}/{command}: {}",
+                stdout(&result)
+            );
+            assert_eq!(
+                privacy_snapshot(project.path()),
+                before,
+                "{reason}/{command} mutated project"
+            );
+        }
+        // Protected machine state retains the suppressed reference, without staging it.
+        fs::write(
+            project.path().join(".gitignore"),
+            "/metactl.local.yaml\n/.test-home/\n/.metactl/\n",
+        )
+        .unwrap();
+        let result = run_cli(project.path(), &["sync", "--no-input"]);
+        if reason == "missing" {
+            assert!(!result.status.success());
+            continue;
+        }
+        assert!(result.status.success(), "{reason}: {}", stderr(&result));
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(
+                project
+                    .path()
+                    .join(".metactl/generated/codex-cli/compile.manifest.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(manifest["resolve_graph"]["suppressed_packs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["pack_ref"]["id"] == private_id));
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["add", "--all"])
+            .status()
+            .unwrap()
+            .success());
+        let staged = Command::new("git")
+            .arg("-C")
+            .arg(project.path())
+            .args(["diff", "--cached"])
+            .output()
+            .unwrap();
+        assert!(!String::from_utf8_lossy(&staged.stdout).contains(private_id));
+    }
+}
+
+#[test]
+fn cli_private_role_default_override_is_checked_before_writes() {
+    let project = TempDir::new().unwrap();
+    let library = TempDir::new().unwrap();
+    copy_directory(Path::new(&starter_library_root()), library.path());
+    let mut role: Value =
+        serde_json::from_slice(&fs::read(library.path().join("roles/builder.json")).unwrap())
+            .unwrap();
+    role["id"] = json!("private-default-role");
+    role["default_pack_refs"] =
+        json!([{"kind":"pack", "id":"local-only-example", "version":"1.0.0"}]);
+    fs::write(
+        library.path().join("roles/private-default-role.json"),
+        serde_json::to_vec(&role).unwrap(),
+    )
+    .unwrap();
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["init", "-q"])
+        .status()
+        .unwrap()
+        .success());
+    init_project(project.path());
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["packs"] = serde_yaml::to_value(Vec::<String>::new()).unwrap();
+    config["starter_library"] =
+        serde_yaml::to_value(vec![library.path().display().to_string()]).unwrap();
+    fs::write(config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+    fs::write(
+        project.path().join(".gitignore"),
+        "/metactl.local.yaml\n/.test-home/\n!/.metactl/\n",
+    )
+    .unwrap();
+    let before = privacy_snapshot(project.path());
+    let output = run_cli(
+        project.path(),
+        &["compile", "--role", "private-default-role", "--no-input"],
+    );
+    assert!(!output.status.success());
+    assert_eq!(privacy_snapshot(project.path()), before);
+}
+
+#[test]
+fn cli_minimal_surface_override_does_not_require_unrequested_private_surfaces() {
+    let project = TempDir::new().unwrap();
+    let library = TempDir::new().unwrap();
+    copy_directory(Path::new(&starter_library_root()), library.path());
+    let pack_path = library.path().join("packs/python-refactor.json");
+    let mut pack: Value = serde_json::from_slice(&fs::read(&pack_path).unwrap()).unwrap();
+    pack["visibility_scope"] = json!("private");
+    fs::write(pack_path, serde_json::to_vec(&pack).unwrap()).unwrap();
+    assert!(Command::new("git")
+        .arg("-C")
+        .arg(project.path())
+        .args(["init", "-q"])
+        .status()
+        .unwrap()
+        .success());
+    init_project(project.path());
+    let config_path = project.path().join("metactl.yaml");
+    let mut config: serde_yaml::Value =
+        serde_yaml::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["packs"] = serde_yaml::to_value(vec!["python-refactor"]).unwrap();
+    config["starter_library"] =
+        serde_yaml::to_value(vec![library.path().display().to_string()]).unwrap();
+    config["defaults"]["surface_selection_mode"] = serde_yaml::to_value("full").unwrap();
+    fs::write(config_path, serde_yaml::to_string(&config).unwrap()).unwrap();
+    fs::write(
+        project.path().join(".gitignore"),
+        "/.metactl/\n/metactl.local.yaml\n/.test-home/\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join(".git/info/exclude"),
+        "/.agents/skills/python-refactor/python-refactor/\n",
+    )
+    .unwrap();
+    let minimal = run_cli(
+        project.path(),
+        &[
+            "compile",
+            "--surface-mode",
+            "minimal",
+            "--apply",
+            "--apply-mode",
+            "copy",
+            "--no-input",
+        ],
+    );
+    assert!(minimal.status.success(), "{}", stderr(&minimal));
+    let applied = run_cli(project.path(), &["apply", "--mode", "copy", "--no-input"]);
+    assert!(applied.status.success(), "{}", stderr(&applied));
+    assert!(project
+        .path()
+        .join(".agents/skills/python-refactor/python-refactor/SKILL.md")
+        .exists());
+    let manifest_path = project
+        .path()
+        .join(".metactl/generated/codex-cli/compile.manifest.json");
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["surface_selection_mode"], "minimal");
+    assert!(!manifest["generated_outputs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|o| o["destination_path"]
+            .as_str()
+            .unwrap_or("")
+            .contains("/contracts/")));
+    let before = privacy_snapshot(project.path());
+    let full = run_cli(
+        project.path(),
+        &["compile", "--surface-mode", "full", "--no-input"],
+    );
+    assert!(!full.status.success());
+    assert_eq!(privacy_snapshot(project.path()), before);
 }

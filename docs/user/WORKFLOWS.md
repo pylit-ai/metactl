@@ -115,19 +115,36 @@ The raw equivalent for `setup --target codex-cli --yes` is still `init`:
 metactl init --target codex-cli --no-input
 ```
 
-For generated adapter noise, repair in two steps. The plan reports ignore-file
-writes and any Git-index untracking before mutation:
+For MetaCTL-local state, repair in two steps. The plan reports ignore-file
+writes before mutation:
 
 ```bash
 metactl ignore status
 metactl ignore fix --plan --scope both
-metactl ignore fix --scope both --untrack-generated --yes
+metactl ignore fix --scope both --yes
 ```
 
-`--untrack-generated --yes` removes generated roots such as `.codex/` or
-`.claude/` from the Git index only. It does not delete files from disk. Root
-adapter docs such as `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` are not treated
-as generated roots by this repair.
+Agent roots such as `.agents/`, `.codex/`, and `.claude/` can contain authored
+content. The ignore commands keep those roots visible and tracked; an old broad
+MetaCTL-managed ignore block is replaced by the safer policy. The
+`--untrack-generated` flag is currently refused. Root adapter docs such as
+`AGENTS.md`, `CLAUDE.md`, and `GEMINI.md` remain outside this repair.
+If an installed private projection, unknown provenance, or an active private
+pack would lose protection, plan/install/fix refuse before writing. Keep the
+old ignore rules while inspecting the exact managed destination and its Git
+index entry. A missing or malformed inventory is not evidence that a generated
+skill is public. Sync preserves private skills, resources, hooks and runtime
+contributions when their destinations are ignored and untracked. Compilation
+checks that protection before staging; apply independently replays current
+synthesis evidence. Unsafe or unknown private destinations refuse publication
+instead of silently dropping capabilities. See
+[private projection protection](private-projection-protection.md).
+For configured folders that are not yet Git worktrees, weakening an existing
+managed block is refused: initialize Git and retry so affected working and
+indexed paths can be checked. MetaCTL does not initialize Git on your behalf.
+Each changed ignore file leaves a reported copy under the private,
+Git-ignored `.metactl/ignore-recovery/` directory. Keep it until any
+concurrent edit has been reconciled; MetaCTL does not delete it.
 
 Project pack activation has both top-level and object-oriented aliases:
 
