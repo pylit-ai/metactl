@@ -192,6 +192,9 @@ class TrialTests(unittest.TestCase):
                          ("codex", 1, 1, .25))
         self.assertEqual((baseline["usage_known"], baseline["discover_ms_p95"]), (0, 12.0))
         self.assertIsNone(baseline["input_tokens_reported"])
+        self.assertEqual(baseline["candidate_coverage_known"], 0)
+        self.assertIsNone(baseline["candidate_count_reported"])
+        self.assertIsNone(baseline["outside_shortlist_choices"])
         self.assertEqual((baseline["task_input_tokens_reported"], baseline["task_input_tokens_known"],
                           baseline["task_output_tokens_reported"], baseline["task_output_tokens_known"],
                           baseline["human_interventions_reported"], baseline["human_interventions_known"]),
@@ -205,7 +208,8 @@ class TrialTests(unittest.TestCase):
         self.assertIsNone(advisory["human_interventions_reported"])
         html_output = trial.render_html(report)
         self.assertEqual(html_output.count("<table>"), 4)
-        self.assertEqual(html_output.count("<th scope='col'>"), 30)
+        self.assertEqual(html_output.count("<th scope='col'>"), 33)
+        self.assertIn("Discovery errors", html_output)
         self.assertIn("unknown <small>(0/0 known)</small>", html_output)
         self.assertIn("unknown / unknown", html_output)
         self.assertEqual(trial.summarize(rows, runtime="pi")["event_count"], 1)

@@ -1,16 +1,24 @@
 # Release Readiness
 
-Release candidate: **0.1.25**, prepared September 26, 2026. Distribution unit:
+Release candidate: **0.1.29**, prepared September 29, 2026. Distribution unit:
 GitHub native binary archives. Crate packaging and dry-run checks remain gates;
 registry publication is a separate, explicitly verified action. npm remains an
 unpublished scaffold; no new registry distribution is included.
 
-This release repairs ignore migration and preserves protected private skills,
-resources, hooks and runtime configuration. Native Git evaluates proposed rules
-before private publication; current synthesis evidence distinguishes shared
-outputs from private or unknown content. Recovery retains displaced files on
-macOS, Linux and Windows. See [private projection protection](user/private-projection-protection.md)
-and the [changelog](../CHANGELOG.md).
+This release fixes two macOS user-catalog test assertions to compare physical
+workspace paths. Production workspace binding and provider permissions remain
+unchanged; exact enrollment, nested-folder isolation and alias identity checks
+remain release gates. The included features add an opt-in persistent user catalog
+for explicitly connected folders without project configuration. Setup previews declared library sources,
+metadata classification and eligible skills before saving private catalog state.
+Configured projects retain precedence; invalid configuration and changed catalog
+context fail closed. Advisory recommendations and abstention are explicit and
+remain distinct from local or shadow candidates. See
+[skill discovery](user/skill-discovery.md) and the [changelog](../CHANGELOG.md).
+
+User-scope Codex connections retain a fixed workspace root. Automatic folder
+resolution, native acceptance across unrelated folders and productivity benefits
+remain unverified. Existing provider enrollment and permissions still apply.
 
 ## Evidence and claims
 
@@ -45,11 +53,11 @@ an isolated home and no provider credentials. See [install verification](user/in
 ## Publication order and recovery
 
 1. Push candidate and require green exact-head CI; merge through normal PR flow.
-2. Verify merged main, then push an annotated v0.1.25 tag. Never move a published tag.
+2. Verify merged main, then push an annotated v0.1.29 tag. Never move a published tag.
 3. Verify workflow and draft assets before public release.
 
 If crate publication is separately included in the release scope, publish
-metactl only after its dry-run passes, wait for metactl 0.1.25 to be visible,
+metactl only after its dry-run passes, wait for metactl 0.1.29 to be visible,
 then dry-run and publish metactld. Verify both registry versions independently;
 the GitHub release does not imply registry publication.
 
