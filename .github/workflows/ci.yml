@@ -14,7 +14,7 @@ jobs:
     name: Windows ignore safety
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v7
         with:
@@ -43,7 +43,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Ensure public-boundary scanner
         run: |
           if ! command -v rg >/dev/null 2>&1; then
